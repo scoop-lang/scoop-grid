@@ -1,0 +1,105 @@
+package scoop.grid
+
+import scoop.ui.View
+import scoop.ui.component.TableColumnSize
+import scoop.ui.component.label
+
+public interface GridColumn<Row> {
+    public val id: GridColumnId
+    public val title: String
+    public val size: TableColumnSize
+    public val sortable: Boolean
+    public val filterable: Boolean
+    public val exportable: Boolean
+    public val missingLast: Boolean
+    public fun cell(row: Row): View
+    public fun text(row: Row): String?
+    public fun number(row: Row): Double?
+    public fun missing(row: Row): Boolean
+    public fun compare(left: Row, right: Row): Long
+    public fun predicate(condition: GridCondition): (Row) -> Boolean
+}
+
+public fun <Row, T> gridColumn(
+    id: GridColumnId,
+    title: String,
+    value: (Row) -> T,
+    values: GridValues<T>,
+    size: TableColumnSize = TableColumnSize(),
+    cell: ((Row) -> View)? = None,
+    sortable: Boolean = true,
+    filterable: Boolean = true,
+    exportable: Boolean = true,
+    missingLast: Boolean = true
+): GridColumn<Row> =
+    TypedGridColumn(
+        id,
+        title,
+        value,
+        values,
+        size,
+        cell,
+        sortable,
+        filterable,
+        exportable,
+        missingLast
+    )
+
+private class TypedGridColumn<Row, T>(
+    public override val id: GridColumnId,
+    public override val title: String,
+    private val value: (Row) -> T,
+    private val values: GridValues<T>,
+    public override val size: TableColumnSize,
+    private val render: ((Row) -> View)?,
+    public override val sortable: Boolean,
+    public override val filterable: Boolean,
+    public override val exportable: Boolean,
+    public override val missingLast: Boolean
+): GridColumn<Row> {
+    public override fun cell(row: Row): View =
+        when (render) {
+            case Some(val build) -> build(row)
+            case None -> label(values.format(value(row)))
+        }
+    public override fun text(row: Row): String? = Some(values.format(value(row)))
+    public override fun number(row: Row): Double? = values.number(value(row))
+    public override fun missing(row: Row): Boolean = values.missing(value(row))
+    public override fun compare(left: Row, right: Row): Long {
+        gridRequire(sortable, "grid column is not sortable")
+        return values.compare(value(left), value(right))
+    }
+    public override fun predicate(condition: GridCondition): (Row) -> Boolean {
+        gridRequire(filterable, "grid column is not filterable")
+        val test = gridCondition(values, condition)
+        val read = value
+        return { row -> test(read(row)) }
+    }
+}
+
+public fun <Row> gridActionColumn(
+    id: GridColumnId,
+    title: String,
+    cell: (Row) -> View,
+    size: TableColumnSize = TableColumnSize()
+): GridColumn<Row> = ActionGridColumn(id, title, cell, size)
+
+private class ActionGridColumn<Row>(
+    public override val id: GridColumnId,
+    public override val title: String,
+    private val render: (Row) -> View,
+    public override val size: TableColumnSize
+): GridColumn<Row> {
+    public override val sortable: Boolean get() = false
+    public override val filterable: Boolean get() = false
+    public override val exportable: Boolean get() = false
+    public override val missingLast: Boolean get() = true
+    public override fun cell(row: Row): View = render(row)
+    public override fun text(row: Row): String? = None
+    public override fun number(row: Row): Double? = None
+    public override fun missing(row: Row): Boolean = true
+    public override fun compare(left: Row, right: Row): Long =
+        throw IllegalArgumentException(Some("action column is not sortable"))
+    public override fun predicate(condition: GridCondition): (Row) -> Boolean =
+        throw IllegalArgumentException(Some("action column is not filterable"))
+}

@@ -1,0 +1,161 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.ui.state
+import scoop.ui.component.TableSource
+
+public class DataGridState<Row> public constructor(
+    source: TableSource<Row>,
+    columns: Array<GridColumn<Row>>,
+    query: GridQuery = GridQuery(),
+    public val onQueryChange: ((GridQuery) -> Unit)? = None
+) {
+    private val computed = state(gridCompute(source, GridColumns(columns), query, None))
+    private val presentation =
+        state(Array<GridColumnState>(columns.size) { index -> GridColumnState(columns[index].id) })
+    public val query: GridQuery get() = computed.value.query
+    public val result: GridResult<Row> get() = computed.value.result
+    public val columns: Array<GridColumn<Row>> get() = computed.value.columns.values
+    public val columnState: Array<GridColumnState> get() = presentation.value
+    public fun column(id: GridColumnId): GridColumn<Row> = computed.value.columns.get(id)
+
+    public fun setQuery(value: GridQuery) {
+        computed.checkMutation()
+        val old = computed.value
+        val requested =
+            if (gridCriteriaEqual(old.query, value))
+                value
+            else
+                value.withPagination(gridFirstPage(value.pagination))
+        if (old.query == requested)
+            return
+        val next = gridCompute(old.source, old.columns, requested, Some(old))
+        computed.value = next
+        notify(old.query, next.query)
+    }
+    public fun setPage(index: Long) {
+        when (query.pagination) {
+            case Page(_, val size) -> setQuery(
+                query.withPagination(GridPagination.Page(index, size))
+            )
+            case Disabled -> throw IllegalArgumentException(Some("pagination is disabled"))
+        }
+    }
+    public fun setPagination(value: GridPagination) {
+        setQuery(query.withPagination(value))
+    }
+    public fun toggleSort(id: GridColumnId, additive: Boolean = false) {
+        gridRequire(column(id).sortable, "grid column is not sortable")
+        val sorting = ArrayList<GridSort>()
+        var found = false
+        for (sort in query.sorting) {
+            if (sort.column == id) {
+                found = true
+                if (sort.direction == GridSortDirection.Ascending)
+                    sorting.add(GridSort(id, GridSortDirection.Descending))
+            } else
+                if (additive)
+                    sorting.add(sort)
+        }
+        if (!found)
+            sorting.add(GridSort(id))
+        setQuery(GridQuery(sorting.toArray(), query.filter, query.quickFilter, query.pagination))
+    }
+    public fun replaceData(source: TableSource<Row>) {
+        computed.checkMutation()
+        val old = computed.value
+        if (source === old.source)
+            return
+        val next = gridCompute(source, old.columns, old.query, Some(old))
+        computed.value = next
+        notify(old.query, next.query)
+    }
+    public fun replaceColumns(values: Array<GridColumn<Row>>) {
+        computed.checkMutation()
+        val old = computed.value
+        val nextColumns = GridColumns(values)
+        val sorting = ArrayList<GridSort>()
+        for (sort in old.query.sorting)
+            if (nextColumns.contains(sort.column))
+                sorting.add(sort)
+        val filter = gridSurvivingFilter(old.query.filter, nextColumns) ?: GridFilter.All
+        val requested =
+            GridQuery(sorting.toArray(), filter, old.query.quickFilter, old.query.pagination)
+        val next = gridCompute(old.source, nextColumns, requested, None)
+        val states = ArrayList<GridColumnState>()
+        val retained = HashSet<GridColumnId>()
+        for (entry in presentation.value)
+            when (nextColumns.find(entry.id)) {
+                case Some(val column) -> {
+                    val width =
+                        when (entry.width) {
+                            case Some(val value) -> Some(column.size.constrain(value))
+                            case None -> None
+                        }
+                    states.add(GridColumnState(entry.id, entry.visible, width, entry.pin))
+                    retained.add(entry.id)
+                }
+                case None -> {}
+            }
+        for (column in values)
+            if (!retained.contains(column.id))
+                states.add(GridColumnState(column.id))
+        presentation.value = states.toArray()
+        computed.value = next
+        notify(old.query, next.query)
+    }
+    public fun setColumnState(value: GridColumnState) {
+        presentation.checkMutation()
+        val definition = column(value.id)
+        val width =
+            when (value.width) {
+                case Some(val amount) -> Some(definition.size.constrain(amount))
+                case None -> None
+            }
+        val resolved = GridColumnState(value.id, value.visible, width, value.pin)
+        presentation.value =
+            Array<GridColumnState>(presentation.value.size) {
+                index ->
+                val old = presentation.value[index]
+                if (old.id == value.id)
+                    resolved
+                else
+                    old
+            }
+    }
+    public fun moveColumn(id: GridColumnId, index: Long) {
+        presentation.checkMutation()
+        column(id)
+        val old = presentation.value
+        gridRequire(index >= 0L && index < old.size, "grid column destination is out of range")
+        val others = ArrayList<GridColumnState>()
+        var moving: GridColumnState? = None
+        for (item in old)
+            if (item.id == id)
+                moving = Some(item)
+            else
+                others.add(item)
+        val entry =
+            moving ?: throw IllegalArgumentException(Some("grid column has no presentation state"))
+        presentation.value =
+            Array<GridColumnState>(old.size) {
+                at -> if (at == index)
+                    entry
+                else
+                    others[
+                        if (at < index)
+                            at
+                        else
+                            at - 1L
+                    ]
+            }
+    }
+    private fun notify(old: GridQuery, next: GridQuery) {
+        if (old == next)
+            return
+        when (onQueryChange) {
+            case Some(val action) -> action(next);
+            case None -> {}
+        }
+    }
+}

@@ -1,0 +1,61 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+
+public enum GridPin {
+    None, Start, End
+}
+
+public class GridColumnState public constructor(
+    public val id: GridColumnId,
+    public val visible: Boolean = true,
+    public val width: Double? = None,
+    public val pin: GridPin = GridPin.None
+)
+
+internal class GridColumns<Row>(val values: Array<GridColumn<Row>>) {
+    private val lookup = HashMap<GridColumnId, GridColumn<Row>>()
+    init {
+        gridRequire(values.size > 0L, "grid requires at least one column")
+        for (column in values) {
+            gridRequire(!lookup.containsKey(column.id), "duplicate grid column id")
+            lookup.put(column.id, column)
+        }
+    }
+    fun find(id: GridColumnId): GridColumn<Row>? = lookup[id]
+    fun contains(id: GridColumnId): Boolean = lookup.containsKey(id)
+    fun get(id: GridColumnId): GridColumn<Row> =
+        find(id) ?: throw IllegalArgumentException(Some(f"unknown grid column: ${id.value}"))
+}
+
+internal fun <Row> gridSurvivingFilter(filter: GridFilter, columns: GridColumns<Row>): GridFilter? =
+    when (filter) {
+        case All -> Some(filter)
+        case Column(val id, _) -> if (columns.contains(id))
+            Some(filter)
+        else
+            None
+        case And(val children) -> gridSurvivingChildren(children, columns, true)
+        case Or(val children) -> gridSurvivingChildren(children, columns, false)
+    }
+
+private fun <Row> gridSurvivingChildren(
+    children: Array<GridFilter>,
+    columns: GridColumns<Row>,
+    conjunction: Boolean
+): GridFilter? {
+    val result = ArrayList<GridFilter>()
+    for (child in children)
+        when (gridSurvivingFilter(child, columns)) {
+            case Some(val value) -> result.add(value)
+            case None -> {}
+        }
+    if (result.size == 0L)
+        return None
+    return Some(
+        if (conjunction)
+            GridFilter.And(result.toArray())
+        else
+            GridFilter.Or(result.toArray())
+    )
+}

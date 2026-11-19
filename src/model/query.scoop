@@ -1,0 +1,58 @@
+package scoop.grid
+
+public enum GridSortDirection {
+    Ascending, Descending
+}
+
+public struct GridSort(
+    val column: GridColumnId,
+    val direction: GridSortDirection = GridSortDirection.Ascending
+): Equals<GridSort> {
+    public override operator fun equals(other: GridSort): Boolean =
+        column == other.column && direction == other.direction
+}
+
+public enum GridPagination: Equals<GridPagination> {
+    Disabled, Page(Long, Long)
+    public override operator fun equals(other: GridPagination): Boolean =
+        when ((this, other)) {
+            case(Disabled, Disabled) -> true
+            case(Page(val a, val b), Page(val c, val d)) -> a == c && b == d
+            else -> false
+        }
+}
+
+public class GridQuery public constructor(
+    public val sorting: Array<GridSort> = [],
+    public val filter: GridFilter = GridFilter.All,
+    public val quickFilter: String = "",
+    public val pagination: GridPagination = GridPagination.Disabled
+): Equals<GridQuery> {
+    init {
+        when (pagination) {
+            case Page(val index, val size) -> gridRequire(
+                index >= 0L && size > 0L,
+                "invalid grid page"
+            )
+            case Disabled -> {}
+        }
+    }
+    public override operator fun equals(other: GridQuery): Boolean =
+        gridCriteriaEqual(this, other) && pagination == other.pagination
+
+    public fun withPagination(value: GridPagination): GridQuery =
+        GridQuery(sorting, filter, quickFilter, value)
+}
+
+internal fun gridCriteriaEqual(left: GridQuery, right: GridQuery): Boolean =
+    gridArrayEqual(left.sorting, right.sorting) &&
+        left.filter ==
+        right.filter &&
+        left.quickFilter ==
+        right.quickFilter
+
+internal fun gridFirstPage(value: GridPagination): GridPagination =
+    when (value) {
+        case Disabled -> GridPagination.Disabled
+        case Page(_, val size) -> GridPagination.Page(0L, size)
+    }

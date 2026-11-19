@@ -1,0 +1,178 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.collections.sortWith
+import scoop.comparisons.comparatorOf
+import scoop.text.*
+import scoop.ui.component.TableSource
+
+internal class GridComputed<Row>(
+    val source: TableSource<Row>,
+    val columns: GridColumns<Row>,
+    val query: GridQuery,
+    val result: GridResult<Row>
+)
+
+internal fun <Row> gridCompute(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    previous: GridComputed<Row>?
+): GridComputed<Row> {
+    gridRequire(source.count >= 0L, "negative grid source count")
+    var cached: TableSource<Row>? = None
+    when (previous) {
+        case Some(val old) -> if (
+            old.source === source && old.columns === columns && gridCriteriaEqual(old.query, query)
+        )
+            cached = Some(old.result.ordered)
+        case None -> {}
+    }
+    val ordered = cached ?: gridLocalOrder(source, columns, query)
+    val total = ordered.count
+    var resolved = query
+    var rows: TableSource<Row> = ordered
+    var pages =
+        if (total == 0L)
+            0L
+        else
+            1L
+    when (query.pagination) {
+        case Disabled -> {}
+        case Page(val requested, val size) -> {
+            pages =
+                total /
+                    size +
+                    if (total % size == 0L)
+                        0L
+                    else
+                        1L
+            val index =
+                if (pages == 0L)
+                    0L
+                else
+                    if (requested >= pages)
+                        pages - 1L
+                    else
+                        requested
+            val start = index * size
+            rows =
+                GridPageRows(
+                    ordered,
+                    start,
+                    if (total - start < size)
+                        total - start
+                    else
+                        size
+                )
+            if (index != requested)
+                resolved = query.withPagination(GridPagination.Page(index, size))
+        }
+    }
+    return GridComputed(source, columns, resolved, GridResult(rows, ordered, total, pages))
+}
+
+private fun <Row> gridFilterPredicate(columns: GridColumns<Row>, filter: GridFilter): (
+    Row
+) -> Boolean =
+    when (filter) {
+        case All -> ({ _ -> true })
+        case Column(val id, val condition) -> columns.get(id).predicate(condition)
+        case And(val children) -> {
+            gridRequire(children.size > 0L, "AND filter requires conditions")
+            val predicates =
+                Array<(Row) -> Boolean>(children.size) {
+                    index -> gridFilterPredicate(columns, children[index])
+                };
+            all@{
+                row ->
+                for (predicate in predicates)
+                    if (!predicate(row))
+                        return@all false
+                true
+            }
+        }
+        case Or(val children) -> {
+            gridRequire(children.size > 0L, "OR filter requires conditions")
+            val predicates =
+                Array<(Row) -> Boolean>(children.size) {
+                    index -> gridFilterPredicate(columns, children[index])
+                };
+            any@{
+                row ->
+                for (predicate in predicates)
+                    if (predicate(row))
+                        return@any true
+                false
+            }
+        }
+    }
+
+private fun <Row> gridQuickMatch(row: Row, columns: GridColumns<Row>, needle: String): Boolean {
+    if (needle == "")
+        return true
+    for (column in columns.values)
+        if (column.exportable)
+            when (column.text(row)) {
+                case Some(val text) -> if (text.lowercaseAscii().contains(needle))
+                    return true
+                case None -> {}
+            }
+    return false
+}
+
+private fun <Row> gridLocalOrder(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery
+): TableSource<Row> {
+    val sorting = ArrayList<GridColumn<Row>>()
+    val ids = HashSet<GridColumnId>()
+    for (sort in query.sorting) {
+        val column = columns.get(sort.column)
+        gridRequire(ids.add(sort.column), "duplicate grid sort column")
+        gridRequire(column.sortable, "grid column is not sortable")
+        sorting.add(column)
+    }
+    val predicate = gridFilterPredicate(columns, query.filter)
+    if (sorting.size == 0L && query.filter == GridFilter.All && query.quickFilter == "")
+        return source
+    val needle = query.quickFilter.lowercaseAscii()
+    val indices = ArrayList<Long>()
+    for (index in 0L ..< source.count) {
+        val row = source.rowAt(index)
+        if (predicate(row) && gridQuickMatch(row, columns, needle))
+            indices.add(index)
+    }
+    if (sorting.size > 0L)
+        indices.sortWith(
+            comparatorOf<Long> compare@{
+                left, right ->
+                val a = source.rowAt(left)
+                val b = source.rowAt(right)
+                for (index in 0L ..< sorting.size) {
+                    val column = sorting[index]
+                    val aMissing = column.missing(a)
+                    val bMissing = column.missing(b)
+                    if (aMissing != bMissing)
+                        return@compare if (aMissing == column.missingLast)
+                            1L
+                        else
+                            -1L
+                    if (!aMissing) {
+                        val value = column.compare(a, b)
+                        if (value != 0L) {
+                            val ascending =
+                                query.sorting[index].direction == GridSortDirection.Ascending
+                            return@compare if ((value < 0L) == ascending)
+                                -1L
+                            else
+                                1L
+                        }
+                    }
+                }
+                left.compareTo(right)
+            }
+        )
+    return GridOrderedRows(source, indices.toArray())
+}

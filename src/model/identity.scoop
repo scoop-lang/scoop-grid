@@ -1,0 +1,23 @@
+package scoop.grid
+
+public class GridColumnId public constructor(public val value: String): Equals<GridColumnId>, Hash {
+    init {
+        gridRequire(value != "", "grid column id must not be empty")
+    }
+    public override operator fun equals(other: GridColumnId): Boolean = value == other.value
+    public override fun hash(): Long = value.hash()
+}
+
+internal fun gridRequire(condition: Boolean, message: String) {
+    if (!condition)
+        throw IllegalArgumentException(Some(message))
+}
+
+internal fun <T: Equals<T>> gridArrayEqual(left: Array<T>, right: Array<T>): Boolean {
+    if (left.size != right.size)
+        return false
+    for (index in 0L ..< left.size)
+        if (left[index] != right[index])
+            return false
+    return true
+}
