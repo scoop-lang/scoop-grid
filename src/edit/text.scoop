@@ -14,6 +14,12 @@ public class GridTextEditor<T> public constructor(
     public val state: TextEditorState = TextEditorState(format(initial))
     public override val composing: Boolean get() = state.isComposing
     public override fun candidate(): GridCandidate<T> = parse(state.committedText)
+    public override fun importText(text: String): String? {
+        if (composing)
+            return Some("请先完成组合输入")
+        state.replaceAll(text)
+        return None
+    }
     public override fun cancelComposition() {
         state.cancelComposition()
     }

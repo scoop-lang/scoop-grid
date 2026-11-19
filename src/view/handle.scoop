@@ -65,6 +65,11 @@ public class DataGridHandle public constructor() {
         guard.checkMutation()
         return target?.cancelEdit() ?: false
     }
+    public fun pasteCell(address: GridCellAddress, text: String): GridPasteResult {
+        guard.checkMutation()
+        gridRequire(address.row != ViewKey.Position, "grid pasting requires an explicit row key")
+        return target?.pasteCell(address, text) ?: GridPasteResult.Rejected("网格未挂载")
+    }
     public fun focusCell(address: GridCellAddress): Boolean {
         guard.checkMutation()
         gridRequire(address.row != ViewKey.Position, "grid focus requires an explicit row key")
@@ -108,4 +113,5 @@ internal interface GridMount {
     fun beginEdit(address: GridCellAddress): Boolean
     fun commitEdit(): GridEditAttempt
     fun cancelEdit(): Boolean
+    fun pasteCell(address: GridCellAddress, text: String): GridPasteResult
 }

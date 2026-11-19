@@ -29,6 +29,7 @@ internal class EditingScene(
                         scroll = Some(probe.scroll)
                         enabled = probe.enabled.value
                         onEditEnd = { event -> probe.ends.add(event) }
+                        onPasteResult = { _, result -> probe.pastes.add(result) }
                     }
                 else
                     empty(),

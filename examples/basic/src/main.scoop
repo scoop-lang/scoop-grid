@@ -152,6 +152,16 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                                         else -> "编辑已结束"
                                     }
                             }
+                        onPasteResult =
+                            {
+                                _,
+                                result -> lastEdit.value =
+                                    when (result) {
+                                        case Committed -> "已粘贴"
+                                        case Pending -> "正在保存粘贴的内容…"
+                                        case Rejected(val message) -> message
+                                    }
+                            }
                     }
                 )
                 label(handle.editError ?: lastEdit.value)

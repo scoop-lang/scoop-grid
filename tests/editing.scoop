@@ -14,7 +14,7 @@ private class GridEditingTest {
     fun `typed drafts preserve integers and distinguish parse errors from validation`() {
         val editor = gridLongEditor(9007199254740993L)
         assertEquals("9007199254740993", editor.state.text)
-        editor.state.replaceAll("9223372036854775807")
+        assertEquals(None, editor.importText("9223372036854775807"))
         when (editor.candidate()) {
             case Value(val value) -> assertEquals(9223372036854775807L, value)
             case Rejected(_) -> fail(Some("valid integer was rejected"))
@@ -98,6 +98,8 @@ private class GridEditingTest {
                 ]
             )
         )
+        assertTrue(editor.composing)
+        assertEquals(Some("请先完成组合输入"), editor.importText("must not replace preedit"))
         assertTrue(editor.composing)
         when (editor.candidate()) {
             case Value(val value) -> assertEquals("base", value)

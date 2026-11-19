@@ -6,6 +6,8 @@ import scoop.platform.time.MonotonicTimeSource
 import scoop.surface.FrameSubmission
 import scoop.test.*
 import scoop.tests.surface.sendSurfaceScroll
+import scoop.tests.window.saveNativeClipboard
+import scoop.tests.window.restoreNativeClipboard
 import scoop.time.Duration
 import scoop.ui.*
 import scoop.ui.component.*
@@ -18,14 +20,22 @@ private class GridWindowTest {
     @Test
     fun `wide native grid virtualizes both axes and focuses exact keyed cells with one frozen instance`() {
         val probe = GridWindowProbe()
-        try {
-            context(ThemeSource(shadcnTheme())) {
-                UiHost { host, active, event -> probe.event(host, active, event) }.use {
-                    host -> Application().run(host)
+        @Unsafe
+        {
+            val clipboard = saveNativeClipboard() ?: fail(Some("cannot save clipboard"))
+            try {
+                context(ThemeSource(shadcnTheme())) {
+                    UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                        host -> Application().run(host)
+                    }
+                }
+            } finally {
+                try {
+                    probe.editing.ime.close()
+                } finally {
+                    assertEquals(0, restoreNativeClipboard(clipboard))
                 }
             }
-        } finally {
-            probe.editing.ime.close()
         }
         assertEquals(9, probe.phase)
         assertTrue(probe.navigation.finished)

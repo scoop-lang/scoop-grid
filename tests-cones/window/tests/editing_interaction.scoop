@@ -142,8 +142,7 @@ internal class GridEditInteractionProbe(private val probe: GridEditingProbe) {
                 if (probe.outside.hasFocus) {
                     assertEquals(None, handle.editingCell)
                     assertEquals(999L, amount(199L))
-                    probe.finished = true
-                    active.requestExit()
+                    probe.next(active, 66) {}
                 }
             }
             else -> {}

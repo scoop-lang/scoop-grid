@@ -15,6 +15,7 @@ internal class TrackedEditor<T>(val text: GridTextEditor<T>): GridEditor<T> {
     var submitting = false
     public override val composing: Boolean get() = text.composing
     public override fun candidate(): GridCandidate<T> = text.candidate()
+    public override fun importText(value: String): String? = text.importText(value)
     public override fun cancelComposition() {
         text.cancelComposition()
     }
@@ -34,6 +35,8 @@ internal class GridEditingProbe {
     val scroll = ScrollState()
     val outside = FocusHandle()
     val ends = ArrayList<GridEditEnd>()
+    val pastes = ArrayList<GridPasteResult>()
+    var multiline = false
     var text: TrackedEditor<String>? = None
     var number: TrackedEditor<Long>? = None
     var data =
@@ -45,6 +48,7 @@ internal class GridEditingProbe {
     val model = DataGridState(data, columns())
     val ime = GridSystemImeProbe(this)
     val interaction = GridEditInteractionProbe(this)
+    val paste = GridPasteProbe(this)
     var defer = false
     var submissions = 0
     var completion: GridCommit<EditRow>? = None
@@ -72,7 +76,7 @@ internal class GridEditingProbe {
                         gridEdit<EditRow, String>(
                             {
                                 value ->
-                                val editor = TrackedEditor(gridTextEditor(value))
+                                val editor = TrackedEditor(gridTextEditor(value, probe.multiline))
                                 probe.text = Some(editor)
                                 probe.created += 1
                                 editor
@@ -190,6 +194,10 @@ internal class GridEditingProbe {
         }
     }
     fun advance(active: ActiveApplication) {
+        if (phase >= 66) {
+            paste.advance(active)
+            return
+        }
         if (phase >= 45) {
             interaction.advance(active)
             return

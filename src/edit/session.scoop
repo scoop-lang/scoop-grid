@@ -158,6 +158,35 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
             }
         }
     }
+    fun paste(address: GridCellAddress, text: String): GridPasteResult {
+        value.checkMutation()
+        val content =
+            when (parseGridCellPaste(text)) {
+                case Value(val content) -> content
+                case Rejected(val message) -> return GridPasteResult.Rejected(message)
+            }
+        when (current) {
+            case Some(_) -> return GridPasteResult.Rejected("请先完成当前单元格编辑")
+            case None -> {}
+        }
+        if (!begin(address))
+            return GridPasteResult.Rejected("当前单元格不可编辑")
+        val edit = current ?: return GridPasteResult.Rejected("编辑目标已失效")
+        when (edit.draft.importText(content)) {
+            case Some(val message) -> {
+                edit.status.value = GridDraftStatus.Rejected(message)
+                return GridPasteResult.Rejected(message)
+            }
+            case None -> {}
+        }
+        return when (submit()) {
+            case Committed -> GridPasteResult.Committed
+            case Pending -> GridPasteResult.Pending
+            case Composing -> GridPasteResult.Rejected("请先完成组合输入")
+            case Rejected -> GridPasteResult.Rejected(edit.error ?: "本次粘贴未能提交")
+            case NoEdit -> GridPasteResult.Rejected("编辑目标已失效")
+        }
+    }
     fun clearError(edit: GridActiveEdit<Row>) {
         if (owns(edit) && !edit.submitting && edit.error != None)
             edit.status.value = GridDraftStatus.Ready

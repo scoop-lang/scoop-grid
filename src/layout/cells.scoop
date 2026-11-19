@@ -180,6 +180,8 @@ internal class GridCell<Row>(
     }
     public override fun update(): UiInvalidation {
         val input = props.value
+        area.scope.textCommandAvailability =
+            Some(TextCommandAvailability(paste = input.editable && !input.submitting))
         semantics.update(
             SemanticProperties(
                 name =
@@ -228,6 +230,11 @@ internal class GridCell<Row>(
     }
     private fun keyboard(context: RoutedEventContext, event: InputEvent) {
         val address = props.value.address ?: return
+        if (handle.hasFocus && gridPasteCommand(event)) {
+            props.value.session?.pasteClipboard(address)
+            context.consume()
+            return
+        }
         val key =
             when (event) {
                 case Keyboard(val value) -> value;

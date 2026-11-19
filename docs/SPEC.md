@@ -40,6 +40,10 @@
 
 `parseGridCellPaste(text)` 返回 `GridCellPaste.Value` 或带原因的 `Rejected`。允许标准引用字段、字段内部换行、转义双引号，以及一个可选的末行换行；多字段、多记录均拒绝，不截取首格。结束引号后的杂字符及未闭合引号也拒绝。该解析器供网格浏览模式使用，文本编辑器内的原生粘贴不调用它。
 
+`DataGridHandle.pasteCell(address, text)` 从浏览状态对一个明确业务地址粘贴，返回 `GridPasteResult.Committed`、`Pending` 或 `Rejected(message)`。浏览格的原生 Paste 命令读取窗口剪贴板并沿同一入口执行；`onPasteResult(address, result)` 交付这次操作的即时结果，异步保存的最终结果仍使用编辑完成合同。多字段、只读格、失效地址、已有编辑或提交中的会话均不创建第二个草稿或额外提交。没有文本与空文本分别处理。
+
+单字段先导入一个真实编辑草稿，再沿类型化解析、校验与应用提交。解析或校验失败保留草稿、错误及真实编辑器焦点；成功后返回当前格浏览。编辑器内的粘贴、剪切及文本撤销仍由其原生文本宿主处理，Textarea 中的未引用多行文字不会经过网格矩形解析器。
+
 ## 原生网格与定位
 
 `dataGrid(state) { ... }` 创建 `DataGrid<Row>`，消费同一模型的当前页。`DataGridProps<Row>` 与 builder 提供外框宽高、固定行高／表头高、像素 overscan、可借用的 `ScrollState`／`DataGridHandle`、字体、主题及启用状态。尺寸按主题密度缩放；明确宽高受父约束限制。默认行高 48、表头高 40、外框高度 320。模型可以被多个挂载消费，但每个挂载有自己的滚动与焦点会话；一个 handle 或 ScrollState 同时只绑定一个挂载。
@@ -62,7 +66,7 @@ Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一
 
 `gridColumn` 的可选 `edit` 由 `gridEdit<Row, T>` 构造。编辑器工厂、相等比较、同步校验和应用提交始终保留 `T`；`GridColumnEditing<Row>` 只封装对共同列接口必要的操作，不提供动态值盒。列可用 `editable` 按记录决定是否允许编辑。
 
-`GridEditor<T>` 返回 `GridCandidate.Value(T)` 或 `Rejected(message)`，通过 `GridEditorOptions` 接收真实焦点、字体／主题、错误、提交中状态和提交回调。内置 `GridTextEditor<T>` 复用 `TextEditorState` 与 Input／Textarea；文本、Long 和有限 Double 提供便捷工厂。自定义编辑器沿相同合同使用真实控件，组合输入由编辑器报告和处理。
+`GridEditor<T>` 返回 `GridCandidate.Value(T)` 或 `Rejected(message)`，通过 `GridEditorOptions` 接收真实焦点、字体／主题、错误、提交中状态和提交回调。`importText(text): String?` 只导入当前单格草稿，成功返回 None，不能导入时返回原因且保留旧草稿；不执行应用提交。内置 `GridTextEditor<T>` 复用 `TextEditorState` 与 Input／Textarea，保留导入的原始文字供解析与错误修正，组合输入期间拒绝导入；文本、Long 和有限 Double 提供便捷工厂。自定义编辑器沿相同合同使用真实控件，组合输入由编辑器报告和处理。
 
 每个挂载只有一个会话。Enter／F2 或 `DataGridHandle.beginEdit(address)` 进入可编辑格；焦点通过既有 LazyFocus 请求落在真实编辑器。不可编辑的交互格仍进入自己的内容焦点域。`editingCell`、`editError`、`isSubmitting` 可在 render 中观察当前会话，包括首次绑定前的读取。`commitEdit()` 返回 NoEdit／Committed／Rejected／Composing／Pending；`cancelEdit()` 显式结束草稿。
 
@@ -74,4 +78,4 @@ Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一
 
 数据替换保留字段未变的草稿，包括同一 Row 的其他字段更新。删除记录、隐藏目标列、替换该列定义、字段变更、禁用和卸载结束旧会话；`onEditEnd` 报告地址及原因。模型通知在实际动作时处理，因此窗口隐藏也不会让已删除记录的会话继续存活。提交成功后重新查询；原 key 不再显示时移到同列最近有效行，空结果回到网格入口。普通滚动保留实际活动编辑器且沿原视口裁剪。
 
-这一批接入显式进入编辑、双击／失焦协调及类型化提交，并以系统拼音输入法验证真实候选、Escape 取消、选词和 Enter 提交，结束后恢复原输入源。浏览状态直接输入启动编辑、布尔／日期／枚举便捷编辑器和浏览模式单格粘贴仍需后续闭合。
+这一批接入显式进入编辑、双击／失焦协调、类型化提交及单格粘贴，并以系统拼音输入法验证真实候选、Escape 取消、选词和 Enter 提交，结束后恢复原输入源。浏览状态直接输入启动编辑、布尔／日期／枚举便捷编辑器仍需后续闭合。
