@@ -1,0 +1,152 @@
+package scoop.grid
+
+import scoop.math.max
+import scoop.math.min
+import scoop.platform.system.OperatingSystem
+import scoop.platform.system.operatingSystem
+import scoop.ui.LayoutDirection
+import scoop.window.*
+
+internal enum GridNavigation {
+    Column(Long), Row(Long), Edge(Boolean, Boolean), Page(Boolean), Tab(Boolean)
+}
+
+internal struct GridCellIndex(val row: Long, val column: Long)
+
+internal fun gridNavigation(key: KeyEvent, direction: LayoutDirection): GridNavigation? {
+    if (key.state != ElementState.Pressed || key.synthetic)
+        return None
+    val m = key.modifiers
+    val primary =
+        if (operatingSystem == OperatingSystem.Darwin)
+            m.superKey
+        else
+            m.control
+    val other =
+        if (operatingSystem == OperatingSystem.Darwin)
+            m.control
+        else
+            m.superKey
+    if (m.alt || other || m.function)
+        return None
+    if (key.logicalKey == LogicalKey.Named(NamedKey.Tab))
+        return if (primary)
+            None
+        else
+            Some(GridNavigation.Tab(m.shift))
+    if (m.shift)
+        return None
+    return when (key.logicalKey) {
+        case Named(NamedKey.Home) -> Some(GridNavigation.Edge(false, primary))
+        case Named(NamedKey.End) -> Some(GridNavigation.Edge(true, primary))
+        else -> if (primary)
+            None
+        else
+            when (key.logicalKey) {
+                case Named(NamedKey.ArrowLeft) -> Some(
+                    GridNavigation.Column(
+                        if (direction == LayoutDirection.Rtl)
+                            1L
+                        else
+                            -1L
+                    )
+                )
+                case Named(NamedKey.ArrowRight) -> Some(
+                    GridNavigation.Column(
+                        if (direction == LayoutDirection.Rtl)
+                            -1L
+                        else
+                            1L
+                    )
+                )
+                case Named(NamedKey.ArrowUp) -> Some(GridNavigation.Row(-1L))
+                case Named(NamedKey.ArrowDown) -> Some(GridNavigation.Row(1L))
+                case Named(NamedKey.PageUp) -> Some(GridNavigation.Page(false))
+                case Named(NamedKey.PageDown) -> Some(GridNavigation.Page(true))
+                else -> None
+            }
+    }
+}
+
+/** Uses separate row/column indices; no row-count times column-count product can overflow. */
+internal fun gridNextCell(
+    current: GridCellIndex,
+    rows: Long,
+    columns: Long,
+    page: Long,
+    navigation: GridNavigation
+): GridCellIndex? {
+    if (rows == 0L || columns == 0L)
+        return None
+    return when (navigation) {
+        case Column(val step) -> Some(
+            GridCellIndex(current.row, gridStep(current.column, step, columns))
+        )
+        case Row(val step) -> Some(GridCellIndex(gridStep(current.row, step, rows), current.column))
+        case Edge(val end, val all) -> Some(
+            GridCellIndex(
+                if (all) {
+                    if (end)
+                        rows - 1L
+                    else
+                        0L
+                } else
+                    current.row,
+                if (end)
+                    columns - 1L
+                else
+                    0L
+            )
+        )
+        case Page(val down) -> Some(
+            GridCellIndex(
+                gridStep(
+                    current.row,
+                    if (down)
+                        page
+                    else
+                        -page,
+                    rows
+                ),
+                current.column
+            )
+        )
+        case Tab(val reverse) -> {
+            if (reverse) {
+                if (current.column > 0L)
+                    Some(GridCellIndex(current.row, current.column - 1L))
+                else
+                    if (current.row > 0L)
+                        Some(GridCellIndex(current.row - 1L, columns - 1L))
+                    else
+                        None
+            } else {
+                if (current.column < columns - 1L)
+                    Some(GridCellIndex(current.row, current.column + 1L))
+                else
+                    if (current.row < rows - 1L)
+                        Some(GridCellIndex(current.row + 1L, 0L))
+                    else
+                        None
+            }
+        }
+    }
+}
+
+private fun gridStep(value: Long, step: Long, count: Long): Long =
+    if (step < 0L)
+        value - min(value, -step)
+    else
+        value + min(count - 1L - value, step)
+
+internal fun gridPlainKey(key: KeyEvent): Boolean {
+    val m = key.modifiers
+    return key.state ==
+        ElementState.Pressed &&
+        !key.synthetic &&
+        !m.control &&
+        !m.alt &&
+        !m.shift &&
+        !m.superKey &&
+        !m.function
+}

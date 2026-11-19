@@ -1,0 +1,222 @@
+package scoop.grid.tests.window
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.test.*
+import scoop.tests.surface.sendSurfaceKey
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.window.*
+
+internal class GridNavigationProbe {
+    val visible = state(false)
+    val direction = state(LayoutDirection.Ltr)
+    val enabled = state(true)
+    val first = FocusHandle()
+    val second = FocusHandle()
+    val outside = FocusHandle()
+    val handle = DataGridHandle()
+    val model =
+        DataGridState(
+            TableRows(
+                Array<TableRecord<Long>>(5L) { index -> TableRecord(ViewKey.Number(index), index) }
+            ),
+            columns()
+        )
+    var window: Window? = None
+    var frame: ComponentScope? = None
+    var phase = 0
+    var clicks = 0
+    var finished = false
+    private fun columns(): Array<GridColumn<Long>> {
+        val probe = this
+        val size = TableColumnSize(GridTrack.Fixed(200.0))
+        return [
+            gridColumn<Long, Long>(GridColumnId("a"), "A", { row -> row }, gridLongValues(), size),
+            gridActionColumn<Long>(
+                GridColumnId("b"),
+                "Controls",
+                {
+                    value -> if (value != 1L)
+                        label(f"row ${value}")
+                    else
+                        row {
+                            button("First", { probe.clicks += 1 }) {
+                                focus = FocusOptions(Some(probe.first))
+                            }
+                            button("Second", { probe.clicks += 1 }) {
+                                focus = FocusOptions(Some(probe.second))
+                            }
+                        }
+                },
+                size
+            ),
+            gridColumn<Long, Long>(
+                GridColumnId("c"),
+                "C",
+                { row -> row * 100L },
+                gridLongValues(),
+                size
+            )
+        ]
+    }
+    fun address(row: Long, column: String): GridCellAddress =
+        GridCellAddress(ViewKey.Number(row), GridColumnId(column))
+    fun start(window: Window) {
+        if (visible.value)
+            return
+        this.window = Some(window)
+        visible.value = true
+    }
+    private fun at(row: Long, column: String): Boolean =
+        handle.focusedCell == Some(address(row, column))
+    private fun send(
+        active: ActiveApplication,
+        next: Int,
+        code: Int,
+        shift: Boolean = false,
+        primary: Boolean = false
+    ) {
+        phase = -1
+        assertTrue(
+            active.proxy().post {
+                _ ->
+                assertTrue(sendSurfaceKey(window!!, code, true, command = primary, shift = shift))
+                assertTrue(sendSurfaceKey(window!!, code, false, command = primary, shift = shift))
+                phase = next
+                frame!!.requestFrame()
+            }
+        )
+    }
+    fun advance(active: ActiveApplication) {
+        when (phase) {
+            case 0 -> {
+                assertTrue(handle.focusCell(address(0L, "a")));
+                phase = 1
+            }
+            case 1 -> if (at(0L, "a")) {
+                send(active, 2, 124)
+            }
+            case 2 -> if (at(0L, "b")) {
+                send(active, 3, 125)
+            }
+            case 3 -> if (at(1L, "b")) {
+                send(active, 4, 120)
+            }
+            case 4 -> if (first.hasFocus) {
+                send(active, 5, 48)
+            }
+            case 5 -> if (second.hasFocus) {
+                send(active, 6, 48)
+            }
+            case 6 -> if (at(1L, "c")) {
+                send(active, 7, 48, shift = true)
+            }
+            case 7 -> if (at(1L, "b") && !first.hasFocus && !second.hasFocus) {
+                send(active, 8, 36)
+            }
+            case 8 -> if (first.hasFocus) {
+                send(active, 9, 53)
+            }
+            case 9 -> if (at(1L, "b") && !first.hasFocus && !second.hasFocus) {
+                send(active, 10, 115)
+            }
+            case 10 -> if (at(1L, "a")) {
+                send(active, 11, 119)
+            }
+            case 11 -> if (at(1L, "c")) {
+                send(active, 12, 119, primary = true)
+            }
+            case 12 -> if (at(4L, "c")) {
+                send(active, 13, 48)
+            }
+            case 13 -> if (outside.hasFocus) {
+                send(active, 14, 48, shift = true)
+            }
+            case 14 -> if (at(4L, "c")) {
+                send(active, 15, 115, primary = true)
+            }
+            case 15 -> if (at(0L, "a")) {
+                send(active, 16, 121)
+            }
+            case 16 -> if (at(4L, "a")) {
+                send(active, 17, 116)
+            }
+            case 17 -> if (at(0L, "a")) {
+                direction.value = LayoutDirection.Rtl;
+                phase = 18
+            }
+            case 18 -> {
+                send(active, 19, 123)
+            }
+            case 19 -> if (at(0L, "b")) {
+                enabled.value = false;
+                phase = 20
+            }
+            case 20 -> {
+                assertFalse(handle.focusCell(address(0L, "a")))
+                assertEquals(0, clicks)
+                finished = true
+                active.requestExit()
+            }
+            else -> {}
+        }
+    }
+}
+
+internal class NavigationScene(
+    private val probe: GridNavigationProbe,
+    private val active: ActiveApplication,
+    scope: ComponentScope
+): Component(scope) {
+    public override fun render(): View {
+        val probe = this.probe
+        val active = this.active
+        return element(
+            { scope -> NavigationFrame(probe, active, scope) },
+            [
+                direction(
+                    dataGrid(probe.model) {
+                        height = 264.0
+                        rowHeight = 56.0
+                        handle = Some(probe.handle)
+                        enabled = probe.enabled.value
+                    },
+                    probe.direction.value
+                ),
+                button("After grid", {}) { focus = FocusOptions(Some(probe.outside)) }
+            ]
+        )
+    }
+}
+
+private class NavigationFrame(
+    private val probe: GridNavigationProbe,
+    private val active: ActiveApplication,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    public override fun onMount() {
+        probe.frame = Some(scope)
+    }
+    public override fun onUnmount() {
+        probe.frame = None
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val size = constraints.constrain(Size(640.0, 360.0))
+        context.measureChild(0L, Constraints(maxWidth = Some(size.width), maxHeight = Some(264.0)))
+        context.placeChild(0L, Point(0.0, 0.0))
+        context.measureChild(1L, Constraints.tight(Size(180.0, 40.0)))
+        context.placeChild(1L, Point(0.0, 280.0))
+        return LayoutResult(LayoutMetrics(size), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted)
+                probe.advance(active)
+        }
+    }
+}

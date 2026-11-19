@@ -127,6 +127,11 @@ Element<GridMeasurePlan>(scope) {
             Some { content -> content.children([1L, 0L]) },
             plan.scroll.snapshot.offset
         )
+        val session = props.value.session
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted)
+                session.accept(plan)
+        }
         val line = props.value.columns.appearance.density
         val border = props.value.columns.appearance.theme.tokens.palette.border
         val rtl = plan.columns.direction == LayoutDirection.Rtl

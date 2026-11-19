@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。编辑和分析功能继续实施。模型用法例如：
+已提供类型化本地模型、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、二维键盘导航、自定义控件内部交互、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。编辑和分析功能继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -36,6 +36,8 @@ scoop test --release .
 ```
 
 原生窗口使用 `dataGrid(model) { height = 480.0; handle = Some(handle) }`，其中 `handle` 是可选的 `DataGridHandle`。`handle.focusCell(GridCellAddress(rowKey, columnId))` 定位到真实单元格；焦点在成功布局后完成。Grid 使用应用的 `ThemeSource`，自定义单元格继续组合普通 View。
+
+浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。Enter／F2 进入自定义单元格的真实控件，Escape 返回单元格浏览；内部控件先处理自己的键盘与文本输入。
 
 运行 [十万行示例](examples/basic/src/main.scoop) 与本机窗口回归：
 

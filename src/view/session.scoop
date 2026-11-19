@@ -1,8 +1,10 @@
 package scoop.grid
 
 import scoop.collections.HashMap
+import scoop.math.max
 import scoop.ui.*
 import scoop.ui.component.TableSource
+import scoop.window.KeyEvent
 
 internal class GridCellFocus(
     val handle: FocusHandle,
@@ -21,6 +23,32 @@ internal class GridSession<Row>: GridMount {
     private var intent: GridCellAddress? = None
     private var recent: GridColumnId? = None
     private val cells = HashMap<GridCellAddress, GridCellFocus>()
+    private var pageRows = 1L
+    fun accept(plan: GridMeasurePlan) {
+        if (active)
+            pageRows = max(1L, (plan.bodyHeight / plan.rowHeight).toLong())
+    }
+    fun navigate(address: GridCellAddress, key: KeyEvent): Boolean {
+        if (!active || !enabled)
+            return false
+        val source = rows ?: return false
+        val plan = columns ?: return false
+        val command = gridNavigation(key, plan.appearance.direction) ?: return false
+        val row = source.indexOfKey(address.row) ?: return false
+        val column = plan.indexOf(address.column) ?: return false
+        val next =
+            gridNextCell(
+                GridCellIndex(row, column),
+                source.count,
+                plan.columns.size,
+                pageRows,
+                command
+            ) ?:
+                return false
+        if (next.row != row || next.column != column)
+            return focus(GridCellAddress(source.keyAt(next.row), plan.columns[next.column].id))
+        return true
+    }
     public override val active: Boolean get() = owner?.isMounted ?: false
     public override val pending: Boolean get() = active && (bodyFocus?.isPending ?: false)
     public override val requested: GridCellAddress? get() =

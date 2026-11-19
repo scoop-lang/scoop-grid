@@ -14,6 +14,11 @@ internal class GridAppearance(
 ) {
     val density = theme.tokens.typography.body.fontSize / 14.0
     val padding = 8.0 * density
+    val body =
+        theme.tokens.typography.body.copy {
+            weight = 400
+            color = theme.tokens.palette.background.foreground
+        }
     val head =
         theme.tokens.typography.body.copy {
             weight = 500

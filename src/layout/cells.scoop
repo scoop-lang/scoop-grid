@@ -3,7 +3,9 @@ package scoop.grid
 import scoop.graphics.*
 import scoop.math.max
 import scoop.math.min
+import scoop.surface.*
 import scoop.ui.*
+import scoop.window.*
 import scoop.window.accessibility.*
 
 internal class GridCellClip(val bounds: Rect)
@@ -27,6 +29,7 @@ internal class GridRowCells<Row>(
         }
     public override fun build(index: Long): View {
         val column = columns.columns[index]
+        val content = GridContentHandle()
         return element(
             GridCellProps(
                 Some(GridCellAddress(rowKey, column.id)),
@@ -35,10 +38,24 @@ internal class GridRowCells<Row>(
                 column.id,
                 column.text(row),
                 columns.appearance,
-                Some(session)
+                Some(session),
+                content = Some(content)
             ),
             { props, scope -> GridCell(props, scope) },
-            [column.cell(row)]
+            [
+                element(
+                    content,
+                    { props, scope -> GridContent(props, scope) },
+                    [
+                        column.cell(
+                            row,
+                            Some(columns.appearance.fonts),
+                            Some(columns.appearance.body),
+                            Some(columns.appearance.paragraph)
+                        )
+                    ]
+                )
+            ]
         )
     }
 }
@@ -96,7 +113,8 @@ internal class GridCellProps<Row>(
     val appearance: GridAppearance,
     val session: GridSession<Row>?,
     val tabStop: Boolean = true,
-    val activate: (() -> Unit)? = None
+    val activate: (() -> Unit)? = None,
+    val content: GridContentHandle? = None
 )
 
 internal class GridCell<Row>(
@@ -113,13 +131,17 @@ internal class GridCell<Row>(
             else
                 SemanticRole.Cell
         )
-    private val press = scope.press(area) { activate() }
+    private val press =
+        scope.press(area, PressOptions(acceptsEnter = props.value.address == None)) { activate() }
     private var registered: GridCellAddress? = None
     init {
         scope.routeChildren(area)
         scope.routeSemanticsChildren(Some(semantics))
         semantics.mergeLabels = true
         semantics.bindFocus(Some(focus))
+        scope.resource {
+            area.scope.addDefaultAction { context, event -> keyboard(context, event) }
+        }
         scope.resource {
             scope.input.observeActivity {
                 if (scope.input.activity.hasFocus) {
@@ -185,6 +207,39 @@ internal class GridCell<Row>(
             case Some(val action) -> action()
             case None -> handle.requestFocus()
         }
+    }
+    private fun keyboard(context: RoutedEventContext, event: InputEvent) {
+        val address = props.value.address ?: return
+        val key =
+            when (event) {
+                case Keyboard(val value) -> value;
+                else -> return
+            }
+        if (gridPlainKey(key)) {
+            if (
+                handle.hasFocus &&
+                    (
+                        key.logicalKey ==
+                            LogicalKey.Named(NamedKey.Enter) ||
+                            key.logicalKey ==
+                            LogicalKey.Named(NamedKey.F2)
+                    )
+            ) {
+                if (props.value.content?.enter() ?: false)
+                    context.consume()
+                return
+            }
+            if (!handle.hasFocus && key.logicalKey == LogicalKey.Named(NamedKey.Escape)) {
+                if (handle.requestFocus(FocusOrigin.Keyboard))
+                    context.consume()
+                return
+            }
+        }
+        if (
+            (handle.hasFocus || key.logicalKey == LogicalKey.Named(NamedKey.Tab)) &&
+                (props.value.session?.navigate(address, key) ?: false)
+        )
+            context.consume()
     }
     public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
         Rect

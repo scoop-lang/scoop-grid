@@ -1,0 +1,47 @@
+package scoop.grid
+
+import scoop.graphics.Point
+import scoop.ui.*
+
+/** Binds only the content subtree; the cell's browsing target stays outside its Tab scope. */
+internal class GridContentHandle {
+    private var scope: FocusScope? = None
+    fun bind(value: FocusScope) {
+        scope = Some(value)
+    }
+    fun unbind(value: FocusScope) {
+        when (scope) {
+            case Some(val old) -> if (old === value)
+                scope = None;
+            case None -> {}
+        }
+    }
+    fun enter(): Boolean = scope?.requestFocus() ?: false
+}
+
+internal class GridContent(
+    private val props: Props<GridContentHandle>,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    private val group = scope.focusScope()
+    private var attached: GridContentHandle? = None
+    public override fun update(): UiInvalidation {
+        attached?.unbind(group)
+        attached = Some(props.value)
+        props.value.bind(group)
+        return UiInvalidation.Layout
+    }
+    public override fun onUnmount() {
+        attached?.unbind(group)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val child = context.measureChild(0L, constraints)
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(child, Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+    }
+}

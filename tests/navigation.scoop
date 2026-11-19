@@ -1,0 +1,73 @@
+package scoop.grid
+
+import scoop.test.*
+
+@Test
+private class GridNavigationTest {
+    @Test
+    fun `navigation crosses row boundaries without multiplying huge row and column counts`() {
+        assertEquals(
+            Some(GridCellIndex(99999999L, 0L)),
+            gridNextCell(
+                GridCellIndex(99999998L, 299L),
+                100000000L,
+                300L,
+                20L,
+                GridNavigation.Tab(false)
+            )
+        )
+        assertEquals(
+            Some(GridCellIndex(99999998L, 299L)),
+            gridNextCell(
+                GridCellIndex(99999999L, 0L),
+                100000000L,
+                300L,
+                20L,
+                GridNavigation.Tab(true)
+            )
+        )
+        assertEquals(
+            None,
+            gridNextCell(
+                GridCellIndex(Long.MAX_VALUE - 1L, 2L),
+                Long.MAX_VALUE,
+                3L,
+                20L,
+                GridNavigation.Tab(false)
+            )
+        )
+        assertEquals(
+            Some(GridCellIndex(Long.MAX_VALUE - 1L, 1L)),
+            gridNextCell(
+                GridCellIndex(Long.MAX_VALUE - 2L, 1L),
+                Long.MAX_VALUE,
+                3L,
+                20L,
+                GridNavigation.Page(true)
+            )
+        )
+    }
+    @Test
+    fun `edges preserve the row while result edges and pages clamp to valid cells`() {
+        assertEquals(
+            Some(GridCellIndex(4L, 0L)),
+            gridNextCell(GridCellIndex(4L, 2L), 10L, 5L, 3L, GridNavigation.Edge(false, false))
+        )
+        assertEquals(
+            Some(GridCellIndex(9L, 4L)),
+            gridNextCell(GridCellIndex(4L, 2L), 10L, 5L, 3L, GridNavigation.Edge(true, true))
+        )
+        assertEquals(
+            Some(GridCellIndex(1L, 2L)),
+            gridNextCell(GridCellIndex(4L, 2L), 10L, 5L, 3L, GridNavigation.Page(false))
+        )
+        assertEquals(
+            Some(GridCellIndex(0L, 2L)),
+            gridNextCell(GridCellIndex(1L, 2L), 10L, 5L, 3L, GridNavigation.Page(false))
+        )
+        assertEquals(
+            None,
+            gridNextCell(GridCellIndex(0L, 0L), 10L, 5L, 3L, GridNavigation.Tab(true))
+        )
+    }
+}

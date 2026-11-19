@@ -24,6 +24,10 @@ private class GridWindowTest {
             }
         }
         assertEquals(9, probe.phase)
+        assertTrue(probe.navigation.finished)
+        assertFalse(probe.navigation.handle.isAttached)
+        assertFalse(probe.navigation.first.isAttached)
+        assertFalse(probe.navigation.second.isAttached)
         assertFalse(probe.handle.isAttached)
         assertFalse(probe.scroll.isAttached)
         assertEquals(0L, probe.cells.live.size)
@@ -36,6 +40,7 @@ private class GridWindowTest {
 }
 
 internal class GridWindowProbe {
+    val navigation = GridNavigationProbe()
     val rows = WindowRows()
     val cells = WindowCells()
     val model = DataGridState(rows, cells.columns())
@@ -74,9 +79,9 @@ internal class GridWindowProbe {
             }
             case NewEvents(StartCause.Deadline) -> fail(
                 Some(
-                    f"grid timeout at phase ${phase}, cells=${cells.live.size}, pending=${
-                        handle.isPending
-                    }"
+                    f"grid timeout at phase ${phase}, navigation=${navigation.phase}, cells=${
+                        cells.live.size
+                    }, pending=${handle.isPending}"
                 )
             )
             else -> {}
@@ -164,7 +169,7 @@ internal class GridWindowProbe {
             case 9 -> {
                 assertFalse(handle.isAttached)
                 assertEquals(0L, cells.live.size)
-                active.requestExit()
+                navigation.start(window!!)
             }
             else -> {}
         }
@@ -179,6 +184,8 @@ private class WindowScene(
     public override fun render(): View {
         val probe = this.probe
         val active = this.active
+        if (probe.navigation.visible.value)
+            return component({ scope -> NavigationScene(probe.navigation, active, scope) })
         return element(
             { scope -> WindowFrame(probe, active, scope) },
             [
