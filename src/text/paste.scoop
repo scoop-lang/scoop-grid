@@ -1,0 +1,69 @@
+package scoop.grid
+
+public enum GridCellPaste {
+    Value(String), Rejected(String)
+}
+
+private enum GridPasteState {
+    Plain, Quoted, AfterQuote, AfterCR, Ended
+}
+
+/** Parses exactly one TSV cell. An editor's own text paste bypasses this parser. */
+public fun parseGridCellPaste(text: String): GridCellPaste {
+    val output = StringBuilder()
+    var mode = GridPasteState.Plain
+    var leading = true
+    for (character in text) {
+        if (leading) {
+            leading = false
+            if (character == '"') {
+                mode = GridPasteState.Quoted
+                continue
+            }
+        }
+        when (mode) {
+            case Quoted -> {
+                if (character == '"')
+                    mode = GridPasteState.AfterQuote
+                else
+                    output.append(character)
+            }
+            case AfterQuote -> {
+                when (character) {
+                    case '"' -> {
+                        output.append('"');
+                        mode = GridPasteState.Quoted
+                    }
+                    case '\t' -> return gridMultiplePaste()
+                    case '\r' -> mode = GridPasteState.AfterCR
+                    case '\n' -> mode = GridPasteState.Ended
+                    else -> return GridCellPaste.Rejected("结束引号后存在无效字符")
+                }
+            }
+            case AfterCR -> {
+                if (character == '\n')
+                    mode = GridPasteState.Ended
+                else
+                    return gridMultiplePaste()
+            }
+            case Ended -> return gridMultiplePaste()
+            case Plain -> {
+                when (character) {
+                    case '\t' -> return gridMultiplePaste()
+                    case '\r' -> mode = GridPasteState.AfterCR
+                    case '\n' -> mode = GridPasteState.Ended
+                    else -> {
+                        output.append(character);
+                        mode = GridPasteState.Plain
+                    }
+                }
+            }
+        }
+    }
+    return if (mode == GridPasteState.Quoted)
+        GridCellPaste.Rejected("剪贴板中的引号未闭合")
+    else
+        GridCellPaste.Value(output.toString())
+}
+
+private fun gridMultiplePaste(): GridCellPaste = GridCellPaste.Rejected("一次只能粘贴到一个单元格")

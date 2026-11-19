@@ -1,0 +1,71 @@
+package scoop.grid
+
+import scoop.text.*
+import scoop.ui.component.TableSource
+
+/** The caller chooses the data scope; exporting never builds views or fetches rows. */
+public fun <Row> gridCsv(
+    rows: TableSource<Row>,
+    columns: Array<GridColumn<Row>>,
+    includeHeaders: Boolean = true
+): String = gridDelimited(rows, columns, ',', "\r\n", includeHeaders, true)
+
+public fun <Row> gridTsv(rows: TableSource<Row>, columns: Array<GridColumn<Row>>): String =
+    gridDelimited(rows, columns, '\t', "\n", false, false)
+
+private fun <Row> gridDelimited(
+    rows: TableSource<Row>,
+    columns: Array<GridColumn<Row>>,
+    delimiter: Char,
+    newline: String,
+    headers: Boolean,
+    terminalNewline: Boolean
+): String {
+    val exported = ArrayList<GridColumn<Row>>()
+    for (column in columns)
+        if (column.exportable)
+            exported.add(column)
+    gridRequire(exported.size > 0L, "grid export requires an exportable column")
+    gridRequire(rows.count >= 0L, "negative grid source count")
+    val output = StringBuilder()
+    if (headers) {
+        for (index in 0L ..< exported.size) {
+            if (index > 0L)
+                output.append(delimiter)
+            appendGridField(output, exported[index].title, delimiter)
+        }
+    }
+    for (rowIndex in 0L ..< rows.count) {
+        if (headers || rowIndex > 0L)
+            output.append(newline)
+        val row = rows.rowAt(rowIndex)
+        for (columnIndex in 0L ..< exported.size) {
+            if (columnIndex > 0L)
+                output.append(delimiter)
+            val column = exported[columnIndex]
+            val text =
+                column.text(row) ?:
+                    throw IllegalArgumentException(
+                        Some(f"export column has no data text: ${column.id.value}")
+                    )
+            appendGridField(output, text, delimiter)
+        }
+    }
+    if (terminalNewline && (headers || rows.count > 0L))
+        output.append(newline)
+    return output.toString()
+}
+
+private fun appendGridField(output: StringBuilder, text: String, delimiter: Char) {
+    val quoted =
+        text.contains(delimiter) || text.contains('"') || text.contains('\r') || text.contains('\n')
+    if (quoted)
+        output.append('"')
+    for (character in text) {
+        if (quoted && character == '"')
+            output.append('"')
+        output.append(character)
+    }
+    if (quoted)
+        output.append('"')
+}
