@@ -91,3 +91,13 @@ internal fun gridImeKey(window: Window, code: Int): Int =
             return@gridNativeView nativeImeKey(view, code)
         }
     }
+
+internal fun gridPointer(window: Window, x: Double, y: Double, clicks: Int = 1) {
+    gridNativeView(window) {
+        view -> @Unsafe
+        {
+            nativeEditorPointer(view, x, y, true, clicks, false)
+            nativeEditorPointer(view, x, y, false, clicks, false)
+        }
+    }
+}

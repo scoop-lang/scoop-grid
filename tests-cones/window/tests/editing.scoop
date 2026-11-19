@@ -44,6 +44,7 @@ internal class GridEditingProbe {
         )
     val model = DataGridState(data, columns())
     val ime = GridSystemImeProbe(this)
+    val interaction = GridEditInteractionProbe(this)
     var defer = false
     var submissions = 0
     var completion: GridCommit<EditRow>? = None
@@ -161,7 +162,7 @@ internal class GridEditingProbe {
         model.replaceData(data)
     }
     private fun row(key: Long): EditRow = data.rowAt(data.indexOfKey(ViewKey.Number(key))!!)
-    private fun accept() {
+    fun accept() {
         assertTrue(completion!!.accept(pending!!))
         data = pending!!
         assertFalse(completion!!.isActive)
@@ -189,6 +190,10 @@ internal class GridEditingProbe {
         }
     }
     fun advance(active: ActiveApplication) {
+        if (phase >= 45) {
+            interaction.advance(active)
+            return
+        }
         if (phase >= 34) {
             ime.advance(active)
             return

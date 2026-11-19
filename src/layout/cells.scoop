@@ -114,11 +114,39 @@ internal class GridCell<Row>(
     private val press =
         scope.press(area, PressOptions(acceptsEnter = props.value.address == None)) { activate() }
     private var registered: GridCellAddress? = None
+    private var doubleClick = false
     init {
         scope.routeChildren(area)
         scope.routeSemanticsChildren(Some(semantics))
         semantics.mergeLabels = true
         semantics.bindFocus(Some(focus))
+        scope.resource {
+            area.scope.addEventHandler {
+                _,
+                event -> when (event) {
+                    case Pointer(
+                        InputPointerEvent.Button(
+                            _,
+                            MouseButton.Left,
+                            ElementState.Pressed,
+                            val clicks
+                        )
+                    ) -> doubleClick = clicks >= 2
+                    case Pointer(InputPointerEvent.Cancelled(_, _)) -> doubleClick = false
+                    else -> {}
+                }
+            }
+        }
+        scope.resource {
+            area.scope.addEventFinished {
+                event -> when (event) {
+                    case Pointer(
+                        InputPointerEvent.Button(_, MouseButton.Left, ElementState.Released, _)
+                    ) -> doubleClick = false
+                    else -> {}
+                }
+            }
+        }
         scope.resource {
             area.scope.addDefaultAction { context, event -> keyboard(context, event) }
         }
@@ -190,7 +218,10 @@ internal class GridCell<Row>(
         when (props.value.activate) {
             case Some(val action) -> action()
             case None -> when (props.value.address) {
-                case Some(val address) -> props.value.session?.focus(address)
+                case Some(val address) -> if (doubleClick && props.value.editable)
+                    props.value.session?.beginEdit(address)
+                else
+                    props.value.session?.focus(address)
                 case None -> handle.requestFocus()
             }
         }

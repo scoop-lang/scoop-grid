@@ -3,10 +3,13 @@ package scoop.grid
 import scoop.collections.HashMap
 import scoop.math.max
 import scoop.math.min
+import scoop.surface.*
 import scoop.ui.*
 import scoop.ui.component.TableSource
 import scoop.ui.style.ThemeSource
 import scoop.window.KeyEvent
+import scoop.window.ElementState
+import scoop.window.MouseButton
 
 internal class GridCellFocus(
     val handle: FocusHandle,
@@ -93,6 +96,29 @@ internal class GridSession<Row>: GridMount {
     fun mount(scope: ComponentScope, value: ScrollViewport) {
         owner = Some(scope)
         viewport = Some(value)
+    }
+    fun capture(context: RoutedEventContext, event: InputEvent) {
+        val edit = editing.current ?: return
+        val press =
+            when (event) {
+                case Pointer(
+                    InputPointerEvent.Button(_, MouseButton.Left, ElementState.Pressed, _)
+                ) -> true
+                case Contact(InputContactEvent.Began(_)) -> true
+                else -> false
+            }
+        if (!press)
+            return
+        val cell = cells[edit.address] ?: return
+        var target: InputScope? = Some(context.target)
+        while (true) {
+            val current = target ?: break
+            if (current === cell.scope.input)
+                return
+            target = current.parent
+        }
+        if (editing.beforePress())
+            context.consume()
     }
     fun update(input: GridRootProps<Row>) {
         model = Some(input.input.state)

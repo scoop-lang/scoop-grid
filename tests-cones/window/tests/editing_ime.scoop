@@ -114,8 +114,8 @@ internal class GridSystemImeProbe(private val probe: GridEditingProbe) {
                         probe.ends[probe.ends.size - 1L].reason
                     )
                     close()
-                    probe.finished = true
-                    active.requestExit()
+                    probe.phase = 45
+                    probe.frame!!.requestFrame()
                 }
             }
             else -> {}

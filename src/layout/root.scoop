@@ -36,15 +36,20 @@ Element<GridMeasurePlan>(scope) {
     private val pan = scope.scrollPan(area, viewport)
     init {
         area.scope.defaultAction = { context, event -> handle(context, event) }
+        area.scope.captureHandler =
+            { context, event -> props.value.session.capture(context, event) }
         scope.routeChildren(area)
         props.value.session.mount(scope, viewport)
         props.value.session.entry = Some(entry)
+        scope.resource {
+            scope.input.observeActivity { props.value.session.editing.focusChanged() }
+        }
     }
     public override fun update(): UiInvalidation {
         val input = props.value
         viewport.state = input.scroll
-        area.scope.enabled = input.input.enabled
         input.session.update(input)
+        area.scope.enabled = input.input.enabled
         return UiInvalidation.Layout
     }
     public override fun onUnmount() {

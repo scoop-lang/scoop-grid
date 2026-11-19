@@ -1,0 +1,126 @@
+package scoop.grid.tests.window
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.window.ActiveApplication
+
+internal class GridEditInteractionProbe(private val probe: GridEditingProbe) {
+    private var oldCompletion: GridCommit<EditRow>? = None
+    private var submitted = 0
+    private fun amount(key: Long): Long {
+        val rows = probe.model.result.ordered
+        return rows.rowAt(rows.indexOfKey(ViewKey.Number(key))!!).amount
+    }
+    fun advance(active: ActiveApplication) {
+        val window = probe.window!!
+        val handle = probe.handle
+        when (probe.phase) {
+            case 45 -> probe.next(active, 46) { gridPointer(window, 300.0, 76.0, 2) }
+            case 46 -> if (probe.number?.focused ?: false) {
+                assertEquals(Some(probe.address(1L, "amount")), handle.editingCell)
+                probe.number!!.text.state.replaceAll("90")
+                probe.next(active, 47) { gridPointer(window, 100.0, 148.0) }
+            }
+            case 47 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(90L, amount(1L))
+                assertEquals(Some(probe.address(2L, "name")), handle.focusedCell)
+                probe.next(active, 48) { gridPointer(window, 100.0, 148.0, 2) }
+            }
+            case 48 -> if (probe.text?.focused ?: false) {
+                probe.text!!.text.state.replaceAll("blur")
+                assertTrue(probe.outside.requestFocus())
+                probe.phase = 49
+            }
+            case 49 -> if (probe.outside.hasFocus) {
+                assertEquals(None, handle.editingCell)
+                assertEquals("blur", probe.model.result.rows.rowAt(1L).name)
+                assertTrue(handle.beginEdit(probe.address(3L, "amount")))
+                probe.phase = 50
+            }
+            case 50 -> if (probe.number?.focused ?: false) {
+                probe.number!!.text.state.replaceAll("bad")
+                probe.next(active, 51) { gridPointer(window, 300.0, 20.0) }
+            }
+            case 51 -> {
+                assertEquals(0L, probe.model.query.sorting.size)
+                assertEquals(Some(probe.address(3L, "amount")), handle.editingCell)
+                assertTrue(probe.number!!.focused)
+                assertTrue(handle.editError != None)
+                probe.number!!.text.state.replaceAll("33")
+                probe.next(active, 52) { gridPointer(window, 300.0, 20.0) }
+            }
+            case 52 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(1L, probe.model.query.sorting.size)
+                assertEquals(GridColumnId("amount"), probe.model.query.sorting[0L].column)
+                assertEquals(33L, amount(3L))
+                probe.model.setQuery(GridQuery())
+                probe.phase = 53
+            }
+            case 53 -> {
+                assertTrue(handle.beginEdit(probe.address(1L, "amount")))
+                probe.phase = 54
+            }
+            case 54 -> if (probe.number?.focused ?: false) {
+                probe.defer = true
+                probe.number!!.text.state.replaceAll("101")
+                assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+                submitted = probe.submissions
+                probe.next(active, 55) { gridPointer(window, 100.0, 148.0, 2) }
+            }
+            case 55 -> {
+                assertEquals(Some(probe.address(1L, "amount")), handle.editingCell)
+                assertEquals(submitted, probe.submissions)
+                assertTrue(probe.number!!.focused)
+                oldCompletion = probe.completion
+                assertTrue(oldCompletion!!.reject("retry"))
+                probe.phase = 56
+            }
+            case 56 -> {
+                assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+                assertFalse(oldCompletion!!.isActive)
+                assertFalse(oldCompletion!!.reject("late attempt"))
+                assertFalse(oldCompletion!!.accept(probe.pending!!))
+                assertTrue(probe.completion!!.isActive)
+                probe.accept()
+                assertEquals(101L, amount(1L))
+                probe.defer = false
+                assertTrue(handle.beginEdit(probe.address(2L, "amount")))
+                probe.phase = 57
+            }
+            case 57 -> if (probe.number?.focused ?: false) {
+                probe.number!!.text.state.replaceAll("-1")
+                assertTrue(probe.outside.requestFocus())
+                probe.phase = 58
+            }
+            case 58 -> if (probe.number?.focused ?: false) {
+                assertFalse(probe.outside.hasFocus)
+                assertEquals(Some("至少为 20"), handle.editError)
+                assertEquals(Some(probe.address(2L, "amount")), handle.editingCell)
+                assertTrue(handle.cancelEdit())
+                probe.model.setQuery(GridQuery(quickFilter = "row"))
+                probe.phase = 59
+            }
+            case 59 -> {
+                assertTrue(handle.beginEdit(probe.address(4L, "name")))
+                probe.phase = 60
+            }
+            case 60 -> if (probe.text?.focused ?: false) {
+                probe.text!!.text.state.replaceAll("outside-filter")
+                assertEquals(GridEditAttempt.Committed, handle.commitEdit())
+                probe.phase = 61
+            }
+            case 61 -> {
+                if (handle.focusedCell == Some(probe.address(5L, "name"))) {
+                    assertEquals(None, handle.editingCell)
+                    assertEquals(None, probe.model.result.rows.indexOfKey(ViewKey.Number(4L)))
+                    probe.finished = true
+                    active.requestExit()
+                }
+            }
+            else -> {}
+        }
+    }
+}

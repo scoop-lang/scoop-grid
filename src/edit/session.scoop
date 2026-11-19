@@ -14,6 +14,7 @@ internal class GridActiveEdit<Row>(
 ) {
     val focus = FocusHandle()
     val status = state(GridDraftStatus.Ready)
+    var receivedFocus = false
     val address: GridCellAddress get() = draft.address
     val submitting: Boolean get() =
         when (status.value) {
@@ -160,6 +161,33 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
     fun clearError(edit: GridActiveEdit<Row>) {
         if (owns(edit) && !edit.submitting && edit.error != None)
             edit.status.value = GridDraftStatus.Ready
+    }
+    fun beforePress(): Boolean {
+        val edit = current ?: return false
+        return when (submit()) {
+            case NoEdit -> false
+            case Committed -> false
+            else -> {
+                session.requestCell(edit.address, Some(edit.focus))
+                true
+            }
+        }
+    }
+    fun focusChanged() {
+        val edit = current ?: return
+        if (!session.active || !session.enabled)
+            return
+        if (session.focused == Some(edit.address)) {
+            if (edit.focus.hasFocus)
+                edit.receivedFocus = true
+            return
+        }
+        if (!edit.receivedFocus || session.pending || edit.submitting)
+            return
+        when (submit(Some {})) {
+            case Composing -> session.requestCell(edit.address, Some(edit.focus))
+            else -> {}
+        }
     }
     fun submit(after: (() -> Unit)? = None): GridEditAttempt {
         value.checkMutation()
