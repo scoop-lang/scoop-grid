@@ -3,6 +3,7 @@ package scoop.grid.tests.window
 import scoop.grid.*
 import scoop.test.*
 import scoop.ui.ViewKey
+import scoop.tests.surface.sendSurfaceKey
 import scoop.window.ActiveApplication
 
 internal class GridEditInteractionProbe(private val probe: GridEditingProbe) {
@@ -116,6 +117,31 @@ internal class GridEditInteractionProbe(private val probe: GridEditingProbe) {
                 if (handle.focusedCell == Some(probe.address(5L, "name"))) {
                     assertEquals(None, handle.editingCell)
                     assertEquals(None, probe.model.result.rows.indexOfKey(ViewKey.Number(4L)))
+                    probe.model.setColumnState(GridColumnState(GridColumnId("id"), visible = false))
+                    probe.phase = 62
+                }
+            }
+            case 62 -> {
+                assertTrue(handle.beginEdit(probe.address(199L, "amount")))
+                probe.phase = 63
+            }
+            case 63 -> if (probe.number?.focused ?: false) {
+                probe.defer = true
+                probe.number!!.text.state.replaceAll("999")
+                probe.next(active, 64) {
+                    assertTrue(sendSurfaceKey(window, 48, true))
+                    assertTrue(sendSurfaceKey(window, 48, false))
+                }
+            }
+            case 64 -> {
+                assertTrue(handle.isSubmitting)
+                probe.accept()
+                probe.phase = 65
+            }
+            case 65 -> {
+                if (probe.outside.hasFocus) {
+                    assertEquals(None, handle.editingCell)
+                    assertEquals(999L, amount(199L))
                     probe.finished = true
                     active.requestExit()
                 }
