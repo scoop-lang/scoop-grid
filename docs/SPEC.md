@@ -37,3 +37,15 @@
 不允许导出的列被省略；全部列均不可导出时报告错误。可导出列必须提供数据文字，缺值由该列正常格式化。逗号／制表符、双引号、CR 和 LF 按对应格式加引号。不存在公式解析或导出为 Excel 公式的特殊分支。
 
 `parseGridCellPaste(text)` 返回 `GridCellPaste.Value` 或带原因的 `Rejected`。允许标准引用字段、字段内部换行、转义双引号，以及一个可选的末行换行；多字段、多记录均拒绝，不截取首格。结束引号后的杂字符及未闭合引号也拒绝。该解析器供网格浏览模式使用，文本编辑器内的原生粘贴不调用它。
+
+## 原生网格与定位
+
+`dataGrid(state) { ... }` 创建 `DataGrid<Row>`，消费同一模型的当前页。`DataGridProps<Row>` 与 builder 提供外框宽高、固定行高／表头高、像素 overscan、可借用的 `ScrollState`／`DataGridHandle`、字体、主题及启用状态。尺寸按主题密度缩放；明确宽高受父约束限制。默认行高 48、表头高 40、外框高度 320。模型可以被多个挂载消费，但每个挂载有自己的滚动与焦点会话；一个 handle 或 ScrollState 同时只绑定一个挂载。
+
+普通父 Element 拥有唯一滚动视口，表头与正文分别按列、按行虚拟化，每个正文行再按列虚拟化。所有条目使用本次 `LayoutInput` 中的相同列宽和滚动结果；scene 只消费自己的完整 LayoutResult。列宽复用 `TableTracks`，Auto 只测表头及声明的文字样本，不创建业务行。横向滚动只挂载可见列、冻结区和实际活动项；不为每个行列组合预建 View 或 FocusHandle。
+
+Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一套列宽和单元格实例。表头保持垂直固定，正文不能绘制或命中表头区域。窄窗口先保留 Start，再裁剪 End，中心剩余宽度可以为零；零面积不发布命中区域。
+
+`GridCellAddress(row, column)` 使用来源 key 与 `GridColumnId`。`DataGridHandle.focusCell(address)` 只接受当前结果中的有效可见列及业务 key，返回请求是否接受；真实焦点必须等布局 Accepted 后落到该格的真实 FocusHandle。`focusedCell` 反映实际焦点（包括自定义内容后代），`pendingCell`／`isPending` 反映尚未完成的请求。`cancelFocus()` 只取消定位请求。目标删除、禁用、外部焦点或新请求沿原 UI 焦点路径取消旧请求，不能在迟到帧中复活。表头排序沿模型入口执行。
+
+此批不将二维键盘、编辑、选区、自动行高或离屏列的原生 AX 动作标记为完成；这些沿同一生产组件继续实现。

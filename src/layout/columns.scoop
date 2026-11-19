@@ -1,0 +1,247 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.graphics.*
+import scoop.math.max
+import scoop.math.min
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class GridColumnsPlan<Row>(
+    val definitions: Array<GridColumn<Row>>,
+    val states: Array<GridColumnState>,
+    val appearance: GridAppearance
+) {
+    private val assembled = gridColumnSetup(definitions, states, appearance)
+    val columns: Array<GridColumn<Row>> get() = assembled.columns
+    val startCount: Long get() = assembled.startCount
+    val endStart: Long get() = assembled.endStart
+    private val lookup = HashMap<GridColumnId, Long>()
+    private var cached: GridColumnLayout? = None
+    init {
+        for (index in 0L ..< columns.size)
+            lookup.put(columns[index].id, index)
+    }
+    fun indexOf(id: GridColumnId): Long? = lookup[id]
+    fun resolve(width: Double): GridColumnLayout {
+        val result = assembled.tracks.resolve(width)
+        when (cached) {
+            case Some(val old) -> if (old.widths === result.values && old.viewport == width)
+                return old
+            case None -> {}
+        }
+        val layout =
+            GridColumnLayout(result.values, startCount, endStart, width, appearance.direction)
+        cached = Some(layout)
+        return layout
+    }
+}
+
+private class GridColumnSetup<Row>(
+    val columns: Array<GridColumn<Row>>,
+    val startCount: Long,
+    val endStart: Long,
+    val tracks: TableTracks
+)
+
+private fun <Row> gridColumnSetup(
+    definitions: Array<GridColumn<Row>>,
+    states: Array<GridColumnState>,
+    appearance: GridAppearance
+): GridColumnSetup<Row> {
+    val byId = HashMap<GridColumnId, GridColumn<Row>>()
+    for (column in definitions)
+        byId.put(column.id, column)
+    val ordered = ArrayList<GridColumn<Row>>()
+    val sizes = ArrayList<TableColumnSize>()
+    val natural = ArrayList<Double>()
+    var start = 0L
+    var end = 0L
+    for (pin in [GridPin.Start, GridPin.None, GridPin.End]) {
+        for (entry in states)
+            if (entry.visible && entry.pin == pin) {
+                val column = byId[entry.id]!!
+                ordered.add(column)
+                val size =
+                    when (entry.width) {
+                        case Some(val width) -> TableColumnSize(
+                            GridTrack.Fixed(width),
+                            column.size.minimum,
+                            column.size.maximum
+                        )
+                        case None -> column.size
+                    }
+                sizes.add(size)
+                natural.add(appearance.natural(size, column.title))
+            }
+        if (pin == GridPin.Start)
+            start = ordered.size
+        if (pin == GridPin.None)
+            end = ordered.size
+    }
+    return GridColumnSetup(
+        ordered.toArray(),
+        start,
+        end,
+        TableTracks(sizes.toArray(), natural.toArray(), appearance.density)
+    )
+}
+
+internal class GridColumnBox(val x: Double, val width: Double, val clip: Rect)
+
+/** Immutable positions for one width; only visible intervals are searched during scrolling. */
+internal class GridColumnLayout(
+    val widths: Array<Double>,
+    val startCount: Long,
+    val endStart: Long,
+    val viewport: Double,
+    val direction: LayoutDirection
+) {
+    val prefix = gridColumnPrefix(widths)
+    val total = max(prefix[widths.size], viewport)
+    val startWidth = prefix[startCount]
+    val endWidth = prefix[widths.size] - prefix[endStart]
+    val startVisible = min(startWidth, viewport)
+    val endVisible = min(endWidth, viewport - startVisible)
+    fun visible(offset: Double): Array<Long> {
+        val result = ArrayList<Long>()
+        append(result, 0L, startCount, 0.0, startVisible)
+        val left =
+            offset +
+                if (direction == LayoutDirection.Rtl)
+                    endVisible
+                else
+                    startVisible
+        val right =
+            offset +
+                viewport -
+                if (direction == LayoutDirection.Rtl)
+                    startVisible
+                else
+                    endVisible
+        if (right > left) {
+            if (direction == LayoutDirection.Rtl)
+                append(result, startCount, endStart, total - right, total - left)
+            else
+                append(result, startCount, endStart, left, right)
+        }
+        append(result, endStart, widths.size, prefix[widths.size] - endVisible, prefix[widths.size])
+        return result.toArray()
+    }
+    private fun append(
+        result: ArrayList<Long>,
+        from: Long,
+        until: Long,
+        low: Double,
+        high: Double
+    ) {
+        if (high <= low)
+            return
+        var left = from
+        var right = until
+        while (left < right) {
+            val middle = left + (right - left) / 2L
+            if (prefix[middle + 1L] <= low)
+                left = middle + 1L
+            else
+                right = middle
+        }
+        var index = left
+        while (index < until && prefix[index] < high) {
+            if (widths[index] > 0.0)
+                result.add(index)
+            index += 1L
+        }
+    }
+    fun box(index: Long, offset: Double, height: Double): GridColumnBox {
+        val rtl = direction == LayoutDirection.Rtl
+        val width = widths[index]
+        var left =
+            offset +
+                if (rtl)
+                    endVisible
+                else
+                    startVisible
+        var right =
+            offset +
+                viewport -
+                if (rtl)
+                    startVisible
+                else
+                    endVisible
+        val x =
+            if (index < startCount) {
+                left =
+                    offset +
+                        if (rtl)
+                            viewport - startVisible
+                        else
+                            0.0
+                right = left + startVisible
+                if (rtl)
+                    offset + viewport - prefix[index + 1L]
+                else
+                    offset + prefix[index]
+            } else
+                if (index >= endStart) {
+                    left =
+                        offset +
+                            if (rtl)
+                                0.0
+                            else
+                                viewport - endVisible
+                    right = left + endVisible
+                    if (rtl)
+                        offset + endWidth - (prefix[index + 1L] - prefix[endStart])
+                    else
+                        offset + viewport - endWidth + prefix[index] - prefix[endStart]
+                } else
+                    if (rtl)
+                        total - prefix[index + 1L]
+                    else
+                        prefix[index]
+        val clipLeft = max(0.0, left - x)
+        val clipRight = min(width, right - x)
+        return GridColumnBox(x, width, Rect(clipLeft, 0.0, max(0.0, clipRight - clipLeft), height))
+    }
+    fun reveal(index: Long, offset: Double): Double {
+        if (index < startCount || index >= endStart)
+            return offset
+        val leftInset =
+            if (direction == LayoutDirection.Rtl)
+                endVisible
+            else
+                startVisible
+        val rightInset =
+            if (direction == LayoutDirection.Rtl)
+                startVisible
+            else
+                endVisible
+        val x =
+            if (direction == LayoutDirection.Rtl)
+                total - prefix[index + 1L]
+            else
+                prefix[index]
+        val available = viewport - leftInset - rightInset
+        if (available <= 0.0)
+            return offset
+        return if (x < offset + leftInset || widths[index] > available)
+            max(0.0, x - leftInset)
+        else
+            if (x + widths[index] > offset + viewport - rightInset)
+                max(0.0, x + widths[index] - viewport + rightInset)
+            else
+                offset
+    }
+}
+
+private fun gridColumnPrefix(widths: Array<Double>): Array<Double> {
+    var sum = 0.0
+    val result = ArrayList<Double>()
+    result.add(sum)
+    for (width in widths) {
+        sum += width;
+        result.add(sum)
+    }
+    return result.toArray()
+}

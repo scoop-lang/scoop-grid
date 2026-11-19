@@ -1,0 +1,91 @@
+package scoop.grid.tests.window
+
+import scoop.collections.HashMap
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class WindowRows: TableSource<Long> {
+    var reads = 0L
+    public override val count: Long get() = 100000000L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long {
+        assertTrue(index >= 0L && index < count)
+        reads += 1L
+        return index
+    }
+}
+
+internal class WindowCells {
+    val live = HashMap<GridCellAddress, CellRecord>()
+    val all = ArrayList<CellRecord>()
+    fun columns(): Array<GridColumn<Long>> =
+        Array<GridColumn<Long>>(300L) {
+            column -> gridColumn<Long, Long>(
+                GridColumnId(f"column-${column}"),
+                f"Column ${column}",
+                { row -> row * 1000L + column },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(90.0)),
+                cell =
+                    Some {
+                        row ->
+                        val record =
+                            CellRecord(
+                                GridCellAddress(
+                                    ViewKey.Number(row),
+                                    GridColumnId(f"column-${column}")
+                                )
+                            )
+                        all.add(record)
+                        element(
+                            { scope -> ObservedCell(this, record, scope) },
+                            [label(f"${row}:${column}")]
+                        )
+                    }
+            )
+        }
+}
+
+internal class CellRecord(val address: GridCellAddress) {
+    var mounts = 0
+    var closes = 0
+    var measured = 0
+}
+
+private class ObservedCell(
+    private val cells: WindowCells,
+    private val record: CellRecord,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    public override fun onMount() {
+        assertFalse(cells.live.containsKey(record.address), Some("a cell was mounted twice"))
+        cells.live.put(record.address, record)
+        record.mounts += 1
+    }
+    public override fun onUnmount() {
+        cells.live.remove(record.address)
+        record.closes += 1
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        record.measured += 1
+        val child = context.measureChild(0L, constraints)
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(child, Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+    }
+}

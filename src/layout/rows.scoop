@@ -1,0 +1,218 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.graphics.*
+import scoop.math.max
+import scoop.math.min
+import scoop.ui.*
+import scoop.ui.component.TableSource
+import scoop.window.accessibility.*
+
+internal class GridRows<Row>(
+    val source: TableSource<Row>,
+    val columns: GridColumnsPlan<Row>,
+    val session: GridSession<Row>
+): ItemSource {
+    public override val count: Long get() = source.count
+    public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
+    public override fun indexOfKey(key: ViewKey): Long? = source.indexOfKey(key)
+    public override fun build(index: Long): View {
+        val cells = GridRowCells(source.rowAt(index), keyAt(index), index, columns, session)
+        return lazyElement(
+            cells,
+            GridRowProps(index, keyAt(index), columns, session),
+            { props, scope -> GridRow(props, scope) }
+        )
+    }
+    fun semantics(): ItemSemantics =
+        ItemSemantics(
+            this,
+            { _ -> Some(SemanticItemProperties(focusable = true)) },
+            grid =
+                Some(
+                    SemanticGrid(
+                        Array<SemanticGridColumn>(columns.columns.size) {
+                            index ->
+                            val column = columns.columns[index]
+                            SemanticGridColumn(
+                                SemanticItemKey.Text(column.id.value),
+                                Some(column.title)
+                            )
+                        },
+                        {
+                            key, column ->
+                            val viewKey =
+                                when (key) {
+                                    case Number(val value) -> ViewKey.Number(value);
+                                    case Text(val value) -> ViewKey.Text(value)
+                                }
+                            val index = source.indexOfKey(viewKey)
+                            when (index) {
+                                case Some(val at) -> Some(
+                                    SemanticItemProperties(
+                                        value = columns.columns[column].text(source.rowAt(at)),
+                                        focusable = true
+                                    )
+                                )
+                                case None -> None
+                            }
+                        }
+                    )
+                )
+        )
+}
+
+internal class GridBodyProps<Row>(val rows: GridRows<Row>, val session: GridSession<Row>)
+
+internal class GridBody<Row>(
+    private val props: Props<GridBodyProps<Row>>,
+    scope: ComponentScope
+): LazyElement<Rect>(scope) {
+    private val semantics = scope.semantics(SemanticRole.Table)
+    public override fun onMount() {
+        props.value.session.bodyFocus =
+            Some(
+                scope.lazyFocus(
+                    props.value.session.viewport!!,
+                    LazyFocusOptions(ItemNavigation.Roving())
+                )
+            )
+        scope.routeSemanticsChildren(Some(semantics))
+    }
+    public override fun update(): UiInvalidation {
+        val rows = props.value.rows
+        semantics.update(
+            SemanticProperties(
+                name = Some("Data grid"),
+                table = Some(SemanticTableSize(rows.count, rows.columns.columns.size))
+            )
+        )
+        semantics.updateCollection(rows, Some(rows.semantics()), props.value.session.viewport)
+        return UiInvalidation.Layout
+    }
+    public override fun measure(
+        context: LazyMeasureContext,
+        constraints: Constraints
+    ): LayoutResult<Rect> {
+        val plan = context.input<GridMeasurePlan>()
+        val offset = plan.scroll.presentationOffset
+        val selected = HashSet<Long>()
+        val first = max(0L, ((offset.y - plan.overscan) / plan.rowHeight).toLong())
+        val end =
+            min(
+                context.itemCount,
+                ((offset.y + plan.bodyHeight + plan.overscan) / plan.rowHeight).toLong() + 1L
+            )
+        if (plan.bodyHeight > 0.0 && plan.columns.viewport > 0.0)
+            for (index in first ..< end)
+                selected.add(index)
+        for (index in context.pinnedItems)
+            selected.add(index)
+        for (index in selected) {
+            context.measureItem(index, Constraints.tight(Size(plan.columns.total, plan.rowHeight)))
+            context.placeItem(
+                index,
+                Point(0.0, index.toDouble() * plan.rowHeight - plan.scroll.snapshot.offset.y)
+            )
+        }
+        return LayoutResult(
+            LayoutMetrics(constraints.constrain(Size(plan.columns.total, 0.0))),
+            Rect(
+                offset.x - plan.scroll.snapshot.offset.x,
+                offset.y - plan.scroll.snapshot.offset.y,
+                plan.columns.viewport,
+                plan.bodyHeight
+            )
+        )
+    }
+    public override fun scene(context: SceneContext, clip: Rect) {
+        context.clipRect(clip)
+        context.semantics(semantics, clip)
+        context.children()
+    }
+}
+
+internal class GridRowProps<Row>(
+    val index: Long,
+    val key: ViewKey,
+    val columns: GridColumnsPlan<Row>,
+    val session: GridSession<Row>
+)
+
+internal class GridRow<Row>(
+    private val props: Props<GridRowProps<Row>>,
+    scope: ComponentScope
+): LazyElement<Unit>(scope) {
+    private val semantics = scope.semantics(SemanticRole.Row)
+    public override fun update(): UiInvalidation {
+        scope.routeSemanticsChildren(Some(semantics))
+        return UiInvalidation.Layout
+    }
+    public override fun measure(
+        context: LazyMeasureContext,
+        constraints: Constraints
+    ): LayoutResult<Unit> {
+        val plan = context.input<GridMeasurePlan>()
+        val selected = HashSet<Long>()
+        for (index in plan.visibleColumns)
+            selected.add(index)
+        for (index in context.pinnedItems)
+            selected.add(index)
+        when (props.value.session.requested) {
+            case Some(val address) -> if (address.row == props.value.key) {
+                when (props.value.columns.indexOf(address.column)) {
+                    case Some(val index) -> selected.add(index);
+                    case None -> {}
+                }
+            }
+            case None -> {}
+        }
+        for (index in selected) {
+            val box = plan.columns.box(index, plan.scroll.presentationOffset.x, plan.rowHeight)
+            context.measureItem(
+                index,
+                Constraints.tight(Size(box.width, plan.rowHeight)),
+                LayoutInput(GridCellClip(box.clip))
+            )
+            context.placeItem(index, Point(box.x - plan.scroll.snapshot.offset.x, 0.0))
+        }
+        return LayoutResult(
+            LayoutMetrics(constraints.constrain(Size(plan.columns.total, plan.rowHeight))),
+            Unit
+        )
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.semantics(semantics, Rect(0.0, 0.0, context.size.width, context.size.height))
+        context.children()
+    }
+}
+
+internal class GridHeader(scope: ComponentScope): LazyElement<Unit>(scope) {
+    public override fun measure(
+        context: LazyMeasureContext,
+        constraints: Constraints
+    ): LayoutResult<Unit> {
+        val plan = context.input<GridMeasurePlan>()
+        val selected = HashSet<Long>()
+        for (index in plan.visibleColumns)
+            selected.add(index)
+        for (index in context.pinnedItems)
+            selected.add(index)
+        for (index in selected) {
+            val box = plan.columns.box(index, plan.scroll.presentationOffset.x, plan.headerHeight)
+            context.measureItem(
+                index,
+                Constraints.tight(Size(box.width, plan.headerHeight)),
+                LayoutInput(GridCellClip(box.clip))
+            )
+            context.placeItem(index, Point(box.x - plan.scroll.snapshot.offset.x, 0.0))
+        }
+        return LayoutResult(
+            LayoutMetrics(constraints.constrain(Size(plan.columns.total, plan.headerHeight))),
+            Unit
+        )
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+    }
+}

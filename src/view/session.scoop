@@ -1,0 +1,119 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.ui.*
+import scoop.ui.component.TableSource
+
+internal class GridCellFocus(
+    val handle: FocusHandle,
+    val target: FocusTarget,
+    val scope: ComponentScope
+)
+
+internal class GridSession<Row>: GridMount {
+    var viewport: ScrollViewport? = None
+    var bodyFocus: LazyFocus? = None
+    private var owner: ComponentScope? = None
+    private var rows: TableSource<Row>? = None
+    private var columns: GridColumnsPlan<Row>? = None
+    private var reference: DataGridHandle? = None
+    private var enabled = true
+    private var intent: GridCellAddress? = None
+    private var recent: GridColumnId? = None
+    private val cells = HashMap<GridCellAddress, GridCellFocus>()
+    public override val active: Boolean get() = owner?.isMounted ?: false
+    public override val pending: Boolean get() = active && (bodyFocus?.isPending ?: false)
+    public override val requested: GridCellAddress? get() =
+        if (pending)
+            intent
+        else
+            None
+    public override val focused: GridCellAddress? get() {
+        for ((address, cell) in cells)
+            if (cell.scope.input.activity.hasFocus)
+                return Some(address)
+        return None
+    }
+    fun mount(scope: ComponentScope, value: ScrollViewport) {
+        owner = Some(scope)
+        viewport = Some(value)
+    }
+    fun update(input: GridRootProps<Row>) {
+        rows = Some(input.rows.source)
+        columns = Some(input.columns)
+        enabled = input.input.enabled
+        val sameHandle =
+            when ((reference, input.input.handle)) {
+                case(Some(val old), Some(val next)) -> old === next
+                case(None, None) -> true
+                else -> false
+            }
+        if (!sameHandle) {
+            reference?.unbind(this)
+            reference = input.input.handle
+            reference?.bind(this)
+        }
+        when (requested) {
+            case Some(val address) -> if (!valid(address))
+                cancel()
+            case None -> {}
+        }
+    }
+    fun unmount() {
+        reference?.unbind(this)
+        reference = None
+        owner = None
+        viewport = None
+        bodyFocus = None
+        intent = None
+    }
+    private fun valid(address: GridCellAddress): Boolean {
+        val source = rows ?: return false
+        val plan = columns ?: return false
+        return enabled &&
+            source.indexOfKey(address.row) !=
+            None &&
+            plan.indexOf(address.column) !=
+            None
+    }
+    public override fun focus(address: GridCellAddress): Boolean {
+        if (!active || !valid(address))
+            return false
+        val focus = bodyFocus ?: return false
+        intent = Some(address)
+        val accepted = focus.requestFocus(address.row) { cells[address]?.handle }
+        if (!accepted)
+            intent = None
+        return accepted
+    }
+    public override fun cancel() {
+        bodyFocus?.cancelRequest()
+        intent = None
+    }
+    fun register(address: GridCellAddress, cell: GridCellFocus) {
+        gridRequire(!cells.containsKey(address), "duplicate mounted grid cell")
+        cells.put(address, cell)
+        updateOrder(address, cell)
+    }
+    fun remove(address: GridCellAddress) {
+        cells.remove(address)
+    }
+    fun remember(address: GridCellAddress) {
+        if (recent == Some(address.column))
+            return
+        recent = Some(address.column)
+        for ((key, cell) in cells)
+            updateOrder(key, cell)
+    }
+    private fun updateOrder(address: GridCellAddress, cell: GridCellFocus) {
+        cell.target.options =
+            FocusOptions(
+                Some(cell.handle),
+                order =
+                    if (recent == Some(address.column))
+                        -1
+                    else
+                        0
+            )
+    }
+}

@@ -1,0 +1,175 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.max
+import scoop.math.min
+import scoop.surface.*
+import scoop.ui.*
+
+internal class GridRootProps<Row>(
+    val input: DataGridProps<Row>,
+    val columns: GridColumnsPlan<Row>,
+    val rows: GridRows<Row>,
+    val scroll: ScrollState,
+    val session: GridSession<Row>
+)
+
+internal class GridMeasurePlan(
+    val columns: GridColumnLayout,
+    val scroll: ScrollLayout,
+    val rowHeight: Double,
+    val headerHeight: Double,
+    val bodyHeight: Double,
+    val overscan: Double,
+    val visibleColumns: Array<Long>
+)
+
+internal class GridRoot<Row>(private val props: Props<GridRootProps<Row>>, scope: ComponentScope):
+Element<GridMeasurePlan>(scope) {
+    private val viewport = scope.scrollViewport(props.value.scroll)
+    private val area = scope.createArea { context, event -> handle(context, event) }
+    private val pan = scope.scrollPan(area, viewport)
+    init {
+        area.scope.defaultAction = { context, event -> handle(context, event) }
+        scope.routeChildren(area)
+        props.value.session.mount(scope, viewport)
+    }
+    public override fun update(): UiInvalidation {
+        val input = props.value
+        viewport.state = input.scroll
+        area.scope.enabled = input.input.enabled
+        input.session.update(input)
+        return UiInvalidation.Layout
+    }
+    public override fun onUnmount() {
+        props.value.session.unmount()
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        GridMeasurePlan
+    > {
+        val input = props.value
+        val density = input.columns.appearance.density
+        val size =
+            constraints.constrain(
+                Size(
+                    input.input.width?.times(density) ?: (constraints.maxWidth ?: 640.0 * density),
+                    input.input.height * density
+                )
+            )
+        val columns = input.columns.resolve(size.width)
+        val rowHeight = input.input.rowHeight * density
+        val headerHeight = min(size.height, input.input.headerHeight * density)
+        val bodyExtent = input.rows.count.toDouble() * rowHeight
+        gridRequire(bodyExtent.isFinite(), "grid row extent overflow")
+        val content = Size(columns.total, bodyExtent + headerHeight)
+        val bodyHeight = max(0.0, size.height - headerHeight)
+        var scroll = viewport.layout(size, content)
+        when (input.session.bodyFocus?.pendingItem ?: None) {
+            case Some(val key) -> when (input.rows.indexOfKey(key)) {
+                case Some(val index) -> {
+                    val old = scroll.snapshot.offset
+                    val top = index.toDouble() * rowHeight
+                    val y =
+                        if (top < old.y || rowHeight > bodyHeight)
+                            top
+                        else
+                            if (top + rowHeight > old.y + bodyHeight)
+                                top + rowHeight - bodyHeight
+                            else
+                                old.y
+                    val target = input.session.requested
+                    val column =
+                        if (target?.row == Some(key))
+                            input.columns.indexOf(target!!.column)
+                        else
+                            None
+                    val x =
+                        when (column) {
+                            case Some(val at) -> columns.reveal(at, old.x)
+                            case None -> old.x
+                        }
+                    scroll =
+                        viewport.layout(
+                            size,
+                            content,
+                            Some(ScrollAdjustment(input.scroll.requestRevision, Point(x, y)))
+                        )
+                }
+                case None -> {}
+            }
+            case None -> {}
+        }
+        val plan =
+            GridMeasurePlan(
+                columns,
+                scroll,
+                rowHeight,
+                headerHeight,
+                bodyHeight,
+                input.input.overscan * density,
+                columns.visible(scroll.presentationOffset.x)
+            )
+        val shared = LayoutInput(plan)
+        context.measureChild(0L, Constraints.tight(Size(columns.total, headerHeight)), shared)
+        context.placeChild(0L, Point(0.0, scroll.presentationOffset.y - scroll.snapshot.offset.y))
+        context.measureChild(1L, Constraints.tight(Size(columns.total, bodyExtent)), shared)
+        context.placeChild(1L, Point(0.0, headerHeight))
+        return LayoutResult(LayoutMetrics(size), plan)
+    }
+    public override fun scene(context: SceneContext, plan: GridMeasurePlan) {
+        val bounds = Rect(0.0, 0.0, context.size.width, context.size.height)
+        val color = props.value.columns.appearance.theme.tokens.palette.background.background
+        context.draw { paint -> paint.canvas.drawRect(bounds, Paint(color)) }
+        context.place(area, bounds)
+        viewport.present(
+            context,
+            plan.scroll,
+            Some { content -> content.children([1L, 0L]) },
+            plan.scroll.snapshot.offset
+        )
+        val line = props.value.columns.appearance.density
+        val border = props.value.columns.appearance.theme.tokens.palette.border
+        val rtl = plan.columns.direction == LayoutDirection.Rtl
+        context.draw {
+            paint ->
+            if (plan.columns.startVisible > 0.0) {
+                val x =
+                    if (rtl)
+                        bounds.width - plan.columns.startVisible
+                    else
+                        plan.columns.startVisible - line
+                paint.canvas.drawRect(
+                    Rect(max(0.0, x), 0.0, min(line, bounds.width), bounds.height),
+                    Paint(border)
+                )
+            }
+            if (plan.columns.endVisible > 0.0) {
+                val x =
+                    if (rtl)
+                        plan.columns.endVisible - line
+                    else
+                        bounds.width - plan.columns.endVisible
+                paint.canvas.drawRect(
+                    Rect(max(0.0, x), 0.0, min(line, bounds.width), bounds.height),
+                    Paint(border)
+                )
+            }
+        }
+    }
+    private fun handle(context: RoutedEventContext, event: InputEvent) {
+        if (context.phase != RoutedPhase.Default || !props.value.input.enabled)
+            return
+        when (event) {
+            case Pointer(InputPointerEvent.Wheel(_, _, val phase, val momentum)) ->
+            viewport.consumeScroll(
+                context,
+                40.0 * props.value.columns.appearance.density,
+                ScrollAxes.Both,
+                ScrollChain.Chain,
+                phase,
+                momentum
+            )
+            else -> {}
+        }
+    }
+}

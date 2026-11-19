@@ -1,0 +1,75 @@
+package scoop.grid
+
+import scoop.platform.concurrent.currentThreadId
+import scoop.ui.*
+
+public struct GridCellAddress(val row: ViewKey, val column: GridColumnId): Equals<
+    GridCellAddress
+>, Hash {
+    public override operator fun equals(other: GridCellAddress): Boolean =
+        row == other.row && column == other.column
+    public override fun hash(): Long = row.hash() xor column.hash()
+}
+
+public class DataGridHandle public constructor() {
+    private val thread = currentThreadId()
+    private val guard = state(Unit)
+    private var target: GridMount? = None
+    private fun checkThread() {
+        if (currentThreadId() != thread)
+            throw IllegalStateException(Some("grid handle used from another thread"))
+    }
+    public val isAttached: Boolean get() {
+        checkThread();
+        return target?.active ?: false
+    }
+    public val isPending: Boolean get() {
+        checkThread();
+        return target?.pending ?: false
+    }
+    public val focusedCell: GridCellAddress? get() {
+        checkThread();
+        return target?.focused ?: None
+    }
+    public val pendingCell: GridCellAddress? get() {
+        checkThread();
+        return target?.requested ?: None
+    }
+    public fun focusCell(address: GridCellAddress): Boolean {
+        guard.checkMutation()
+        gridRequire(address.row != ViewKey.Position, "grid focus requires an explicit row key")
+        return target?.focus(address) ?: false
+    }
+    public fun cancelFocus() {
+        guard.checkMutation()
+        target?.cancel()
+    }
+    internal fun bind(value: GridMount) {
+        checkThread()
+        when (target) {
+            case Some(val old) -> gridRequire(
+                old === value || !old.active,
+                "grid handle already has a mount"
+            )
+            case None -> {}
+        }
+        target = Some(value)
+    }
+    internal fun unbind(value: GridMount) {
+        checkThread()
+        when (target) {
+            case Some(val old) -> if (old === value)
+                target = None
+            case None -> {}
+        }
+    }
+}
+
+internal interface GridMount {
+    val active: Boolean
+    val pending: Boolean
+    val focused: GridCellAddress?
+    val requested: GridCellAddress?
+    fun focus(address: GridCellAddress): Boolean
+    fun cancel()
+}

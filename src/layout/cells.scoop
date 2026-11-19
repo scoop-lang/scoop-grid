@@ -1,0 +1,253 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.max
+import scoop.math.min
+import scoop.ui.*
+import scoop.window.accessibility.*
+
+internal class GridCellClip(val bounds: Rect)
+
+internal class GridRowCells<Row>(
+    private val row: Row,
+    private val rowKey: ViewKey,
+    private val rowIndex: Long,
+    private val columns: GridColumnsPlan<Row>,
+    private val session: GridSession<Row>
+): ItemSource {
+    public override val count: Long get() = columns.columns.size
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Text(columns.columns[index].id.value)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Text(val value) -> if (value == "")
+                None
+            else
+                columns.indexOf(GridColumnId(value))
+            else -> None
+        }
+    public override fun build(index: Long): View {
+        val column = columns.columns[index]
+        return element(
+            GridCellProps(
+                Some(GridCellAddress(rowKey, column.id)),
+                rowIndex,
+                index,
+                column.id,
+                column.text(row),
+                columns.appearance,
+                Some(session)
+            ),
+            { props, scope -> GridCell(props, scope) },
+            [column.cell(row)]
+        )
+    }
+}
+
+internal class GridHeaderCells<Row>(
+    private val columns: GridColumnsPlan<Row>,
+    private val model: DataGridState<Row>
+): ItemSource {
+    public override val count: Long get() = columns.columns.size
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Text(columns.columns[index].id.value)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Text(val value) -> if (value == "")
+                None
+            else
+                columns.indexOf(GridColumnId(value))
+            else -> None
+        }
+    public override fun build(index: Long): View {
+        val column = columns.columns[index]
+        var title = column.title
+        for (sort in model.query.sorting)
+            if (sort.column == column.id)
+                title += if (sort.direction == GridSortDirection.Ascending)
+                    " ↑"
+                else
+                    " ↓"
+        return element(
+            GridCellProps<Row>(
+                None,
+                0L,
+                index,
+                column.id,
+                Some(column.title),
+                columns.appearance,
+                None,
+                column.sortable,
+                if (column.sortable)
+                    Some { model.toggleSort(column.id) }
+                else
+                    None
+            ),
+            { props, scope -> GridCell(props, scope) },
+            [columns.appearance.label(title)]
+        )
+    }
+}
+
+internal class GridCellProps<Row>(
+    val address: GridCellAddress?,
+    val row: Long,
+    val column: Long,
+    val id: GridColumnId,
+    val text: String?,
+    val appearance: GridAppearance,
+    val session: GridSession<Row>?,
+    val tabStop: Boolean = true,
+    val activate: (() -> Unit)? = None
+)
+
+internal class GridCell<Row>(
+    private val props: Props<GridCellProps<Row>>,
+    scope: ComponentScope
+): Element<Rect>(scope) {
+    private val handle = FocusHandle()
+    private val area = scope.createArea(focusable = true)
+    private val focus = scope.focusTarget(area, FocusOptions(Some(handle), props.value.tabStop))
+    private val semantics =
+        scope.semantics(
+            if (props.value.address == None)
+                SemanticRole.ColumnHeader
+            else
+                SemanticRole.Cell
+        )
+    private val press = scope.press(area) { activate() }
+    private var registered: GridCellAddress? = None
+    init {
+        scope.routeChildren(area)
+        scope.routeSemanticsChildren(Some(semantics))
+        semantics.mergeLabels = true
+        semantics.bindFocus(Some(focus))
+        scope.resource {
+            scope.input.observeActivity {
+                if (scope.input.activity.hasFocus) {
+                    when (props.value.address) {
+                        case Some(val address) -> props.value.session?.remember(address);
+                        case None -> {}
+                    }
+                }
+                if (scope.isMounted)
+                    scope.requestFrame()
+            }
+        }
+    }
+    public override fun onMount() {
+        when (props.value.address) {
+            case Some(val address) -> {
+                props.value.session!!.register(address, GridCellFocus(handle, focus, scope))
+                registered = Some(address)
+            }
+            case None -> {}
+        }
+    }
+    public override fun onUnmount() {
+        when (registered) {
+            case Some(val address) -> props.value.session?.remove(address);
+            case None -> {}
+        }
+    }
+    public override fun update(): UiInvalidation {
+        val input = props.value
+        semantics.update(
+            SemanticProperties(
+                name =
+                    if (input.address == None)
+                        input.text
+                    else
+                        None,
+                value =
+                    if (input.address == None)
+                        None
+                    else
+                        input.text,
+                readOnly = true,
+                cell =
+                    if (input.address == None)
+                        None
+                    else
+                        Some(
+                            SemanticTableCell(
+                                input.row,
+                                input.column,
+                                columnKey = Some(SemanticItemKey.Text(input.id.value))
+                            )
+                        )
+            )
+        )
+        if (input.address == None)
+            focus.options = FocusOptions(Some(handle), input.tabStop)
+        return UiInvalidation.Layout
+    }
+    private fun activate() {
+        when (props.value.activate) {
+            case Some(val action) -> action()
+            case None -> handle.requestFocus()
+        }
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Rect
+    > {
+        val clip = context.input<GridCellClip>().bounds
+        val size = constraints.constrain(Size(0.0, 0.0))
+        val inset = min(props.value.appearance.padding, min(size.width, size.height) / 2.0)
+        val child =
+            context.measureChild(
+                0L,
+                Constraints(
+                    maxWidth = Some(max(0.0, size.width - inset * 2.0)),
+                    maxHeight = Some(max(0.0, size.height - inset * 2.0))
+                )
+            )
+        context.placeChild(
+            0L,
+            Point(
+                if (context.layoutDirection == LayoutDirection.Rtl)
+                    max(inset, size.width - inset - child.size.width)
+                else
+                    inset,
+                max(inset, (size.height - child.size.height) / 2.0)
+            )
+        )
+        return LayoutResult(LayoutMetrics(size), clip)
+    }
+    public override fun scene(context: SceneContext, clip: Rect) {
+        val input = props.value
+        val bounds = Rect(0.0, 0.0, context.size.width, context.size.height)
+        val palette = input.appearance.theme.tokens.palette
+        val background =
+            if (input.address == None)
+                palette.muted.background
+            else
+                palette.background.background
+        val focused = handle.isFocusVisible
+        val line = input.appearance.density
+        context.clipRect(clip)
+        context.draw {
+            paint ->
+            paint.canvas.drawRect(bounds, Paint(background))
+            paint.canvas.drawRect(
+                Rect(0.0, max(0.0, bounds.height - line), bounds.width, min(line, bounds.height)),
+                Paint(palette.border)
+            )
+            paint.canvas.drawRect(
+                Rect(max(0.0, bounds.width - line), 0.0, min(line, bounds.width), bounds.height),
+                Paint(palette.border)
+            )
+        }
+        context.place(area, bounds)
+        context.semantics(semantics, bounds)
+        context.children()
+        if (focused)
+            context.draw {
+                paint ->
+                val stroke = min(2.0 * line, min(bounds.width, bounds.height))
+                val ink = Paint(palette.ring)
+                paint.canvas.drawRect(Rect(0.0, 0.0, bounds.width, stroke), ink)
+                paint.canvas.drawRect(Rect(0.0, bounds.height - stroke, bounds.width, stroke), ink)
+                paint.canvas.drawRect(Rect(0.0, 0.0, stroke, bounds.height), ink)
+                paint.canvas.drawRect(Rect(bounds.width - stroke, 0.0, stroke, bounds.height), ink)
+            }
+    }
+}

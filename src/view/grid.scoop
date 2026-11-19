@@ -1,0 +1,65 @@
+package scoop.grid
+
+import scoop.ui.*
+import scoop.ui.style.*
+
+public class DataGrid<Row> public constructor(
+    private val props: Props<DataGridProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private val ownScroll = ScrollState()
+    private val session = GridSession<Row>()
+    private var ambient: ThemeSource? = None
+    private var plan: GridColumnsPlan<Row>? = None
+    private var fontRevision = -1L
+    public override fun onMount() {
+        when (props.value.theme) {
+            case None -> ambient = Some(currentThemeSource());
+            case Some(_) -> {}
+        }
+    }
+    public override fun render(): View {
+        val input = props.value
+        val source = input.theme ?: (ambient ?: currentThemeSource())
+        val theme = source.read(scope)
+        val fonts = input.fonts ?: scope.defaultFonts
+        val columns = input.state.columns
+        val states = input.state.columnState
+        val direction = scope.layoutDirection
+        val reuse =
+            when (plan) {
+                case Some(val old) -> old.definitions ===
+                    columns &&
+                    old.states ===
+                    states &&
+                    old.appearance.theme ===
+                    theme &&
+                    old.appearance.fonts ===
+                    fonts &&
+                    old.appearance.direction ==
+                    direction &&
+                    fontRevision ==
+                    fonts.revision
+                case None -> false
+            }
+        if (!reuse) {
+            plan = Some(GridColumnsPlan(columns, states, GridAppearance(theme, fonts, direction)))
+            fontRevision = fonts.revision
+        }
+        val layout = plan!!
+        val rows = GridRows(input.state.result.rows, layout, session)
+        val header = GridHeaderCells(layout, input.state)
+        return element(
+            GridRootProps(input, layout, rows, input.scroll ?: ownScroll, session),
+            { props, scope -> GridRoot(props, scope) },
+            [
+                lazyElement(header, { scope -> GridHeader(scope) }),
+                lazyElement(
+                    rows,
+                    GridBodyProps(rows, session),
+                    { props, scope -> GridBody(props, scope) }
+                )
+            ]
+        )
+    }
+}
