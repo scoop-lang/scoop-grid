@@ -18,13 +18,18 @@ private class GridWindowTest {
     @Test
     fun `wide native grid virtualizes both axes and focuses exact keyed cells with one frozen instance`() {
         val probe = GridWindowProbe()
-        context(ThemeSource(shadcnTheme())) {
-            UiHost { host, active, event -> probe.event(host, active, event) }.use {
-                host -> Application().run(host)
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
             }
+        } finally {
+            probe.editing.ime.close()
         }
         assertEquals(9, probe.phase)
         assertTrue(probe.navigation.finished)
+        assertTrue(probe.editing.finished)
         assertFalse(probe.navigation.handle.isAttached)
         assertFalse(probe.navigation.first.isAttached)
         assertFalse(probe.navigation.second.isAttached)
@@ -40,7 +45,8 @@ private class GridWindowTest {
 }
 
 internal class GridWindowProbe {
-    val navigation = GridNavigationProbe()
+    val editing = GridEditingProbe()
+    val navigation = GridNavigationProbe(editing)
     val rows = WindowRows()
     val cells = WindowCells()
     val model = DataGridState(rows, cells.columns())
@@ -79,9 +85,9 @@ internal class GridWindowProbe {
             }
             case NewEvents(StartCause.Deadline) -> fail(
                 Some(
-                    f"grid timeout at phase ${phase}, navigation=${navigation.phase}, cells=${
-                        cells.live.size
-                    }, pending=${handle.isPending}"
+                    f"grid timeout at phase ${phase}, navigation=${navigation.phase}, editing=${
+                        editing.phase
+                    }, cells=${cells.live.size}, pending=${handle.isPending}"
                 )
             )
             else -> {}
@@ -184,6 +190,8 @@ private class WindowScene(
     public override fun render(): View {
         val probe = this.probe
         val active = this.active
+        if (probe.editing.visible.value)
+            return component({ scope -> EditingScene(probe.editing, active, scope) })
         if (probe.navigation.visible.value)
             return component({ scope -> NavigationScene(probe.navigation, active, scope) })
         return element(

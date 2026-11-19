@@ -11,6 +11,7 @@ coordinate = "scoop.grid.examples:basic:0.1.0"
 kind = "executable"
 dependencies = [
     "scoop:scoop.core:0.1.0",
+    "scoop:scoop.graphics:0.1.0",
     "scoop:scoop.grid:0.1.0",
     "scoop:scoop.std:0.1.0",
     "scoop:scoop.ui.component:0.1.0",

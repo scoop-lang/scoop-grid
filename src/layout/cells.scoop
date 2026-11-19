@@ -29,40 +29,17 @@ internal class GridRowCells<Row>(
         }
     public override fun build(index: Long): View {
         val column = columns.columns[index]
-        val content = GridContentHandle()
-        return element(
-            GridCellProps(
-                Some(GridCellAddress(rowKey, column.id)),
-                rowIndex,
-                index,
-                column.id,
-                column.text(row),
-                columns.appearance,
-                Some(session),
-                content = Some(content)
-            ),
-            { props, scope -> GridCell(props, scope) },
-            [
-                element(
-                    content,
-                    { props, scope -> GridContent(props, scope) },
-                    [
-                        column.cell(
-                            row,
-                            Some(columns.appearance.fonts),
-                            Some(columns.appearance.body),
-                            Some(columns.appearance.paragraph)
-                        )
-                    ]
-                )
-            ]
+        return component(
+            GridDataCellProps(row, rowKey, rowIndex, index, column, columns.appearance, session),
+            { props, scope -> GridDataCell(props, scope) }
         )
     }
 }
 
 internal class GridHeaderCells<Row>(
     private val columns: GridColumnsPlan<Row>,
-    private val model: DataGridState<Row>
+    private val model: DataGridState<Row>,
+    private val session: GridSession<Row>
 ): ItemSource {
     public override val count: Long get() = columns.columns.size
     public override fun keyAt(index: Long): ViewKey = ViewKey.Text(columns.columns[index].id.value)
@@ -94,7 +71,7 @@ internal class GridHeaderCells<Row>(
                 None,
                 column.sortable,
                 if (column.sortable)
-                    Some { model.toggleSort(column.id) }
+                    Some { session.editing.leave { model.toggleSort(column.id) } }
                 else
                     None
             ),
@@ -114,7 +91,10 @@ internal class GridCellProps<Row>(
     val session: GridSession<Row>?,
     val tabStop: Boolean = true,
     val activate: (() -> Unit)? = None,
-    val content: GridContentHandle? = None
+    val content: GridContentHandle? = None,
+    val editable: Boolean = false,
+    val error: String? = None,
+    val submitting: Boolean = false
 )
 
 internal class GridCell<Row>(
@@ -184,7 +164,11 @@ internal class GridCell<Row>(
                         None
                     else
                         input.text,
-                readOnly = true,
+                readOnly = !input.editable,
+                invalid = input.error != None,
+                description = input.error,
+                error = input.error,
+                busy = input.submitting,
                 cell =
                     if (input.address == None)
                         None
@@ -205,7 +189,10 @@ internal class GridCell<Row>(
     private fun activate() {
         when (props.value.activate) {
             case Some(val action) -> action()
-            case None -> handle.requestFocus()
+            case None -> when (props.value.address) {
+                case Some(val address) -> props.value.session?.focus(address)
+                case None -> handle.requestFocus()
+            }
         }
     }
     private fun keyboard(context: RoutedEventContext, event: InputEvent) {
@@ -225,9 +212,30 @@ internal class GridCell<Row>(
                             LogicalKey.Named(NamedKey.F2)
                     )
             ) {
-                if (props.value.content?.enter() ?: false)
+                if (props.value.editable) {
+                    props.value.session?.beginEdit(address)
                     context.consume()
+                } else
+                    if (props.value.content?.enter() ?: false)
+                        context.consume()
                 return
+            }
+            val edit = props.value.session?.editing?.cell(address) ?: None
+            when (edit) {
+                case Some(val active) -> {
+                    if (key.logicalKey == LogicalKey.Named(NamedKey.Escape)) {
+                        if (!active.draft.composing)
+                            props.value.session?.cancelEdit()
+                        context.consume()
+                        return
+                    }
+                    if (key.logicalKey == LogicalKey.Named(NamedKey.Enter)) {
+                        props.value.session?.commitEdit()
+                        context.consume()
+                        return
+                    }
+                }
+                case None -> {}
             }
             if (!handle.hasFocus && key.logicalKey == LogicalKey.Named(NamedKey.Escape)) {
                 if (handle.requestFocus(FocusOrigin.Keyboard))

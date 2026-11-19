@@ -5,13 +5,15 @@ import scoop.math.max
 import scoop.math.min
 import scoop.surface.*
 import scoop.ui.*
+import scoop.ui.style.ThemeSource
 
 internal class GridRootProps<Row>(
     val input: DataGridProps<Row>,
     val columns: GridColumnsPlan<Row>,
     val rows: GridRows<Row>,
     val scroll: ScrollState,
-    val session: GridSession<Row>
+    val session: GridSession<Row>,
+    val theme: ThemeSource
 )
 
 internal class GridMeasurePlan(
@@ -27,12 +29,16 @@ internal class GridMeasurePlan(
 internal class GridRoot<Row>(private val props: Props<GridRootProps<Row>>, scope: ComponentScope):
 Element<GridMeasurePlan>(scope) {
     private val viewport = scope.scrollViewport(props.value.scroll)
-    private val area = scope.createArea { context, event -> handle(context, event) }
+    private val entry = FocusHandle()
+    private val area =
+        scope.createArea(focusable = true) { context, event -> handle(context, event) }
+    private val target = scope.focusTarget(area, FocusOptions(Some(entry), tabStop = false))
     private val pan = scope.scrollPan(area, viewport)
     init {
         area.scope.defaultAction = { context, event -> handle(context, event) }
         scope.routeChildren(area)
         props.value.session.mount(scope, viewport)
+        props.value.session.entry = Some(entry)
     }
     public override fun update(): UiInvalidation {
         val input = props.value

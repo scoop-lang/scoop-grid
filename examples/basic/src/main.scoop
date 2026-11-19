@@ -1,15 +1,23 @@
 package scoop.grid.examples.basic
 
+import scoop.collections.HashMap
+import scoop.graphics.Paint
 import scoop.grid.*
 import scoop.ui.*
 import scoop.ui.component.*
 import scoop.ui.style.*
 import scoop.ui.style.shadcn.shadcnTheme
 
-private class SampleRows: TableSource<Long> {
+private class SampleRow(val id: Long, val name: String, val amount: Long)
+
+/** Only edited rows are stored; each source snapshot owns its private map. */
+private class SampleRows(private val changes: HashMap<Long, SampleRow> = HashMap()): TableSource<
+    SampleRow
+> {
     public override val count: Long get() = 100000L
     public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
-    public override fun rowAt(index: Long): Long = index + 1L
+    public override fun rowAt(index: Long): SampleRow =
+        changes[index] ?: SampleRow(index + 1L, f"记录 ${index + 1L}", (index + 1L) * 10L)
     public override fun indexOfKey(key: ViewKey): Long? =
         when (key) {
             case Number(val index) -> if (index >= 0L && index < count)
@@ -18,23 +26,89 @@ private class SampleRows: TableSource<Long> {
                 None
             else -> None
         }
+    fun replacing(row: SampleRow): SampleRows {
+        val next = HashMap<Long, SampleRow>()
+        for ((key, value) in changes)
+            next.put(key, value)
+        next.put(row.id - 1L, row)
+        return SampleRows(next)
+    }
 }
 
 private class GridExample(scope: ComponentScope): Component(scope) {
-    private val model =
-        DataGridState(
-            SampleRows(),
-            Array<GridColumn<Long>>(40L) {
-                column -> if (column == 1L)
-                    gridColumn<Long, String>(
-                        GridColumnId("name"),
-                        "名称",
-                        { row -> f"记录 ${row}" },
-                        gridTextValues(),
-                        TableColumnSize(GridTrack.Fixed(160.0))
+    private var rows = SampleRows()
+    private val model = DataGridState(rows, columns())
+    private val handle = DataGridHandle()
+    private val lastEdit = state("名称与金额可编辑")
+    private fun save(row: SampleRow, completion: GridCommit<SampleRow>) {
+        val next = rows.replacing(row)
+        if (completion.accept(next))
+            rows = next
+    }
+    private fun columns(): Array<GridColumn<SampleRow>> {
+        val example = this
+        return Array<GridColumn<SampleRow>>(40L) {
+            column -> if (column == 1L)
+                gridColumn<SampleRow, String>(
+                    GridColumnId("name"),
+                    "名称",
+                    { row -> row.name },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(200.0)),
+                    edit =
+                        Some(
+                            gridEdit<SampleRow, String>(
+                                { value -> gridTextEditor(value) },
+                                {
+                                    change,
+                                    completion -> example.save(
+                                        SampleRow(change.row.id, change.value, change.row.amount),
+                                        completion
+                                    )
+                                },
+                                validate =
+                                    {
+                                        _,
+                                        value -> if (value == "")
+                                            Some("名称不能为空")
+                                        else
+                                            None
+                                    }
+                            )
+                        )
+                )
+            else
+                if (column == 2L)
+                    gridColumn<SampleRow, Long>(
+                        GridColumnId("amount"),
+                        "金额",
+                        { row -> row.amount },
+                        gridLongValues(),
+                        TableColumnSize(GridTrack.Fixed(180.0)),
+                        edit =
+                            Some(
+                                gridEdit<SampleRow, Long>(
+                                    { value -> gridLongEditor(value) },
+                                    {
+                                        change,
+                                        completion -> example.save(
+                                            SampleRow(change.row.id, change.row.name, change.value),
+                                            completion
+                                        )
+                                    },
+                                    validate =
+                                        {
+                                            _,
+                                            value -> if (value < 0L)
+                                                Some("金额不能为负数")
+                                            else
+                                                None
+                                        }
+                                )
+                            )
                     )
                 else
-                    gridColumn<Long, Long>(
+                    gridColumn<SampleRow, Long>(
                         GridColumnId(f"metric-${column}"),
                         if (column == 0L)
                             "序号"
@@ -42,24 +116,50 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                             f"指标 ${column}",
                         {
                             row -> if (column == 0L)
-                                row
+                                row.id
                             else
-                                row * (column + 1L)
+                                row.id * (column + 1L)
                         },
                         gridLongValues(),
                         TableColumnSize(GridTrack.Fixed(112.0))
                     )
-            }
-        )
+        }
+    }
     init {
         model.setColumnState(GridColumnState(GridColumnId("metric-0"), pin = GridPin.Start))
         model.setColumnState(GridColumnState(GridColumnId("metric-39"), pin = GridPin.End))
     }
-    public override fun render(): View =
-        dataGrid(model) {
-            height = 600.0;
-            rowHeight = 36.0
+    public override fun render(): View {
+        val model = this.model
+        val handle = this.handle
+        val lastEdit = this.lastEdit
+        val theme = currentThemeSource().read(scope)
+        val content =
+            column {
+                label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
+                add(
+                    dataGrid(model) {
+                        height = 560.0
+                        rowHeight = 64.0
+                        this.handle = Some(handle)
+                        onEditEnd =
+                            {
+                                event -> lastEdit.value =
+                                    when (event.reason) {
+                                        case Accepted -> "已保存"
+                                        case Unchanged -> "内容未变"
+                                        case Cancelled -> "已取消编辑"
+                                        else -> "编辑已结束"
+                                    }
+                            }
+                    }
+                )
+                label(handle.editError ?: lastEdit.value)
+            }
+        return styled(content) {
+            style { background = Some(Paint(theme.tokens.palette.background.background)) }
         }
+    }
 }
 
 fun main() {

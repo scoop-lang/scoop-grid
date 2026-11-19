@@ -14,7 +14,12 @@ public struct GridCellAddress(val row: ViewKey, val column: GridColumnId): Equal
 public class DataGridHandle public constructor() {
     private val thread = currentThreadId()
     private val guard = state(Unit)
-    private var target: GridMount? = None
+    private val binding = state<GridMount?>(None)
+    private var target: GridMount?
+    get() = binding.value
+    set(value) {
+        binding.value = value
+    }
     private fun checkThread() {
         if (currentThreadId() != thread)
             throw IllegalStateException(Some("grid handle used from another thread"))
@@ -34,6 +39,31 @@ public class DataGridHandle public constructor() {
     public val pendingCell: GridCellAddress? get() {
         checkThread();
         return target?.requested ?: None
+    }
+    public val editingCell: GridCellAddress? get() {
+        checkThread()
+        return target?.editingCell ?: None
+    }
+    public val editError: String? get() {
+        checkThread()
+        return target?.editError ?: None
+    }
+    public val isSubmitting: Boolean get() {
+        checkThread()
+        return target?.submitting ?: false
+    }
+    public fun beginEdit(address: GridCellAddress): Boolean {
+        guard.checkMutation()
+        gridRequire(address.row != ViewKey.Position, "grid editing requires an explicit row key")
+        return target?.beginEdit(address) ?: false
+    }
+    public fun commitEdit(): GridEditAttempt {
+        guard.checkMutation()
+        return target?.commitEdit() ?: GridEditAttempt.NoEdit
+    }
+    public fun cancelEdit(): Boolean {
+        guard.checkMutation()
+        return target?.cancelEdit() ?: false
     }
     public fun focusCell(address: GridCellAddress): Boolean {
         guard.checkMutation()
@@ -70,6 +100,12 @@ internal interface GridMount {
     val pending: Boolean
     val focused: GridCellAddress?
     val requested: GridCellAddress?
+    val editingCell: GridCellAddress?
+    val editError: String?
+    val submitting: Boolean
     fun focus(address: GridCellAddress): Boolean
     fun cancel()
+    fun beginEdit(address: GridCellAddress): Boolean
+    fun commitEdit(): GridEditAttempt
+    fun cancelEdit(): Boolean
 }

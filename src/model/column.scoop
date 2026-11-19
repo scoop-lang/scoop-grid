@@ -15,6 +15,7 @@ public interface GridColumn<Row> {
     public val filterable: Boolean
     public val exportable: Boolean
     public val missingLast: Boolean
+    public val editing: GridColumnEditing<Row>?
     public fun cell(
         row: Row,
         fonts: FontCollection? = None,
@@ -38,7 +39,8 @@ public fun <Row, T> gridColumn(
     sortable: Boolean = true,
     filterable: Boolean = true,
     exportable: Boolean = true,
-    missingLast: Boolean = true
+    missingLast: Boolean = true,
+    edit: GridEditSpec<Row, T>? = None
 ): GridColumn<Row> =
     TypedGridColumn(
         id,
@@ -50,7 +52,8 @@ public fun <Row, T> gridColumn(
         sortable,
         filterable,
         exportable,
-        missingLast
+        missingLast,
+        edit
     )
 
 private class TypedGridColumn<Row, T>(
@@ -63,8 +66,10 @@ private class TypedGridColumn<Row, T>(
     public override val sortable: Boolean,
     public override val filterable: Boolean,
     public override val exportable: Boolean,
-    public override val missingLast: Boolean
+    public override val missingLast: Boolean,
+    edit: GridEditSpec<Row, T>?
 ): GridColumn<Row> {
+    public override val editing: GridColumnEditing<Row>? = edit?.bind(value)
     public override fun cell(
         row: Row,
         fonts: FontCollection?,
@@ -115,6 +120,7 @@ private class ActionGridColumn<Row>(
     public override val filterable: Boolean get() = false
     public override val exportable: Boolean get() = false
     public override val missingLast: Boolean get() = true
+    public override val editing: GridColumnEditing<Row>? get() = None
     public override fun cell(
         row: Row,
         fonts: FontCollection?,

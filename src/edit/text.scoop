@@ -1,0 +1,74 @@
+package scoop.grid
+
+import scoop.text.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.text.TextEditorState
+
+public class GridTextEditor<T> public constructor(
+    initial: T,
+    format: (T) -> String,
+    private val parse: (String) -> GridCandidate<T>,
+    public val multiline: Boolean = false
+): GridEditor<T> {
+    public val state: TextEditorState = TextEditorState(format(initial))
+    public override val composing: Boolean get() = state.isComposing
+    public override fun candidate(): GridCandidate<T> = parse(state.committedText)
+    public override fun cancelComposition() {
+        state.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        val configure: InputBuilder.() -> Unit =
+            {
+                focus = FocusOptions(Some(options.focus))
+                fonts = Some(options.fonts)
+                theme = Some(options.theme)
+                invalid = options.error != None
+                description =
+                    if (options.submitting)
+                        "正在保存…"
+                    else
+                        options.error ?: ""
+                readOnly = options.submitting
+                onSubmit = { _ -> options.onSubmit() }
+                onEdited = { _ -> options.onEdited() }
+            }
+        return if (multiline)
+            textarea(state) {
+                configure(this)
+                rows = 1L
+            }
+        else
+            input(state, configure)
+    }
+}
+
+public fun gridTextEditor(value: String, multiline: Boolean = false): GridTextEditor<String> =
+    GridTextEditor(value, { text -> text }, { text -> GridCandidate.Value(text) }, multiline)
+
+public fun gridLongEditor(value: Long): GridTextEditor<Long> =
+    GridTextEditor(
+        value,
+        { number -> f"${number}" },
+        {
+            text -> when (text.toLongOrNone()) {
+                case Some(val number) -> GridCandidate.Value(number)
+                case None -> GridCandidate.Rejected("请输入有效整数")
+            }
+        }
+    )
+
+public fun gridDoubleEditor(value: Double): GridTextEditor<Double> =
+    GridTextEditor(
+        value,
+        { number -> f"${number}" },
+        {
+            text -> when (text.toDoubleOrNone()) {
+                case Some(val number) -> if (number.isFinite())
+                    GridCandidate.Value(number)
+                else
+                    GridCandidate.Rejected("请输入有限数值")
+                case None -> GridCandidate.Rejected("请输入有效数值")
+            }
+        }
+    )

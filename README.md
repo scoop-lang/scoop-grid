@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、二维键盘导航、自定义控件内部交互、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。编辑和分析功能继续实施。模型用法例如：
+已提供类型化本地模型、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。完整编辑入口和分析功能继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -37,7 +37,11 @@ scoop test --release .
 
 原生窗口使用 `dataGrid(model) { height = 480.0; handle = Some(handle) }`，其中 `handle` 是可选的 `DataGridHandle`。`handle.focusCell(GridCellAddress(rowKey, columnId))` 定位到真实单元格；焦点在成功布局后完成。Grid 使用应用的 `ThemeSource`，自定义单元格继续组合普通 View。
 
-浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。Enter／F2 进入自定义单元格的真实控件，Escape 返回单元格浏览；内部控件先处理自己的键盘与文本输入。
+浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。Enter／F2 进入可编辑列的编辑器或自定义单元格的真实控件。编辑中的 Enter／Tab 先提交，Escape 先交给输入法，再取消草稿；内部控件先处理自己的键盘与文本输入。
+
+列通过 `edit = Some(gridEdit<Row, T>(...))` 明确声明编辑器、校验和有类型的应用回调。内置 `gridTextEditor`、`gridLongEditor`、`gridDoubleEditor` 复用原生文本编辑器；`GridEditor<T>` 可接入自定义控件。应用用 `GridCommit<Row>.accept(nextSource)` 发布真实数据快照，或 `reject(message)` 保留草稿；异步 completion 只完成原会话一次，取消／卸载后的结果返回 false。`handle.editingCell`、`editError` 和 `isSubmitting` 可用于响应式状态栏。
+
+[示例](examples/basic/src/main.scoop) 的名称和金额提供完整的取值、编辑、同步校验及不可变数据替换用法。原生回归分别覆盖受控文本事务和真实系统拼音输入；系统候选取消、选词后提交已经通过，输入源会恢复。
 
 运行 [十万行示例](examples/basic/src/main.scoop) 与本机窗口回归：
 

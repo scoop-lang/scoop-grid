@@ -108,6 +108,13 @@ internal class GridBody<Row>(
                 selected.add(index)
         for (index in context.pinnedItems)
             selected.add(index)
+        when (props.value.session.editing.current) {
+            case Some(val edit) -> when (props.value.rows.indexOfKey(edit.address.row)) {
+                case Some(val index) -> selected.add(index)
+                case None -> {}
+            }
+            case None -> {}
+        }
         for (index in selected) {
             context.measureItem(index, Constraints.tight(Size(plan.columns.total, plan.rowHeight)))
             context.placeItem(
@@ -162,6 +169,15 @@ internal class GridRow<Row>(
             case Some(val address) -> if (address.row == props.value.key) {
                 when (props.value.columns.indexOf(address.column)) {
                     case Some(val index) -> selected.add(index);
+                    case None -> {}
+                }
+            }
+            case None -> {}
+        }
+        when (props.value.session.editing.current) {
+            case Some(val edit) -> if (edit.address.row == props.value.key) {
+                when (props.value.columns.indexOf(edit.address.column)) {
+                    case Some(val index) -> selected.add(index)
                     case None -> {}
                 }
             }

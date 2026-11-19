@@ -12,6 +12,7 @@ kind = "library"
 dependencies = ["scoop:scoop.core:0.1.0"]
 test-dependencies = [
     "scoop.tests:surface-native:0.1.0",
+    "scoop.tests:window-native:0.1.0",
     "scoop:scoop.graphics:0.1.0",
     "scoop:scoop.grid:0.1.0",
     "scoop:scoop.platform:0.1.0",

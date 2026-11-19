@@ -13,11 +13,37 @@ public class DataGridState<Row> public constructor(
     private val computed = state(gridCompute(source, GridColumns(columns), query, None))
     private val presentation =
         state(Array<GridColumnState>(columns.size) { index -> GridColumnState(columns[index].id) })
+    private val observers = ArrayList<GridModelObserver>()
     public val query: GridQuery get() = computed.value.query
     public val result: GridResult<Row> get() = computed.value.result
     public val columns: Array<GridColumn<Row>> get() = computed.value.columns.values
     public val columnState: Array<GridColumnState> get() = presentation.value
     public fun column(id: GridColumnId): GridColumn<Row> = computed.value.columns.get(id)
+    internal val source: TableSource<Row> get() = computed.value.source
+    internal fun findColumn(id: GridColumnId): GridColumn<Row>? = computed.value.columns.find(id)
+    internal fun visibleColumn(id: GridColumnId): Boolean {
+        for (column in presentation.value)
+            if (column.id == id)
+                return column.visible
+        return false
+    }
+    internal fun observe(action: () -> Unit): Closeable {
+        val observer = GridModelObserver(action, { value -> removeObserver(value) })
+        observers.add(observer)
+        return observer
+    }
+    private fun removeObserver(value: GridModelObserver) {
+        for (index in 0L ..< observers.size)
+            if (observers[index] === value) {
+                observers.removeAt(index)
+                return
+            }
+    }
+    private fun changed() {
+        for (observer in observers.toArray())
+            if (!observer.closed)
+                observer.action()
+    }
 
     public fun setQuery(value: GridQuery) {
         computed.checkMutation()
@@ -122,6 +148,7 @@ public class DataGridState<Row> public constructor(
                 else
                     old
             }
+        changed()
     }
     public fun moveColumn(id: GridColumnId, index: Long) {
         presentation.checkMutation()
@@ -149,13 +176,28 @@ public class DataGridState<Row> public constructor(
                             at - 1L
                     ]
             }
+        changed()
     }
     private fun notify(old: GridQuery, next: GridQuery) {
+        changed()
         if (old == next)
             return
         when (onQueryChange) {
             case Some(val action) -> action(next);
             case None -> {}
         }
+    }
+}
+
+private class GridModelObserver(
+    val action: () -> Unit,
+    private val remove: (GridModelObserver) -> Unit
+): Closeable {
+    var closed = false
+    public override fun close() {
+        if (closed)
+            return
+        closed = true
+        remove(this)
     }
 }

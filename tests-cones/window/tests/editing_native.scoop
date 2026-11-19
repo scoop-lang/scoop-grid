@@ -1,0 +1,93 @@
+package scoop.grid.tests.window
+
+import scoop.tests.window.*
+import scoop.ui.text.TextEditorState
+import scoop.window.*
+import scoop.window.native.*
+
+private fun <R> gridNativeView(window: Window, action: (Ptr<Unit>) -> R): R {
+    @Unsafe
+    {
+        return window.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                return@use when (lease.handle) {
+                    case AppKit(_, val view) -> action(view)
+                }
+            }
+        }
+    }
+}
+
+internal fun gridNativeText(window: Window, text: String, kind: Int = 0): Int =
+    gridNativeView(window) {
+        view -> @Unsafe
+        {
+            return@gridNativeView text.withUtf8Bytes {
+                bytes,
+                length -> @Unsafe
+                {
+                    return@withUtf8Bytes nativeEditorText(
+                        view,
+                        kind,
+                        bytes,
+                        length,
+                        0L,
+                        0L,
+                        -1L,
+                        0L
+                    )
+                }
+            }
+        }
+    }
+
+internal fun gridNativeDocument(window: Window, state: TextEditorState): Boolean {
+    val input = state.inputState
+    val selected = input.selection.range
+    val marked = input.markedRange
+    return gridNativeView(window) {
+        view -> @Unsafe
+        {
+            return@gridNativeView input.surroundingText.withUtf8Bytes {
+                bytes,
+                length -> @Unsafe
+                {
+                    return@withUtf8Bytes nativeEditorDocument(
+                        view,
+                        bytes,
+                        length,
+                        selected.start,
+                        selected.end,
+                        marked?.start ?: -1L,
+                        marked?.end ?: -1L
+                    )
+                }
+            }
+        }
+    }
+}
+
+internal fun gridSelectPinyin(window: Window): Int =
+    gridNativeView(window) {
+        view -> @Unsafe
+        {
+            return@gridNativeView selectNativePinyin(view)
+        }
+    }
+
+internal fun gridPinyinSelected(window: Window): Boolean =
+    gridNativeView(window) {
+        view -> @Unsafe
+        {
+            return@gridNativeView nativePinyinSelected(view)
+        }
+    }
+
+internal fun gridImeKey(window: Window, code: Int): Int =
+    gridNativeView(window) {
+        view -> @Unsafe
+        {
+            return@gridNativeView nativeImeKey(view, code)
+        }
+    }

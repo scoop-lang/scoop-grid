@@ -2,8 +2,10 @@ package scoop.grid
 
 import scoop.collections.HashMap
 import scoop.math.max
+import scoop.math.min
 import scoop.ui.*
 import scoop.ui.component.TableSource
+import scoop.ui.style.ThemeSource
 import scoop.window.KeyEvent
 
 internal class GridCellFocus(
@@ -15,11 +17,15 @@ internal class GridCellFocus(
 internal class GridSession<Row>: GridMount {
     var viewport: ScrollViewport? = None
     var bodyFocus: LazyFocus? = None
+    var theme: ThemeSource? = None
+    var entry: FocusHandle? = None
+    val editing = GridEditCoordinator<Row>(this)
     private var owner: ComponentScope? = None
-    private var rows: TableSource<Row>? = None
+    private var model: DataGridState<Row>? = None
+    private val rows: TableSource<Row>? get() = model?.result?.rows
     private var columns: GridColumnsPlan<Row>? = None
     private var reference: DataGridHandle? = None
-    private var enabled = true
+    var enabled = true
     private var intent: GridCellAddress? = None
     private var recent: GridColumnId? = None
     private val cells = HashMap<GridCellAddress, GridCellFocus>()
@@ -43,10 +49,32 @@ internal class GridSession<Row>: GridMount {
                 plan.columns.size,
                 pageRows,
                 command
-            ) ?:
-                return false
-        if (next.row != row || next.column != column)
-            return focus(GridCellAddress(source.keyAt(next.row), plan.columns[next.column].id))
+            )
+        when (next) {
+            case None -> {
+                when (editing.current) {
+                    case None -> return false
+                    case Some(_) -> when (command) {
+                        case Tab(val reverse) -> {
+                            editing.submit(
+                                Some {
+                                    owner?.moveFocus(reverse);
+                                    Unit
+                                }
+                            )
+                            return true
+                        }
+                        else -> return false
+                    }
+                }
+            }
+            case Some(_) -> {}
+        }
+        val target = next!!
+        if (target.row != row || target.column != column) {
+            val address = GridCellAddress(source.keyAt(target.row), plan.columns[target.column].id)
+            editing.leave { restore(address, target.row) }
+        }
         return true
     }
     public override val active: Boolean get() = owner?.isMounted ?: false
@@ -67,9 +95,11 @@ internal class GridSession<Row>: GridMount {
         viewport = Some(value)
     }
     fun update(input: GridRootProps<Row>) {
-        rows = Some(input.rows.source)
+        model = Some(input.input.state)
         columns = Some(input.columns)
+        theme = Some(input.theme)
         enabled = input.input.enabled
+        editing.update(input.input)
         val sameHandle =
             when ((reference, input.input.handle)) {
                 case(Some(val old), Some(val next)) -> old === next
@@ -88,12 +118,16 @@ internal class GridSession<Row>: GridMount {
         }
     }
     fun unmount() {
+        editing.close()
         reference?.unbind(this)
         reference = None
         owner = None
         viewport = None
         bodyFocus = None
         intent = None
+        model = None
+        theme = None
+        entry = None
     }
     private fun valid(address: GridCellAddress): Boolean {
         val source = rows ?: return false
@@ -102,18 +136,62 @@ internal class GridSession<Row>: GridMount {
             source.indexOfKey(address.row) !=
             None &&
             plan.indexOf(address.column) !=
-            None
+            None &&
+            (model?.visibleColumn(address.column) ?: false)
     }
     public override fun focus(address: GridCellAddress): Boolean {
         if (!active || !valid(address))
             return false
+        when (editing.cell(address)) {
+            case Some(val edit) -> return requestCell(address, Some(edit.focus))
+            case None -> {}
+        }
+        return editing.leave { requestCell(address) }
+    }
+    fun requestCell(address: GridCellAddress, editor: FocusHandle? = None): Boolean {
+        if (!active || !valid(address))
+            return false
         val focus = bodyFocus ?: return false
         intent = Some(address)
-        val accepted = focus.requestFocus(address.row) { cells[address]?.handle }
+        val select: () -> FocusHandle? =
+            {
+                when (editor) {
+                    case Some(val handle) -> Some(handle)
+                    case None -> cells[address]?.handle
+                }
+            }
+        val accepted = focus.requestFocus(address.row, select)
         if (!accepted)
             intent = None
         return accepted
     }
+    fun restore(address: GridCellAddress, index: Long) {
+        if (!active || !enabled)
+            return
+        val source = rows ?: return
+        val plan = columns ?: return
+        if (source.count == 0L || plan.columns.size == 0L) {
+            entry?.requestFocus()
+            return
+        }
+        val at = source.indexOfKey(address.row) ?: min(index, source.count - 1L)
+        if (model?.visibleColumn(address.column) ?: false) {
+            requestCell(GridCellAddress(source.keyAt(at), address.column))
+            return
+        }
+        for (column in plan.columns)
+            if (model?.visibleColumn(column.id) ?: false) {
+                requestCell(GridCellAddress(source.keyAt(at), column.id))
+                return
+            }
+        entry?.requestFocus()
+    }
+    public override val editingCell: GridCellAddress? get() = editing.current?.address
+    public override val editError: String? get() = editing.current?.error ?: None
+    public override val submitting: Boolean get() = editing.current?.submitting ?: false
+    public override fun beginEdit(address: GridCellAddress): Boolean = editing.begin(address)
+    public override fun commitEdit(): GridEditAttempt = editing.submit()
+    public override fun cancelEdit(): Boolean = editing.cancel()
     public override fun cancel() {
         bodyFocus?.cancelRequest()
         intent = None

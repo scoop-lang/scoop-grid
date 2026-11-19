@@ -1,0 +1,115 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.TableRecord
+import scoop.ui.component.TableRows
+import scoop.window.*
+
+private class EditedRow(val value: Long, val note: String)
+
+@Test
+private class GridEditingTest {
+    @Test
+    fun `typed drafts preserve integers and distinguish parse errors from validation`() {
+        val editor = gridLongEditor(9007199254740993L)
+        assertEquals("9007199254740993", editor.state.text)
+        editor.state.replaceAll("9223372036854775807")
+        when (editor.candidate()) {
+            case Value(val value) -> assertEquals(9223372036854775807L, value)
+            case Rejected(_) -> fail(Some("valid integer was rejected"))
+        }
+        editor.state.replaceAll("9223372036854775808")
+        when (editor.candidate()) {
+            case Value(_) -> fail(Some("integer overflow was accepted"))
+            case Rejected(val message) -> assertTrue(message != "")
+        }
+        val floating = gridDoubleEditor(1.0)
+        floating.state.replaceAll("NaN")
+        when (floating.candidate()) {
+            case Value(_) -> fail(Some("nonfinite number was accepted"))
+            case Rejected(_) -> {}
+        }
+    }
+
+    @Test
+    fun `typed proposals use the current row and do not submit unchanged or invalid values`() {
+        val draft = gridLongEditor(10L)
+        val submissions = ArrayList<GridChange<EditedRow, Long>>()
+        val specification =
+            gridEdit<EditedRow, Long>(
+                { _ -> draft },
+                { change, _ -> submissions.add(change) },
+                validate =
+                    {
+                        _,
+                        value -> if (value < 0L)
+                            Some("negative")
+                        else
+                            None
+                    }
+            )
+        val column =
+            gridColumn<EditedRow, Long>(
+                GridColumnId("value"),
+                "Value",
+                { row -> row.value },
+                gridLongValues(),
+                edit = Some(specification)
+            )
+        val address = GridCellAddress(ViewKey.Number(1L), column.id)
+        val edit = column.editing!!.create(address, EditedRow(10L, "old"))
+        assertTrue(edit.baselineMatches(EditedRow(10L, "new")))
+        assertFalse(edit.baselineMatches(EditedRow(11L, "old")))
+        when (edit.proposal(EditedRow(10L, "new"))) {
+            case Unchanged -> {}
+            else -> fail(Some("unchanged value should not call the application"))
+        }
+        draft.state.replaceAll("-1")
+        when (edit.proposal(EditedRow(10L, "new"))) {
+            case Rejected(val message) -> assertEquals("negative", message)
+            else -> fail(Some("invalid candidate was accepted"))
+        }
+        draft.state.replaceAll("20")
+        val completion = GridCommit<EditedRow>({ true }, { _ -> true }, { _ -> true })
+        when (edit.proposal(EditedRow(10L, "new"))) {
+            case Submit(val submit) -> submit(completion)
+            else -> fail(Some("changed value should be submitted"))
+        }
+        assertEquals(1L, submissions.size)
+        assertEquals("new", submissions[0L].row.note)
+        assertEquals(10L, submissions[0L].original)
+        assertEquals(20L, submissions[0L].value)
+        assertEquals(address, submissions[0L].address)
+    }
+
+    @Test
+    fun `text draft composition and undo remain owned by TextEditorState`() {
+        val editor = gridTextEditor("base")
+        editor.state.applyInput(
+            TextInputBatch(
+                None,
+                [
+                    TextInputOperation.Preedit(
+                        "中😀",
+                        Some(Utf8Selection(3L, 3L)),
+                        TextReplacement.CurrentSelection
+                    )
+                ]
+            )
+        )
+        assertTrue(editor.composing)
+        when (editor.candidate()) {
+            case Value(val value) -> assertEquals("base", value)
+            case Rejected(_) -> fail(Some("text is always parseable"))
+        }
+        editor.cancelComposition()
+        assertFalse(editor.composing)
+        assertEquals("base", editor.state.text)
+        editor.state.replace(Utf8Range(0L, 4L), "new")
+        assertTrue(editor.state.undo())
+        assertEquals("base", editor.state.text)
+        assertTrue(editor.state.redo())
+        assertEquals("new", editor.state.text)
+    }
+}

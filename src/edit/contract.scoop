@@ -1,0 +1,152 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.ui.*
+import scoop.ui.component.TableSource
+import scoop.ui.style.ThemeSource
+
+public enum GridCandidate<T> {
+    Value(T), Rejected(String)
+}
+
+public class GridEditorOptions public constructor(
+    public val focus: FocusHandle,
+    public val fonts: FontCollection,
+    public val theme: ThemeSource,
+    public val error: String?,
+    public val submitting: Boolean,
+    public val onSubmit: () -> Unit,
+    public val onEdited: () -> Unit
+)
+
+/** A single typed draft; its view uses ordinary native UI controls. */
+public interface GridEditor<T> {
+    public val composing: Boolean
+    public fun candidate(): GridCandidate<T>
+    public fun view(options: GridEditorOptions): View
+    public fun cancelComposition()
+}
+
+public class GridChange<Row, T> internal constructor(
+    public val address: GridCellAddress,
+    public val row: Row,
+    public val original: T,
+    public val value: T
+)
+
+/** A completion belongs to one pending edit, not to a row position. */
+public class GridCommit<Row> internal constructor(
+    private val available: () -> Boolean,
+    private val accepted: (TableSource<Row>) -> Boolean,
+    private val rejected: (String) -> Boolean
+) {
+    private val guard = state(Unit)
+    private var resolved = false
+    public val isActive: Boolean get() {
+        guard.value
+        return !resolved && available()
+    }
+    public fun accept(source: TableSource<Row>): Boolean {
+        guard.checkMutation()
+        if (!isActive)
+            return false
+        resolved = true
+        return accepted(source)
+    }
+    public fun reject(message: String): Boolean {
+        guard.checkMutation()
+        gridRequire(message != "", "edit rejection requires a message")
+        if (!isActive)
+            return false
+        resolved = true
+        return rejected(message)
+    }
+    internal fun invalidate() {
+        resolved = true
+    }
+}
+
+public enum GridEditAttempt {
+    NoEdit, Committed, Rejected, Composing, Pending
+}
+
+public enum GridEditEndReason {
+    Accepted, Unchanged, Cancelled, RecordRemoved, ColumnChanged, ValueChanged, Hidden, Disabled,
+    Detached
+}
+
+public struct GridEditEnd(val address: GridCellAddress, val reason: GridEditEndReason)
+
+public class GridEditSpec<Row, T> internal constructor(
+    internal val editor: (T) -> GridEditor<T>,
+    internal val submit: (GridChange<Row, T>, GridCommit<Row>) -> Unit,
+    internal val editable: (Row) -> Boolean,
+    internal val validate: (Row, T) -> String?,
+    internal val equal: (T, T) -> Boolean
+) {
+    internal fun bind(read: (Row) -> T): GridColumnEditing<Row> {
+        val spec = this
+        return GridColumnEditing(
+            editable,
+            { address, row -> TypedGridEdit(address, row, read, spec) }
+        )
+    }
+}
+
+public fun <Row, T: Equals<T>> gridEdit(
+    editor: (T) -> GridEditor<T>,
+    submit: (GridChange<Row, T>, GridCommit<Row>) -> Unit,
+    editable: (Row) -> Boolean = { _ -> true },
+    validate: (Row, T) -> String? = { _, _ -> None },
+    equal: (T, T) -> Boolean = { left, right -> left == right }
+): GridEditSpec<Row, T> = GridEditSpec(editor, submit, editable, validate, equal)
+
+/** The column erases operations only; each created editor retains its concrete value type. */
+public class GridColumnEditing<Row> internal constructor(
+    public val editable: (Row) -> Boolean,
+    internal val create: (GridCellAddress, Row) -> GridEdit<Row>
+)
+
+internal interface GridEdit<Row> {
+    val address: GridCellAddress
+    val composing: Boolean
+    fun baselineMatches(row: Row): Boolean
+    fun proposal(row: Row): GridProposal<Row>
+    fun view(options: GridEditorOptions): View
+    fun cancelComposition()
+}
+
+internal enum GridProposal<Row> {
+    Unchanged, Rejected(String), Submit((GridCommit<Row>) -> Unit)
+}
+
+private class TypedGridEdit<Row, T>(
+    public override val address: GridCellAddress,
+    row: Row,
+    private val read: (Row) -> T,
+    private val spec: GridEditSpec<Row, T>
+): GridEdit<Row> {
+    private val original = read(row)
+    private val editor = spec.editor(original)
+    public override val composing: Boolean get() = editor.composing
+    public override fun baselineMatches(row: Row): Boolean = spec.equal(original, read(row))
+    public override fun proposal(row: Row): GridProposal<Row> =
+        when (editor.candidate()) {
+            case Rejected(val message) -> GridProposal.Rejected(message)
+            case Value(val next) -> if (spec.equal(original, next))
+                GridProposal.Unchanged
+            else
+                when (spec.validate(row, next)) {
+                    case Some(val message) -> GridProposal.Rejected(message)
+                    case None -> {
+                        val change = GridChange(address, row, original, next)
+                        val submit = spec.submit
+                        GridProposal.Submit { completion -> submit(change, completion) }
+                    }
+                }
+        }
+    public override fun view(options: GridEditorOptions): View = editor.view(options)
+    public override fun cancelComposition() {
+        editor.cancelComposition()
+    }
+}

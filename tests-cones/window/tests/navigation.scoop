@@ -9,7 +9,7 @@ import scoop.ui.*
 import scoop.ui.component.*
 import scoop.window.*
 
-internal class GridNavigationProbe {
+internal class GridNavigationProbe(private val editing: GridEditingProbe) {
     val visible = state(false)
     val direction = state(LayoutDirection.Ltr)
     val enabled = state(true)
@@ -158,7 +158,8 @@ internal class GridNavigationProbe {
                 assertFalse(handle.focusCell(address(0L, "a")))
                 assertEquals(0, clicks)
                 finished = true
-                active.requestExit()
+                phase = 21
+                editing.start(window!!)
             }
             else -> {}
         }

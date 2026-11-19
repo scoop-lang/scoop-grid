@@ -1,0 +1,64 @@
+package scoop.grid
+
+import scoop.ui.*
+
+internal class GridDataCellProps<Row>(
+    val row: Row,
+    val key: ViewKey,
+    val rowIndex: Long,
+    val columnIndex: Long,
+    val column: GridColumn<Row>,
+    val appearance: GridAppearance,
+    val session: GridSession<Row>
+)
+
+/** One stable cell element hosts either its display content or its actual editor. */
+internal class GridDataCell<Row>(
+    private val props: Props<GridDataCellProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private val content = GridContentHandle()
+    public override fun render(): View {
+        val input = props.value
+        val appearance = input.appearance
+        val address = GridCellAddress(input.key, input.column.id)
+        val edit = input.session.editing.cell(address)
+        val child =
+            when (edit) {
+                case Some(val active) -> active.draft.view(
+                    GridEditorOptions(
+                        active.focus,
+                        appearance.fonts,
+                        input.session.theme!!,
+                        active.error,
+                        active.submitting,
+                        { input.session.commitEdit() },
+                        { input.session.editing.clearError(active) }
+                    )
+                )
+                case None -> input.column.cell(
+                    input.row,
+                    Some(appearance.fonts),
+                    Some(appearance.body),
+                    Some(appearance.paragraph)
+                )
+            }
+        return element(
+            GridCellProps(
+                Some(address),
+                input.rowIndex,
+                input.columnIndex,
+                input.column.id,
+                input.column.text(input.row),
+                appearance,
+                Some(input.session),
+                content = Some(content),
+                editable = input.column.editing?.editable(input.row) ?: false,
+                error = edit?.error ?: None,
+                submitting = edit?.submitting ?: false
+            ),
+            { props, scope -> GridCell(props, scope) },
+            [element(content, { props, scope -> GridContent(props, scope) }, [child])]
+        )
+    }
+}

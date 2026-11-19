@@ -1,0 +1,272 @@
+package scoop.grid
+
+import scoop.ui.*
+import scoop.ui.component.TableSource
+
+internal enum GridDraftStatus {
+    Ready, Rejected(String), Submitting
+}
+
+internal class GridActiveEdit<Row>(
+    val draft: GridEdit<Row>,
+    val column: GridColumn<Row>,
+    val rowIndex: Long
+) {
+    val focus = FocusHandle()
+    val status = state(GridDraftStatus.Ready)
+    val address: GridCellAddress get() = draft.address
+    val submitting: Boolean get() =
+        when (status.value) {
+            case Submitting -> true
+            else -> false
+        }
+    val error: String? get() =
+        when (status.value) {
+            case Rejected(val message) -> Some(message)
+            else -> None
+        }
+}
+
+/** Coordinates one mounted edit with real model changes and a single application completion. */
+internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
+    private val value = state<GridActiveEdit<Row>?>(None)
+    private var subscription: Closeable? = None
+    private var model: DataGridState<Row>? = None
+    private var onEnd: (GridEditEnd) -> Unit = { _ -> Unit }
+    private var accepting = false
+    val current: GridActiveEdit<Row>? get() = value.value
+    fun cell(address: GridCellAddress): GridActiveEdit<Row>? {
+        val edit = current ?: return None
+        return if (edit.address == address)
+            Some(edit)
+        else
+            None
+    }
+    private fun owns(edit: GridActiveEdit<Row>): Boolean =
+        when (current) {
+            case Some(val active) -> active === edit
+            case None -> false
+        }
+    fun update(input: DataGridProps<Row>) {
+        val same =
+            when (model) {
+                case Some(val old) -> old === input.state
+                case None -> false
+            }
+        if (!same) {
+            finishCurrent(GridEditEndReason.Detached, false)
+            subscription?.close()
+            model = Some(input.state)
+            subscription = Some(input.state.observe { reconcile() })
+        }
+        onEnd = input.onEditEnd
+        if (!input.enabled)
+            finishCurrent(GridEditEndReason.Disabled, false)
+        else
+            reconcile()
+    }
+    fun close() {
+        subscription?.close()
+        subscription = None
+        finishCurrent(GridEditEndReason.Detached, false)
+        model = None
+    }
+    private fun invalid(edit: GridActiveEdit<Row>): GridEditEndReason? {
+        val input = model ?: return Some(GridEditEndReason.Detached)
+        val source = input.source
+        val index =
+            source.indexOfKey(edit.address.row) ?: return Some(GridEditEndReason.RecordRemoved)
+        val column =
+            input.findColumn(edit.address.column) ?: return Some(GridEditEndReason.ColumnChanged)
+        if (column !== edit.column)
+            return Some(GridEditEndReason.ColumnChanged)
+        val row = source.rowAt(index)
+        if (!(column.editing?.editable(row) ?: false))
+            return Some(GridEditEndReason.ColumnChanged)
+        if (!edit.draft.baselineMatches(row))
+            return Some(GridEditEndReason.ValueChanged)
+        if (
+            !input.visibleColumn(column.id) ||
+                input.result.rows.indexOfKey(edit.address.row) ==
+                None
+        )
+            return Some(GridEditEndReason.Hidden)
+        return None
+    }
+    private fun reconcile() {
+        if (accepting)
+            return
+        val edit = current ?: return
+        when (invalid(edit)) {
+            case Some(val reason) -> finish(edit, reason, session.focused == Some(edit.address))
+            case None -> {}
+        }
+    }
+    fun begin(address: GridCellAddress): Boolean {
+        value.checkMutation()
+        if (!session.active || !session.enabled)
+            return false
+        val input = model ?: return false
+        val index = input.result.rows.indexOfKey(address.row) ?: return false
+        if (!input.visibleColumn(address.column))
+            return false
+        val column = input.findColumn(address.column) ?: return false
+        val editing = column.editing ?: return false
+        val row = input.result.rows.rowAt(index)
+        if (!editing.editable(row))
+            return false
+        when (current) {
+            case Some(val old) -> {
+                if (old.address == address)
+                    return session.requestCell(address, Some(old.focus))
+                if (old.submitting)
+                    return false
+                if (
+                    submit(
+                        Some {
+                            begin(address);
+                            Unit
+                        }
+                    ) ==
+                        GridEditAttempt.Pending
+                )
+                    return true
+                return when (cell(address)) {
+                    case Some(_) -> true
+                    case None -> false
+                }
+            }
+            case None -> {}
+        }
+        val edit = GridActiveEdit(editing.create(address, row), column, index)
+        value.value = Some(edit)
+        if (session.requestCell(address, Some(edit.focus)))
+            return true
+        finish(edit, GridEditEndReason.Cancelled, false)
+        return false
+    }
+    fun leave(action: () -> Unit): Boolean {
+        when (current) {
+            case None -> {
+                action()
+                return true
+            }
+            case Some(_) -> return when (submit(Some(action))) {
+                case Committed -> true
+                else -> false
+            }
+        }
+    }
+    fun clearError(edit: GridActiveEdit<Row>) {
+        if (owns(edit) && !edit.submitting && edit.error != None)
+            edit.status.value = GridDraftStatus.Ready
+    }
+    fun submit(after: (() -> Unit)? = None): GridEditAttempt {
+        value.checkMutation()
+        val edit = current ?: return GridEditAttempt.NoEdit
+        if (edit.submitting)
+            return GridEditAttempt.Pending
+        if (edit.draft.composing)
+            return GridEditAttempt.Composing
+        when (invalid(edit)) {
+            case Some(val reason) -> {
+                finish(edit, reason, true)
+                return GridEditAttempt.Rejected
+            }
+            case None -> {}
+        }
+        val source = model!!.source
+        val row = source.rowAt(source.indexOfKey(edit.address.row)!!)
+        when (edit.draft.proposal(row)) {
+            case Unchanged -> {
+                finish(edit, GridEditEndReason.Unchanged, restoreAfter(after))
+                after?.invoke()
+                return GridEditAttempt.Committed
+            }
+            case Rejected(val message) -> {
+                edit.status.value = GridDraftStatus.Rejected(message)
+                session.requestCell(edit.address, Some(edit.focus))
+                return GridEditAttempt.Rejected
+            }
+            case Submit(val apply) -> {
+                edit.status.value = GridDraftStatus.Submitting
+                val completion =
+                    GridCommit<Row>(
+                        { owns(edit) && edit.submitting },
+                        { source -> accept(edit, source, after) },
+                        { message -> reject(edit, message) }
+                    )
+                try {
+                    apply(completion)
+                } catch (error: Throwable) {
+                    completion.invalidate()
+                    if (owns(edit))
+                        edit.status.value = GridDraftStatus.Ready
+                    throw error
+                }
+                return if (!owns(edit))
+                    GridEditAttempt.Committed
+                else
+                    if (edit.submitting)
+                        GridEditAttempt.Pending
+                    else
+                        GridEditAttempt.Rejected
+            }
+        }
+    }
+    private fun accept(
+        edit: GridActiveEdit<Row>,
+        source: TableSource<Row>,
+        after: (() -> Unit)?
+    ): Boolean {
+        if (!owns(edit) || !edit.submitting)
+            return false
+        accepting = true
+        try {
+            model!!.replaceData(source)
+        } catch (error: Throwable) {
+            if (owns(edit))
+                edit.status.value = GridDraftStatus.Ready
+            throw error
+        } finally {
+            accepting = false
+        }
+        if (!owns(edit))
+            return false
+        finish(edit, GridEditEndReason.Accepted, restoreAfter(after))
+        after?.invoke()
+        return true
+    }
+    private fun reject(edit: GridActiveEdit<Row>, message: String): Boolean {
+        if (!owns(edit) || !edit.submitting)
+            return false
+        edit.status.value = GridDraftStatus.Rejected(message)
+        session.requestCell(edit.address, Some(edit.focus))
+        return true
+    }
+    private fun restoreAfter(after: (() -> Unit)?): Boolean =
+        when (after) {
+            case None -> true
+            case Some(_) -> false
+        }
+    fun cancel(restore: Boolean = true): Boolean {
+        value.checkMutation()
+        return finishCurrent(GridEditEndReason.Cancelled, restore)
+    }
+    private fun finishCurrent(reason: GridEditEndReason, restore: Boolean): Boolean {
+        val edit = current ?: return false
+        finish(edit, reason, restore)
+        return true
+    }
+    private fun finish(edit: GridActiveEdit<Row>, reason: GridEditEndReason, restore: Boolean) {
+        if (!owns(edit))
+            return
+        value.value = None
+        if (session.requested == Some(edit.address))
+            session.cancel()
+        edit.draft.cancelComposition()
+        if (restore)
+            session.restore(edit.address, edit.rowIndex)
+        onEnd(GridEditEnd(edit.address, reason))
+    }
+}
