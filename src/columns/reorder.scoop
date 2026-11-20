@@ -1,0 +1,239 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.max
+import scoop.math.min
+import scoop.platform.time.MonotonicInstant
+import scoop.ui.*
+
+internal class GridHeaderDragInput<Row>(
+    val model: DataGridState<Row>,
+    val id: GridColumnId,
+    val session: GridSession<Row>,
+    val appearance: GridAppearance,
+    val enabled: Boolean
+)
+
+internal class GridColumnMove<Row>(
+    val snapshot: GridColumnGesture<Row>,
+    val appearance: GridAppearance,
+    val scroll: ScrollState,
+    val stop: () -> Unit
+) {
+    var time: MonotonicInstant? = None
+}
+
+private class GridColumnMoveLayout<Row>(val plan: GridMeasurePlan, val input: GridRootProps<Row>)
+
+/** One mounted grid owns the preview and commits only the final insertion. */
+internal class GridColumnReorder<Row>(private val session: GridSession<Row>): Closeable {
+    private val active = state<GridColumnMove<Row>?>(None)
+    private val pointer = state<Point?>(None)
+    private var accepted: GridColumnMoveLayout<Row>? = None
+
+    fun isMoving(id: GridColumnId): Boolean =
+        when (active.value) {
+            case Some(val move) -> move.snapshot.id == id
+            case None -> false
+        }
+
+    fun update(input: GridRootProps<Row>) {
+        when (active.value) {
+            case Some(val move) -> if (!valid(move, input))
+                cancel(move)
+            case None -> {}
+        }
+    }
+
+    private fun valid(move: GridColumnMove<Row>, input: GridRootProps<Row>): Boolean =
+        input.input.enabled &&
+            !session.submitting &&
+            move.snapshot.current() &&
+            move.snapshot.model ===
+            input.input.state &&
+            move.appearance ===
+            input.columns.appearance &&
+            move.scroll ===
+            input.scroll
+
+    fun begin(input: GridHeaderDragInput<Row>, point: Point, stop: () -> Unit): GridColumnMove<
+        Row
+    >? {
+        cancelCurrent()
+        val layout = accepted ?: return None
+        if (
+            !input.enabled ||
+                layout.input.input.state !==
+                input.model ||
+                layout.input.columns.definitions !==
+                input.model.columns ||
+                layout.input.columns.states !==
+                input.model.columnState ||
+                layout.input.columns.appearance !==
+                input.appearance
+        )
+            return None
+        val snapshot =
+            when (val start = session.columnActions.beginGesture(input.model, input.id)) {
+                case Ready(val value) -> value
+                case Rejected(_) -> return None
+            }
+        val move = GridColumnMove(snapshot, input.appearance, layout.input.scroll, stop)
+        active.value = Some(move)
+        position(move, point)
+        return Some(move)
+    }
+
+    fun position(move: GridColumnMove<Row>, local: Point) {
+        if (!owns(move))
+            return
+        val layout = accepted ?: return cancel(move)
+        if (!valid(move, layout.input))
+            return cancel(move)
+        val index = layout.input.columns.indexOf(move.snapshot.id) ?: return cancel(move)
+        val offset = layout.plan.scroll.presentationOffset.x
+        val box = layout.plan.columns.box(index, offset, layout.plan.headerHeight)
+        pointer.value = Some(Point(box.x - offset + local.x, local.y))
+    }
+
+    fun finish(move: GridColumnMove<Row>, local: Point) {
+        position(move, local)
+        if (!owns(move))
+            return
+        val layout = accepted ?: return cancel(move)
+        val point = pointer.value ?: return cancel(move)
+        val index = layout.input.columns.indexOf(move.snapshot.id) ?: return cancel(move)
+        val drop =
+            gridColumnDrop(
+                layout.plan.columns,
+                index,
+                layout.plan.scroll.presentationOffset.x,
+                point,
+                layout.plan.headerHeight
+            )
+        clear()
+        when (drop) {
+            case Some(val target) -> {
+                val destination =
+                    gridColumnMoveIndex(
+                        move.snapshot.initial,
+                        move.snapshot.id,
+                        layout.input.columns.columns[target.anchor].id,
+                        target.before
+                    ) ?:
+                        return
+                session.columnActions.move(move.snapshot.id, destination)
+            }
+            case None -> {}
+        }
+    }
+
+    fun marker(plan: GridMeasurePlan, input: GridRootProps<Row>): GridColumnDrop? {
+        val move = active.value ?: return None
+        val point = pointer.value ?: return None
+        if (!valid(move, input))
+            return None
+        val index = input.columns.indexOf(move.snapshot.id) ?: return None
+        return gridColumnDrop(
+            plan.columns,
+            index,
+            plan.scroll.presentationOffset.x,
+            point,
+            plan.headerHeight
+        )
+    }
+
+    private fun speed(plan: GridMeasurePlan, input: GridRootProps<Row>): Double {
+        val move = active.value ?: return 0.0
+        val point = pointer.value ?: return 0.0
+        if (!valid(move, input))
+            return 0.0
+        val index = input.columns.indexOf(move.snapshot.id) ?: return 0.0
+        val speed =
+            gridColumnDragSpeed(
+                plan.columns,
+                index,
+                point,
+                plan.headerHeight,
+                move.appearance.density
+            )
+        val offset = plan.scroll.snapshot.offset.x
+        val maximum = plan.scroll.snapshot.maximum.x
+        return if ((speed < 0.0 && offset <= 0.0) || (speed > 0.0 && offset >= maximum))
+            0.0
+        else
+            speed
+    }
+
+    fun animating(plan: GridMeasurePlan, input: GridRootProps<Row>): Boolean =
+        speed(plan, input) != 0.0
+
+    fun accept(plan: GridMeasurePlan, input: GridRootProps<Row>, time: MonotonicInstant?) {
+        if (
+            input.columns.definitions !==
+                input.input.state.columns ||
+                input.columns.states !==
+                input.input.state.columnState
+        )
+            return
+        accepted = Some(GridColumnMoveLayout(plan, input))
+        val move = active.value ?: return
+        if (!valid(move, input))
+            return cancel(move)
+        val previous = move.time
+        move.time = time
+        val velocity = speed(plan, input)
+        if (velocity == 0.0)
+            return
+        val now = time ?: return
+        when (previous) {
+            case Some(val instant) -> {
+                val elapsed = now - instant
+                val seconds =
+                    min(
+                        0.05,
+                        max(
+                            0.0,
+                            elapsed.floorSeconds.toDouble() +
+                                elapsed.nanosecondsOfSecond.toDouble() /
+                                1000000000.0
+                        )
+                    )
+                if (seconds > 0.0)
+                    move.scroll.scrollBy(Point(velocity * seconds, 0.0), ScrollOrigin.User)
+            }
+            case None -> {}
+        }
+        session.requestFrame()
+    }
+
+    private fun owns(move: GridColumnMove<Row>): Boolean =
+        when (active.value) {
+            case Some(val current) -> current === move
+            case None -> false
+        }
+
+    fun cancel(move: GridColumnMove<Row>) {
+        if (!owns(move))
+            return
+        clear()
+        move.stop()
+    }
+
+    private fun clear() {
+        active.value = None
+        pointer.value = None
+    }
+
+    private fun cancelCurrent() {
+        when (active.value) {
+            case Some(val move) -> cancel(move)
+            case None -> {}
+        }
+    }
+
+    public override fun close() {
+        cancelCurrent()
+        accepted = None
+    }
+}

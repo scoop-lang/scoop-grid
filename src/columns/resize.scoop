@@ -18,7 +18,7 @@ internal class GridHeaderResize<Row>(
     private val props: Props<GridHeaderResizeProps<Row>>,
     scope: ComponentScope
 ): Component(scope) {
-    private var gesture: GridColumnResizeGesture<Row>? = None
+    private var gesture: GridColumnGesture<Row>? = None
     private val error = state<String?>(None)
     private var errorModel: DataGridState<Row>? = None
     private var errorStates: Array<GridColumnState>? = None
@@ -42,7 +42,7 @@ internal class GridHeaderResize<Row>(
     }
     private fun begin(): Boolean {
         val input = props.value
-        when (val result = input.session.columnActions.beginResize(input.model, input.column.id)) {
+        when (val result = input.session.columnActions.beginGesture(input.model, input.column.id)) {
             case Ready(val active) -> {
                 gesture = Some(active)
                 error.value = None

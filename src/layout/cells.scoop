@@ -94,7 +94,17 @@ internal class GridHeaderCells<Row>(
                         }
                     else
                         None,
-                    multiSortModifier = modifier
+                    multiSortModifier = modifier,
+                    drag =
+                        Some(
+                            GridHeaderDragInput(
+                                model,
+                                column.id,
+                                session,
+                                columns.appearance,
+                                enabled
+                            )
+                        )
                 ),
                 { props, scope -> GridCell(props, scope) },
                 [columns.appearance.label(title)]
@@ -120,7 +130,8 @@ internal class GridCellProps<Row>(
     val editable: Boolean = false,
     val error: String? = None,
     val submitting: Boolean = false,
-    val multiSortModifier: GridMultiSortModifier = GridMultiSortModifier.Shift
+    val multiSortModifier: GridMultiSortModifier = GridMultiSortModifier.Shift,
+    val drag: GridHeaderDragInput<Row>? = None
 )
 
 internal class GridCell<Row>(
@@ -137,6 +148,12 @@ internal class GridCell<Row>(
             else
                 SemanticRole.Cell
         )
+    // A claimed drag must handle release before Press consumes the same area's event.
+    private val headerDrag =
+        when (props.value.drag) {
+            case Some(_) -> Some(GridHeaderDrag(scope, area, handle, { props.value.drag!! }))
+            case None -> None
+        }
     private val press =
         scope.press(area, PressOptions(acceptsEnter = props.value.address == None)) { activate() }
     private var registered: GridCellAddress? = None
@@ -215,6 +232,7 @@ internal class GridCell<Row>(
         }
     }
     public override fun onUnmount() {
+        headerDrag?.cancel()
         when (registered) {
             case Some(val address) -> props.value.session?.remove(address);
             case None -> {}
@@ -222,6 +240,7 @@ internal class GridCell<Row>(
     }
     public override fun update(): UiInvalidation {
         val input = props.value
+        headerDrag?.update()
         area.scope.textCommandAvailability =
             Some(TextCommandAvailability(paste = input.editable && !input.submitting))
         semantics.update(
@@ -238,7 +257,19 @@ internal class GridCell<Row>(
                         input.text,
                 readOnly = !input.editable,
                 invalid = input.error != None,
-                description = input.error,
+                description =
+                    if (input.error != None)
+                        input.error
+                    else
+                        when (input.drag) {
+                            case Some(_) -> Some("拖动调整列顺序；也可使用列工具前移或后移")
+                            case None -> None
+                        },
+                automationId =
+                    if (input.address == None)
+                        Some(f"grid-header-${input.id.value}")
+                    else
+                        None,
                 error = input.error,
                 busy = input.submitting,
                 cell =
@@ -400,7 +431,7 @@ internal class GridCell<Row>(
         context.place(area, bounds)
         context.semantics(semantics, bounds)
         context.children()
-        if (focused)
+        if (focused || (headerDrag?.moving ?: false))
             context.draw {
                 paint ->
                 val stroke = min(2.0 * line, min(bounds.width, bounds.height))

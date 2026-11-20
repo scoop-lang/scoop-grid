@@ -1,0 +1,190 @@
+package scoop.grid
+
+import scoop.graphics.Point
+import scoop.math.abs
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private fun assertNoDrop(drop: GridColumnDrop?) {
+    when (drop) {
+        case Some(_) -> fail(Some("a clipped or different frozen region must reject the drop"))
+        case None -> {}
+    }
+}
+
+@Test
+private class GridColumnDragTest {
+    @Test
+    fun `drop geometry mirrors scrolling and keeps anchors inside their frozen region`() {
+        val widths = [80.0, 60.0, 100.0, 140.0, 120.0, 70.0, 50.0]
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            val rtl = direction == LayoutDirection.Rtl
+            val columns = GridColumnLayout(widths, 2L, 5L, 500.0, direction)
+            val offset =
+                if (rtl)
+                    90.0
+                else
+                    30.0
+            fun point(x: Double): Point =
+                Point(
+                    if (rtl)
+                        500.0 - x
+                    else
+                        x,
+                    16.0
+                )
+            val center = gridColumnDrop(columns, 2L, offset, point(330.0), 32.0)!!
+            assertEquals(3L, center.anchor)
+            assertFalse(center.before)
+            val next = gridColumnDrop(columns, 2L, offset, point(365.0), 32.0)!!
+            assertEquals(4L, next.anchor)
+            assertTrue(next.before)
+            assertEquals(center.x, next.x)
+            assertEquals(
+                if (rtl)
+                    150.0
+                else
+                    350.0,
+                center.x
+            )
+            val start = gridColumnDrop(columns, 0L, offset, point(130.0), 32.0)!!
+            assertEquals(1L, start.anchor)
+            assertFalse(start.before)
+            assertEquals(
+                if (rtl)
+                    360.0
+                else
+                    140.0,
+                start.x
+            )
+            val end = gridColumnDrop(columns, 5L, offset, point(490.0), 32.0)!!
+            assertEquals(6L, end.anchor)
+            assertFalse(end.before)
+            assertEquals(
+                if (rtl)
+                    0.0
+                else
+                    500.0,
+                end.x
+            )
+            assertNoDrop(gridColumnDrop(columns, 2L, offset, point(80.0), 32.0))
+            assertNoDrop(gridColumnDrop(columns, 2L, offset, point(450.0), 32.0))
+            assertNoDrop(gridColumnDrop(columns, 0L, offset, point(330.0), 32.0))
+            assertNoDrop(gridColumnDrop(columns, 2L, offset, Point(250.0, 32.0), 32.0))
+            val narrow = GridColumnLayout(widths, 2L, 5L, 100.0, direction)
+            assertNoDrop(gridColumnDrop(narrow, 2L, 0.0, Point(50.0, 16.0), 32.0))
+        }
+    }
+
+    @Test
+    fun `inserting a visible column keeps hidden and other pinned columns in relative order`() {
+        val ids = ["end", "start", "a", "hidden", "b", "start2", "c"]
+        val columns =
+            Array<GridColumn<Long>>(ids.size) {
+                index -> gridColumn<Long, Long>(
+                    GridColumnId(ids[index]),
+                    ids[index],
+                    { row -> row },
+                    gridLongValues()
+                )
+            }
+        val model = DataGridState(TableRows([TableRecord(ViewKey.Number(0L), 1L)]), columns)
+        model.setColumnStates(
+            [
+                GridColumnState(GridColumnId("end"), pin = GridPin.End),
+                GridColumnState(GridColumnId("start"), pin = GridPin.Start),
+                GridColumnState(GridColumnId("a")),
+                GridColumnState(GridColumnId("hidden"), visible = false),
+                GridColumnState(GridColumnId("b")),
+                GridColumnState(GridColumnId("start2"), pin = GridPin.Start),
+                GridColumnState(GridColumnId("c"))
+            ]
+        )
+        model.toggleSort(GridColumnId("a"))
+        val result = model.result
+        val query = model.query
+        val before = model.columnState
+        val index = gridColumnMoveIndex(before, GridColumnId("a"), GridColumnId("b"), false)!!
+        assertEquals(4L, index)
+        model.moveColumn(GridColumnId("a"), index)
+        val expected = ["end", "start", "hidden", "b", "a", "start2", "c"]
+        for (at in 0L ..< expected.size)
+            assertEquals(expected[at], model.columnState[at].id.value)
+        assertTrue(result === model.result)
+        assertTrue(query === model.query)
+        assertFalse(model.columnState[2L].visible)
+        assertEquals(GridPin.End, model.columnState[0L].pin)
+        assertEquals(GridPin.Start, model.columnState[5L].pin)
+        assertEquals(
+            Some(2L),
+            gridColumnMoveIndex(before, GridColumnId("a"), GridColumnId("a"), false)
+        )
+        assertEquals(
+            Some(2L),
+            gridColumnMoveIndex(before, GridColumnId("a"), GridColumnId("a"), true)
+        )
+        assertEquals(
+            None,
+            gridColumnMoveIndex(before, GridColumnId("missing"), GridColumnId("a"), true)
+        )
+    }
+
+    @Test
+    fun `only the center header edges drive physical scrolling at the current density`() {
+        val widths = [80.0, 60.0, 100.0, 140.0, 120.0, 70.0, 50.0]
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            for (density in [1.0, 1.5]) {
+                val columns =
+                    GridColumnLayout(
+                        Array<Double>(widths.size) { index -> widths[index] * density },
+                        2L,
+                        5L,
+                        500.0 * density,
+                        direction
+                    )
+                val region = columns.region(2L, 0.0, 32.0 * density)
+                val left = Point(region.x + 5.0 * density, 16.0 * density)
+                val right = Point(region.x + region.width - 5.0 * density, 16.0 * density)
+                assertTrue(
+                    abs(
+                        gridColumnDragSpeed(columns, 2L, left, 32.0 * density, density) +
+                            475.0 *
+                            density
+                    ) <
+                        0.0001
+                )
+                assertTrue(
+                    abs(
+                        gridColumnDragSpeed(columns, 2L, right, 32.0 * density, density) -
+                            475.0 *
+                            density
+                    ) <
+                        0.0001
+                )
+                assertEquals(0.0, gridColumnDragSpeed(columns, 0L, left, 32.0 * density, density))
+                assertEquals(0.0, gridColumnDragSpeed(columns, 6L, right, 32.0 * density, density))
+                assertEquals(
+                    0.0,
+                    gridColumnDragSpeed(
+                        columns,
+                        2L,
+                        Point(250.0 * density, 16.0 * density),
+                        32.0 * density,
+                        density
+                    )
+                )
+                assertEquals(
+                    0.0,
+                    gridColumnDragSpeed(
+                        columns,
+                        2L,
+                        Point(left.x, 40.0 * density),
+                        32.0 * density,
+                        density
+                    )
+                )
+            }
+        }
+    }
+}

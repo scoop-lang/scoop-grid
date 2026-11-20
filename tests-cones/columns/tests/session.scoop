@@ -1,5 +1,6 @@
 package scoop.grid.tests.columns
 
+import scoop.graphics.Point
 import scoop.grid.*
 import scoop.platform.time.MonotonicTimeSource
 import scoop.test.*
@@ -26,7 +27,7 @@ private class GridColumnsWindowTest {
             }
             assertTrue(probe.finished)
             assertFalse(probe.handle.isAttached)
-            assertEquals(2, probe.submissions)
+            assertEquals(3, probe.submissions)
             assertEquals(0, probe.queryEvents)
         } catch (error: Throwable) {
             println(probe.diagnostic);
@@ -80,13 +81,18 @@ internal class ColumnsProbe: Closeable {
     var waiting = false
     var retry = false
     val diagnostic: String get() =
-        f"columns phase=${phase}, waiting=${waiting}, retry=${retry}, queryEvents=${queryEvents}"
+        f"columns phase=${phase}, waiting=${waiting}, retry=${retry}, queryEvents=${
+            queryEvents
+        }, scroll=${scroll.offset.x}"
     var active: ActiveApplication? = None
+    var uiHost: UiHost? = None
     var window: Window? = None
     var ui: UiWindow? = None
     var calls: NativeCalls? = None
     var root: NativeNode? = None
     var view: ViewProbe? = None
+    var frames: FrameProbe? = None
+    var idleDeadline: WindowDeadline? = None
     var grid: NativeNode? = None
     var collection: NativeNode? = None
     var cell: NativeNode? = None
@@ -108,6 +114,18 @@ internal class ColumnsProbe: Closeable {
     var dragX = 0.0
     var dragY = 0.0
     var dragDelta = 0.0
+    var movePointer = Point(0.0, 0.0)
+    var moveSnapshot: Array<GridColumnState>? = None
+    var moveResult: GridResult<Long>? = None
+    var moveHeader: NativeNode? = None
+    var moveCell: NativeNode? = None
+    var movePinned: NativeNode? = None
+    var moveEnd: NativeNode? = None
+    var movePrevious: DataGridState<Long>? = None
+    var moveWaitFrames = 0
+    var idlePass = 0
+    var idleFrames = 0L
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(30L)
     private val held = ArrayList<NativeNode>()
     init {
         original.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))
@@ -136,9 +154,8 @@ internal class ColumnsProbe: Closeable {
         when (event) {
             case Resumed -> {
                 active = Some(application)
-                application.setControlFlow(
-                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
-                )
+                uiHost = Some(host)
+                application.setControlFlow(ControlFlow.WaitUntil(timeout))
                 val native =
                     application.createWindow(
                         windowAttributes {
@@ -147,6 +164,8 @@ internal class ColumnsProbe: Closeable {
                         }
                     )
                 window = Some(native)
+                frames = Some(observeFrames(native))
+                idleDeadline = Some(native.createDeadline { moveIdleTick() })
                 @Unsafe
                 {
                     native.acquireNativeWindow().use {
@@ -181,9 +200,10 @@ internal class ColumnsProbe: Closeable {
                 native.requestFocus()
             }
             case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
-            case NewEvents(StartCause.Deadline) -> fail(
-                Some(f"${diagnostic}, nativeFocus=${window?.isFocused ?: false}")
-            )
+            case NewEvents(StartCause.Deadline) -> {
+                if (MonotonicTimeSource.now() >= timeout)
+                    fail(Some(f"${diagnostic}, nativeFocus=${window?.isFocused ?: false}"))
+            }
             else -> {}
         }
     }
@@ -253,9 +273,11 @@ internal class ColumnsProbe: Closeable {
         assertEquals(0, columnKey(window!!, code, text))
     }
     public override fun close() {
+        idleDeadline?.close()
         calls?.close();
         for (node in held)
             node.close();
         view?.close()
+        frames?.close()
     }
 }

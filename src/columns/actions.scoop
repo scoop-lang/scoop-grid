@@ -128,26 +128,26 @@ internal class GridColumnActions<Row>(private val session: GridSession<Row>): Cl
             }
         return publish(current, before, next)
     }
-    fun beginResize(model: DataGridState<Row>, id: GridColumnId): GridColumnResizeStart<Row> {
-        val current = current() ?: return GridColumnResizeStart.Rejected("网格未挂载或已禁用")
+    fun beginGesture(model: DataGridState<Row>, id: GridColumnId): GridColumnGestureStart<Row> {
+        val current = current() ?: return GridColumnGestureStart.Rejected("网格未挂载或已禁用")
         if (current.input.state !== model)
-            return GridColumnResizeStart.Rejected("请等待当前网格完成布局")
+            return GridColumnGestureStart.Rejected("请等待当前网格完成布局")
         when (accepted.value) {
-            case None -> return GridColumnResizeStart.Rejected("请等待当前网格完成布局")
+            case None -> return GridColumnGestureStart.Rejected("请等待当前网格完成布局")
             case Some(_) -> {}
         }
         val definitions = model.columns
         val before = model.columnState
-        val at = gridColumnStateIndex(before, id) ?: return GridColumnResizeStart.Rejected("列已移除")
+        val at = gridColumnStateIndex(before, id) ?: return GridColumnGestureStart.Rejected("列已移除")
         if (!before[at].visible)
-            return GridColumnResizeStart.Rejected("列已隐藏")
+            return GridColumnGestureStart.Rejected("列已隐藏")
         when (val error = editError(current, before, definitions)) {
-            case Some(val message) -> return GridColumnResizeStart.Rejected(message)
+            case Some(val message) -> return GridColumnGestureStart.Rejected(message)
             case None -> {}
         }
-        return GridColumnResizeStart.Ready(GridColumnResizeGesture(model, definitions, before, id))
+        return GridColumnGestureStart.Ready(GridColumnGesture(model, definitions, before, id))
     }
-    fun resize(gesture: GridColumnResizeGesture<Row>, width: Double?): GridColumnActionResult {
+    fun resize(gesture: GridColumnGesture<Row>, width: Double?): GridColumnActionResult {
         val input = current() ?: return GridColumnActionResult.Rejected("网格未挂载或已禁用")
         if (input.input.state !== gesture.model || !gesture.current())
             return GridColumnActionResult.Rejected("列配置已更新，请重新开始调宽")

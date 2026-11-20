@@ -137,10 +137,6 @@ internal fun ColumnsProbe.advanceResize() {
             waiting = true
             calls!!.post(root!!, phase, 20)
         }
-        case 127 -> {
-            finished = true;
-            active!!.requestExit()
-        }
         else -> fail(Some("unexpected header resize phase"))
     }
 }
@@ -170,8 +166,30 @@ internal fun ColumnsProbe.inspectResize() {
         }
         case 79 -> resizeWidth("c1", Some(140.0))
         case 81 -> resizeWidth("c1", Some(170.0))
-        case 82 -> resizeWidth("c1", Some(140.0))
-        case 83 -> resizeWidth("c1", Some(150.0))
+        case 82 -> {
+            resizeWidth("c1", Some(140.0))
+            assertTrue(
+                resizeCenter!!.flag(4),
+                Some(
+                    f"Escape must retain resize focus; header=${
+                        identified("grid-header-c1").flag(4)
+                    }"
+                )
+            )
+        }
+        case 83 -> {
+            assertTrue(
+                resizeCenter!!.flag(4),
+                Some(
+                    f"release must retain resize focus; header=${
+                        identified("grid-header-c1").flag(4)
+                    }, next=${identified("grid-header-c2").flag(4)}, enabled=${
+                        resizeCenter!!.flag(1)
+                    }"
+                )
+            )
+            resizeWidth("c1", Some(150.0))
+        }
         case 84 -> resizeWidth("c1", None)
         case 86 -> {
             resizeWidth("c0", Some(250.0));

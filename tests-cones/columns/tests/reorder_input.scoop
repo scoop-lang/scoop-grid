@@ -1,0 +1,136 @@
+package scoop.grid.tests.columns
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.moveSurfacePointer
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.native.*
+
+internal fun ColumnsProbe.resetMoveColumns(compact: Boolean = false) {
+    val entries =
+        Array<GridColumnState>(300L) {
+            index ->
+            val pin =
+                when (index) {
+                    case 0L -> GridPin.Start
+                    case 4L -> GridPin.Start
+                    case 298L -> GridPin.End
+                    case 299L -> GridPin.End
+                    else -> GridPin.None
+                }
+            val size =
+                if (compact) {
+                    if (pin == GridPin.None)
+                        60.0
+                    else
+                        50.0
+                } else
+                    when (index) {
+                        case 0L -> 80.0
+                        case 4L -> 60.0
+                        case 298L -> 70.0
+                        case 299L -> 50.0
+                        else -> 100.0
+                    }
+            GridColumnState(GridColumnId(f"c${index}"), index != 3L, Some(size), pin)
+        }
+    model.setColumnStates(entries)
+    width.value = 500.0
+    scroll.scrollTo(
+        Point(
+            if (direction.value == LayoutDirection.Rtl)
+                1000000.0
+            else
+                0.0,
+            0.0
+        )
+    )
+    moveSnapshot = Some(model.columnState)
+    moveResult = Some(model.result)
+}
+
+internal fun ColumnsProbe.reopenForMove() {
+    resizeRelease()
+    resetMoveColumns()
+    ui = uiHost!!.attach(window!!, { mount -> ColumnsScene(this, mount) })
+    @Unsafe
+    {
+        window!!.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                when (lease.handle) {
+                    case AppKit(_, val pointer) -> root =
+                        Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                }
+            }
+        }
+    }
+}
+
+internal fun ColumnsProbe.movePress(x: Double, y: Double = 16.0) {
+    movePointer = Point(448.0 + x, 12.0 + y)
+    assertTrue(moveSurfacePointer(window!!, movePointer.x, movePointer.y))
+    assertTrue(view!!.button(movePointer.x, movePointer.y, true))
+}
+
+internal fun ColumnsProbe.moveTo(x: Double, y: Double = 16.0) {
+    movePointer = Point(448.0 + x, 12.0 + y)
+    assertTrue(moveSurfacePointer(window!!, movePointer.x, movePointer.y))
+}
+
+internal fun ColumnsProbe.moveRelease() {
+    assertTrue(view!!.button(movePointer.x, movePointer.y, false))
+}
+
+internal fun ColumnsProbe.moveUnchanged() {
+    assertTrue(moveSnapshot!! === model.columnState, Some(f"unexpected move at ${phase}"))
+    assertTrue(moveResult!! === model.result, Some(f"query rerun at ${phase}"))
+}
+
+internal fun ColumnsProbe.movePrefix(expected: Array<String>) {
+    for (index in 0L ..< expected.size)
+        assertEquals(
+            expected[index],
+            model.columnState[index].id.value,
+            Some(f"move order at ${phase}/${index}")
+        )
+    assertTrue(moveResult!! === model.result)
+    assertFalse(entry("c3").visible)
+}
+
+internal fun ColumnsProbe.moveCapture() {
+    moveHeader = Some(identified("grid-header-c1"))
+    grid = Some(named("Data grid"))
+    moveCell = Some(keep(grid!!.cell(0L, 2L)!!))
+}
+
+internal fun ColumnsProbe.beginMoveIdle() {
+    waiting = true
+    idlePass = 0
+    idleDeadline!!.schedule(MonotonicTimeSource.now() + Duration.milliseconds(250L))
+}
+
+internal fun ColumnsProbe.moveIdleTick() {
+    assertEquals(177, phase)
+    val snapshot = frames!!.snapshot()
+    assertFalse(snapshot.required, Some("column dragging must stop requesting frames"))
+    if (idlePass == 0) {
+        idleFrames = snapshot.presentations
+        idlePass = 1
+        idleDeadline!!.schedule(MonotonicTimeSource.now() + Duration.milliseconds(100L))
+    } else {
+        assertEquals(idleFrames, snapshot.presentations, Some("static grid must not keep drawing"))
+        completed(phase, 1)
+    }
+}
+
+internal fun ColumnsProbe.defaultMoveTheme() {
+    direction.value = LayoutDirection.Ltr
+    theme.current.value = shadcnTheme()
+    resetMoveColumns()
+}

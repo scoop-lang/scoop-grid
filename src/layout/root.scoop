@@ -137,9 +137,14 @@ Element<GridMeasurePlan>(scope) {
         )
         val session = props.value.session
         val input = props.value
+        val time =
+            if (session.columnReorder.animating(plan, input))
+                Some(context.time)
+            else
+                None
         context.onFrameComplete {
             frame -> if (frame.submission == FrameSubmission.Accepted)
-                session.accept(plan, input)
+                session.accept(plan, input, time)
         }
         val line = props.value.columns.appearance.density
         val border = props.value.columns.appearance.theme.tokens.palette.border
@@ -168,6 +173,22 @@ Element<GridMeasurePlan>(scope) {
                     Paint(border)
                 )
             }
+        }
+        when (val marker = session.columnReorder.marker(plan, input)) {
+            case Some(val drop) -> context.draw {
+                paint ->
+                val width = min(2.0 * line, drop.region.width)
+                val x =
+                    max(
+                        drop.region.x,
+                        min(drop.x - line, drop.region.x + drop.region.width - width)
+                    )
+                paint.canvas.drawRect(
+                    Rect(x, 0.0, width, plan.headerHeight),
+                    Paint(input.columns.appearance.theme.tokens.palette.ring)
+                )
+            }
+            case None -> {}
         }
     }
     private fun handle(context: RoutedEventContext, event: InputEvent) {

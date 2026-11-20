@@ -64,6 +64,12 @@ internal fun ColumnsProbe.completed(tag: Int, result: Int) {
         return
     }
     phase += 1
+    if (phase >= 127) {
+        advanceReorder()
+        if (!finished && phase != 177 && phase != 198)
+            frame!!.requestFrame()
+        return
+    }
     if (phase >= 76) {
         advanceResize()
         if (!finished && phase != 126)
