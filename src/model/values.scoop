@@ -3,7 +3,7 @@ package scoop.grid
 import scoop.datetime.LocalDate
 
 public enum GridValueKind {
-    Text, Number, BooleanValue, Date
+    Text, Integer, Number, BooleanValue, Date
 }
 
 public class GridValues<T> public constructor(
@@ -11,6 +11,7 @@ public class GridValues<T> public constructor(
     public val format: (T) -> String,
     public val compare: (T, T) -> Long,
     public val literal: (GridLiteral) -> T,
+    public val encode: (T) -> GridLiteral,
     public val missing: (T) -> Boolean = { _ -> false },
     public val number: (T) -> Double? = { _ -> None }
 )
@@ -25,12 +26,13 @@ public fun gridTextValues(): GridValues<String> =
                 case Text(val value) -> value
                 else -> throw IllegalArgumentException(Some("text column requires a text literal"))
             }
-        }
+        },
+        { value -> GridLiteral.Text(value) }
     )
 
 public fun gridLongValues(): GridValues<Long> =
     GridValues(
-        GridValueKind.Number,
+        GridValueKind.Integer,
         { value -> f"${value}" },
         { a, b -> a.compareTo(b) },
         {
@@ -41,6 +43,7 @@ public fun gridLongValues(): GridValues<Long> =
                 )
             }
         },
+        { value -> GridLiteral.Integer(value) },
         number = { value -> Some(value.toDouble()) }
     )
 
@@ -60,6 +63,11 @@ public fun gridDoubleValues(): GridValues<Double> =
                     Some("number column requires a numeric literal")
                 )
             }
+        },
+        {
+            value ->
+            gridRequire(value.isFinite(), "number filter values must be finite")
+            GridLiteral.Number(value)
         },
         number =
             {
@@ -96,7 +104,8 @@ public fun gridBooleanValues(): GridValues<Boolean> =
                     Some("boolean column requires a boolean literal")
                 )
             }
-        }
+        },
+        { value -> GridLiteral.BooleanValue(value) }
     )
 
 public fun gridDateValues(): GridValues<LocalDate> =
@@ -109,7 +118,8 @@ public fun gridDateValues(): GridValues<LocalDate> =
                 case Date(val value) -> value
                 else -> throw IllegalArgumentException(Some("date column requires a date literal"))
             }
-        }
+        },
+        { value -> GridLiteral.Date(value) }
     )
 
 public fun <T> nullableGridValues(values: GridValues<T>): GridValues<T?> =
@@ -134,6 +144,12 @@ public fun <T> nullableGridValues(values: GridValues<T>): GridValues<T?> =
             literal -> when (literal) {
                 case Empty -> None
                 else -> Some(values.literal(literal))
+            }
+        },
+        {
+            value -> when (value) {
+                case Some(val item) -> values.encode(item)
+                case None -> GridLiteral.Empty
             }
         },
         {

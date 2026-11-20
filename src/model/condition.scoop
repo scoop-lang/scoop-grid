@@ -32,7 +32,7 @@ internal fun <T> gridCondition(values: GridValues<T>, condition: GridCondition):
                 !values.missing(first) && !values.missing(last),
                 "range bounds must not be missing"
             )
-            gridRequire(values.compare(first, last) <= 0L, "grid filter range is reversed");
+            gridRequire(values.compare(first, last) <= 0L, "区间下限不能大于上限");
             (
                 {
                     value -> !values.missing(value) &&

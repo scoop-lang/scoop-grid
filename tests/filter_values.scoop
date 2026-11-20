@@ -1,0 +1,161 @@
+package scoop.grid.tests
+
+import scoop.collections.HashSet
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class FilterValueCalls {
+    var reads = 0L
+    var builds = 0L
+}
+
+private fun <T> valueRows(values: Array<T>): TableRows<T> =
+    TableRows(
+        Array<TableRecord<T>>(values.size) {
+            index -> TableRecord(ViewKey.Number(index), values[index])
+        }
+    )
+
+@Test
+private class GridFilterValuesTest {
+    @Test
+    fun `candidate keys retain integer precision and duplicate labels without creating views`() {
+        val calls = FilterValueCalls()
+        val id = GridColumnId("number")
+        val base = gridLongValues()
+        val values =
+            GridValues(base.kind, { _ -> "same label" }, base.compare, base.literal, base.encode)
+        val column =
+            gridColumn<Long, Long>(
+                id,
+                "Number",
+                {
+                    value ->
+                    calls.reads += 1L;
+                    value
+                },
+                values,
+                cell =
+                    Some {
+                        _ ->
+                        calls.builds += 1L;
+                        empty()
+                    }
+            )
+        val model =
+            DataGridState(
+                valueRows([9007199254740993L, 9007199254740992L, 9007199254740993L]),
+                [column]
+            )
+        assertEquals(0L, calls.reads)
+        assertEquals(Some(GridValueKind.Integer), column.valueKind)
+        val candidates = model.filterValues(id)
+        assertEquals(3L, calls.reads)
+        assertEquals(0L, calls.builds)
+        assertEquals(2L, candidates.values.size)
+        assertEquals(GridLiteral.Integer(9007199254740993L), candidates.values[0L].key)
+        assertEquals(GridLiteral.Integer(9007199254740992L), candidates.values[1L].key)
+        assertEquals("same label", candidates.values[0L].label)
+        assertEquals("same label", candidates.values[1L].label)
+        assertTrue(model.filterValues(id) === candidates)
+        assertEquals(3L, calls.reads)
+        model.setQuery(
+            GridQuery(
+                [GridSort(id)],
+                GridFilter.Column(id, GridCondition.In([candidates.values[1L].key])),
+                pagination = GridPagination.Page(0L, 1L)
+            )
+        )
+        assertEquals(1L, model.result.rows.count)
+        assertEquals(9007199254740992L, model.result.rows.rowAt(0L))
+        val afterQuery = calls.reads
+        model.setColumnState(GridColumnState(id, visible = false, width = Some(210.0)))
+        assertTrue(model.filterValues(id) === candidates)
+        assertEquals(afterQuery, calls.reads)
+        assertEquals(0L, calls.builds)
+        model.replaceData(valueRows([9007199254740992L, 8L]))
+        assertFalse(model.filterValuesCurrent(id, candidates))
+        val next = model.filterValues(id)
+        assertTrue(next !== candidates)
+        assertEquals(GridLiteral.Integer(8L), next.values[1L].key)
+        model.replaceColumns([gridColumn<Long, Long>(id, "Number", { value -> value }, base)])
+        assertFalse(model.filterValuesCurrent(id, next))
+        assertEquals("8", model.filterValues(id).values[1L].label)
+    }
+
+    @Test
+    fun `set candidates distinguish missing empty text and equal numeric zero`() {
+        val id = GridColumnId("text")
+        val model =
+            DataGridState(
+                valueRows<String?>([None, Some(""), Some("same"), Some("")]),
+                [
+                    gridColumn<String?, String?>(
+                        id,
+                        "Text",
+                        { value -> value },
+                        nullableGridValues(gridTextValues())
+                    )
+                ]
+            )
+        val candidates = model.filterValues(id)
+        assertEquals(3L, candidates.values.size)
+        assertEquals(GridLiteral.Empty, candidates.values[0L].key)
+        assertEquals(GridLiteral.Text(""), candidates.values[1L].key)
+        model.setQuery(
+            GridQuery(filter = GridFilter.Column(id, GridCondition.In([GridLiteral.Empty])))
+        )
+        assertEquals(1L, model.result.rows.count)
+        model.setQuery(
+            GridQuery(filter = GridFilter.Column(id, GridCondition.In([GridLiteral.Text("")])))
+        )
+        assertEquals(2L, model.result.rows.count)
+        model.setQuery(GridQuery(filter = GridFilter.Column(id, GridCondition.In([]))))
+        assertEquals(0L, model.result.rows.count)
+        assertTrue(model.filterValues(id) === candidates)
+        val keys = HashSet<GridLiteral>()
+        assertTrue(keys.add(GridLiteral.Number(-0.0)))
+        assertFalse(keys.add(GridLiteral.Number(0.0)))
+        assertTrue(keys.add(GridLiteral.Integer(0L)))
+        assertTrue(keys.add(GridLiteral.Text("")))
+        assertTrue(keys.add(GridLiteral.Empty))
+        assertEquals(4L, keys.size)
+    }
+
+    @Test
+    fun `candidate failures never publish partial lists and action columns reject loading`() {
+        val calls = FilterValueCalls()
+        val id = GridColumnId("number")
+        val model =
+            DataGridState(
+                valueRows([1.0, Double.NaN, 2.0]),
+                [
+                    gridColumn<Double, Double>(
+                        id,
+                        "Number",
+                        {
+                            value ->
+                            calls.reads += 1L;
+                            value
+                        },
+                        gridDoubleValues()
+                    )
+                ]
+            )
+        assertFailsWith<IllegalArgumentException> { model.filterValues(id) }
+        assertEquals(2L, calls.reads)
+        assertFailsWith<IllegalArgumentException> { model.filterValues(id) }
+        assertEquals(4L, calls.reads)
+        model.replaceData(valueRows([1.0, 2.0]))
+        assertEquals(2L, model.filterValues(id).values.size)
+        val actions =
+            DataGridState(
+                valueRows([1L]),
+                [gridActionColumn<Long>(id, "Actions", { _ -> empty() })]
+            )
+        assertEquals(None, actions.column(id).valueKind)
+        assertFailsWith<IllegalArgumentException> { actions.filterValues(id) }
+    }
+}

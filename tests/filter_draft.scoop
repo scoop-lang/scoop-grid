@@ -1,0 +1,147 @@
+package scoop.grid.tests
+
+import scoop.datetime.LocalDate
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+private fun draftKind(id: GridColumnId): GridValueKind =
+    when (id.value) {
+        case "text" -> GridValueKind.Text
+        case "integer" -> GridValueKind.Integer
+        case "number" -> GridValueKind.Number
+        case "boolean" -> GridValueKind.BooleanValue
+        case "date" -> GridValueKind.Date
+        else -> throw IllegalArgumentException(Some("missing draft column"))
+    }
+
+@Test
+private class GridFilterDraftTest {
+    @Test
+    fun `nested filter drafts preserve typed queries until explicitly changed`() {
+        val filter =
+            GridFilter.And(
+                [
+                    GridFilter.Column(
+                        GridColumnId("text"),
+                        GridCondition.Text(GridTextMatch.Contains, "Ab", true)
+                    ),
+                    GridFilter.Or(
+                        [
+                            GridFilter.Column(
+                                GridColumnId("integer"),
+                                GridCondition.Between(
+                                    GridLiteral.Integer(9007199254740992L),
+                                    GridLiteral.Integer(9007199254740993L)
+                                )
+                            ),
+                            GridFilter.Column(
+                                GridColumnId("number"),
+                                GridCondition.Compare(GridComparison.Equal, GridLiteral.Integer(1L))
+                            )
+                        ]
+                    ),
+                    GridFilter.Column(
+                        GridColumnId("boolean"),
+                        GridCondition.Compare(GridComparison.Equal, GridLiteral.BooleanValue(false))
+                    ),
+                    GridFilter.Column(
+                        GridColumnId("date"),
+                        GridCondition.Compare(
+                            GridComparison.GreaterOrEqual,
+                            GridLiteral.Date(LocalDate(2024, 2, 29))
+                        )
+                    )
+                ]
+            )
+        val keys = GridFilterKeys()
+        val draft = GridFilterDraft(filter, keys)
+        assertEquals(filter, draft.filter({ id -> draftKind(id) }))
+        val empty = GridFilterDraft(GridFilter.All, keys)
+        assertEquals(GridFilter.All, empty.filter({ id -> draftKind(id) }))
+        val nested = GridFilterGroupDraft(keys.take(), false, [])
+        empty.root.append(GridFilterNode.Group(nested))
+        assertFailsWith<IllegalArgumentException> { empty.filter({ id -> draftKind(id) }) }
+        nested.append(
+            GridFilterNode.Condition(
+                GridFilterConditionDraft(
+                    keys.take(),
+                    GridColumnId("boolean"),
+                    GridCondition.Missing(true)
+                )
+            )
+        )
+        assertEquals(
+            GridFilter.Or(
+                [GridFilter.Column(GridColumnId("boolean"), GridCondition.Missing(true))]
+            ),
+            empty.filter({ id -> draftKind(id) })
+        )
+        empty.root.remove(nested.key)
+        assertEquals(GridFilter.All, empty.filter({ id -> draftKind(id) }))
+        assertTrue(draft.root.key != empty.root.key)
+    }
+
+    @Test
+    fun `filter operands reject overflow nonfinite numbers and invalid calendar dates`() {
+        val value = GridFilterScalar(GridLiteral.Integer(Long.MAX_VALUE))
+        assertEquals(GridLiteral.Integer(Long.MAX_VALUE), value.value(GridValueKind.Integer))
+        value.text.replaceAll("9223372036854775808")
+        assertFailsWith<IllegalArgumentException> { value.value(GridValueKind.Integer) }
+        value.text.replaceAll("NaN")
+        assertFailsWith<IllegalArgumentException> { value.value(GridValueKind.Number) }
+        value.text.replaceAll("2026-02-29")
+        assertFailsWith<IllegalArgumentException> { value.value(GridValueKind.Date) }
+        value.text.replaceAll("2024-02-29")
+        assertEquals(GridLiteral.Date(LocalDate(2024, 2, 29)), value.value(GridValueKind.Date))
+        value.text.replaceAll("")
+        assertEquals(GridLiteral.Text(""), value.value(GridValueKind.Text))
+        val condition =
+            GridFilterConditionDraft(
+                ViewKey.Number(0L),
+                GridColumnId("integer"),
+                GridCondition.In([GridLiteral.Integer(3L)])
+            )
+        condition.setColumn(GridColumnId("text"), GridLiteral.Text(""))
+        assertEquals(
+            GridCondition.Compare(GridComparison.Equal, GridLiteral.Text("")),
+            condition.condition(GridValueKind.Text)
+        )
+        assertEquals(0L, condition.values.selectedValues().size)
+    }
+
+    @Test
+    fun `searching candidates preserves selected keys and retires replaced candidate identities`() {
+        val id = GridColumnId("text")
+        val model =
+            DataGridState(
+                TableRows(
+                    [
+                        TableRecord(ViewKey.Number(0L), "Alpha"),
+                        TableRecord(ViewKey.Number(1L), "Beta")
+                    ]
+                ),
+                [gridColumn<String, String>(id, "Text", { text -> text }, gridTextValues())]
+            )
+        val set = GridFilterSetDraft([GridLiteral.Text("Alpha")])
+        set.load(model.filterValues(id))
+        val first = set.list!!
+        val selection = set.selected
+        set.search.replaceAll("beta")
+        set.applySearch()
+        assertEquals(1L, set.list!!.indices.size)
+        assertEquals(1L, set.list!!.indices[0L])
+        assertEquals(first.key, set.list!!.key)
+        set.selectShown()
+        assertEquals(2L, set.selected.size)
+        assertEquals(1L, selection.size)
+        assertTrue(GridLiteral.Text("Alpha") in set.selected)
+        model.replaceData(TableRows([TableRecord(ViewKey.Number(0L), "Beta")]))
+        set.load(model.filterValues(id))
+        assertTrue(first.key != set.list!!.key)
+        assertEquals(2L, set.selected.size)
+        set.clearSelection()
+        assertEquals(0L, set.selectedValues().size)
+    }
+}

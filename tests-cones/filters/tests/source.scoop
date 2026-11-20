@@ -1,0 +1,109 @@
+package scoop.grid.tests.filters
+
+import scoop.datetime.LocalDate
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class FilterRow(val index: Long, val name: String, val amount: Long) {
+    val enabled: Boolean get() = index % 3L == 0L
+    val date: LocalDate get() = LocalDate(2026, 11, (index % 28L).toInt() + 1)
+}
+
+internal class FilterRows(
+    val revision: Int = 0,
+    private val changed: FilterRow? = None
+): TableSource<FilterRow> {
+    public override val count: Long get() = 10000L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): FilterRow {
+        if (changed?.index == Some(index))
+            return changed!!
+        val group =
+            if (index % 2L == 0L)
+                "alpha"
+            else
+                "beta"
+        return FilterRow(index, f"row ${group} ${revision}", 9007199254740992L + index)
+    }
+    fun replacing(row: FilterRow): FilterRows = FilterRows(revision, Some(row))
+}
+
+internal fun initialFilterQuery(): GridQuery =
+    GridQuery(
+        [GridSort(GridColumnId("amount"))],
+        GridFilter.Column(GridColumnId("tag"), GridCondition.In([])),
+        "row",
+        GridPagination.Page(0L, 5L)
+    )
+
+internal fun filterColumns(probe: FilterProbe): Array<GridColumn<FilterRow>> {
+    val longs = gridLongValues()
+    return [
+        gridColumn<FilterRow, String>(
+            GridColumnId("name"),
+            "Name",
+            { row -> row.name },
+            gridTextValues()
+        ),
+        gridColumn<FilterRow, Long>(
+            GridColumnId("amount"),
+            "Amount",
+            { row -> row.amount },
+            longs,
+            edit =
+                Some(
+                    gridEdit<FilterRow, Long>(
+                        {
+                            value ->
+                            val editor = gridLongEditor(value)
+                            probe.editor = Some(editor)
+                            editor
+                        },
+                        { change, completion -> probe.save(change, completion) }
+                    )
+                )
+        ),
+        gridColumn<FilterRow, Boolean>(
+            GridColumnId("enabled"),
+            "Enabled",
+            { row -> row.enabled },
+            gridBooleanValues()
+        ),
+        gridColumn<FilterRow, LocalDate>(
+            GridColumnId("date"),
+            "Date",
+            { row -> row.date },
+            gridDateValues()
+        ),
+        gridColumn<FilterRow, Long>(
+            GridColumnId("tag"),
+            "Tag",
+            { row -> row.index },
+            GridValues(
+                GridValueKind.Integer,
+                {
+                    value -> if (value < 2L)
+                        "同名"
+                    else
+                        f"值 ${value}"
+                },
+                longs.compare,
+                longs.literal,
+                {
+                    value ->
+                    probe.encodings += 1L;
+                    GridLiteral.Integer(value)
+                }
+            )
+        )
+    ]
+}

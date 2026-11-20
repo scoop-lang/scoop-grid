@@ -1,0 +1,213 @@
+package scoop.grid
+
+import scoop.datetime.LocalDate
+import scoop.ui.style.Insets
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.row as filterRow
+import scoop.ui.component.column as filterColumn
+import scoop.ui.component.button as filterButton
+import scoop.ui.component.select as filterSelect
+
+internal class GridFilterUi<Row>(
+    val input: GridFilterPanelProps<Row>,
+    val draft: GridFilterDraft,
+    val appearance: GridAppearance,
+    val referenceDate: LocalDate,
+    val active: () -> Boolean,
+    val failed: (String) -> Unit
+) {
+    val enabled: Boolean get() = input.enabled
+    val structural: Boolean get() = enabled && !draft.composing
+    fun message(text: String): View =
+        component(
+            LabelProps(
+                LabelText.Plain(text, None),
+                Some(appearance.fonts),
+                baseStyle = Some(appearance.body)
+            ),
+            { props, scope -> Label(props, scope) }
+        )
+    fun firstColumn(): GridColumn<Row>? {
+        for (column in input.state.columns)
+            if (column.filterable && column.valueKind != None)
+                return Some(column)
+        return None
+    }
+    fun addCondition(group: GridFilterGroupDraft) {
+        if (!active() || draft.composing)
+            return
+        val column = firstColumn() ?: return
+        group.append(
+            GridFilterNode.Condition(
+                GridFilterConditionDraft(
+                    draft.keys.take(),
+                    column.id,
+                    GridCondition.Compare(
+                        GridComparison.Equal,
+                        gridFilterDefault(column.valueKind!!, referenceDate)
+                    )
+                )
+            )
+        )
+    }
+    fun addGroup(group: GridFilterGroupDraft) {
+        if (active() && !draft.composing)
+            group.append(GridFilterNode.Group(GridFilterGroupDraft(draft.keys.take(), true, [])))
+    }
+    fun columnChoices(): Array<Choice<GridColumnId>> {
+        val choices = ArrayList<Choice<GridColumnId>>()
+        for (column in input.state.columns)
+            if (column.filterable && column.valueKind != None)
+                choices.add(Choice(ViewKey.Text(column.id.value), column.id, column.title))
+        return choices.toArray()
+    }
+}
+
+internal fun <Row> gridFilterKind(model: DataGridState<Row>, id: GridColumnId): GridValueKind {
+    val column = model.findColumn(id) ?: throw IllegalArgumentException(Some(f"筛选列已移除：${id.value}"))
+    gridRequire(column.filterable, f"列不可筛选：${column.title}")
+    return column.valueKind ?: throw IllegalArgumentException(Some(f"列没有可筛选的值：${column.title}"))
+}
+
+internal fun gridFilterControl(key: ViewKey, part: String, name: String): ComponentSemantics =
+    ComponentSemantics(name = Some(name), automationId = Some(gridFilterControlId(key, part)))
+
+internal fun gridFilterControlId(key: ViewKey, part: String): String =
+    when (key) {
+        case Number(val id) -> f"grid-filter-${id}-${part}"
+        case Text(val id) -> f"grid-filter-${id}-${part}"
+        case Position -> throw IllegalArgumentException(
+            Some("filter controls require explicit keys")
+        )
+    }
+
+internal fun <Row> gridFilterGroupView(
+    group: GridFilterGroupDraft,
+    ui: GridFilterUi<Row>,
+    path: String,
+    remove: (() -> Unit)?
+): View {
+    val density = ui.appearance.density
+    val title =
+        if (path == "")
+            "筛选条件"
+        else
+            f"条件组 ${path}"
+    return filterColumn {
+        key = group.key
+        add(
+            filterRow {
+                item(
+                    filterSelect(
+                        binding<Boolean?>(
+                            { Some(group.conjunction.value) },
+                            {
+                                next -> if (ui.active() && !ui.draft.composing)
+                                    when (next) {
+                                        case Some(val value) -> group.join(value);
+                                        case None -> {}
+                                    }
+                            }
+                        ),
+                        [
+                            Choice(ViewKey.Text("and"), true, "所有条件（AND）"),
+                            Choice(ViewKey.Text("or"), false, "任一条件（OR）")
+                        ]
+                    ) {
+                        enabled = ui.structural
+                        width = Some(184.0 * density)
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        semantics = gridFilterControl(group.key, "join", f"${title} 组合方式")
+                    }
+                ) { grow = 1.0 }
+                when (remove) {
+                    case Some(val action) -> add(
+                        filterButton("删除组", action) {
+                            enabled = ui.structural
+                            fonts = ui.input.fonts
+                            theme = ui.input.theme
+                            variant = ButtonVariant.Outline
+                            semantics = gridFilterControl(group.key, "remove", f"删除${title}")
+                        }
+                    )
+                    case None -> {}
+                }
+                spacing = 8.0 * density
+            }
+        )
+        val children = group.children.value
+        if (children.size == 0L)
+            add(
+                ui.message(
+                    if (path == "")
+                        "尚未添加条件"
+                    else
+                        "请添加条件或删除该组"
+                )
+            )
+        for (index in 0L ..< children.size) {
+            val child = children[index]
+            val childPath =
+                if (path == "")
+                    f"${index + 1L}"
+                else
+                    f"${path}.${index + 1L}"
+            val erase: () -> Unit =
+                {
+                    if (ui.active() && !ui.draft.composing)
+                        group.remove(child.key)
+                }
+            when (child) {
+                case Condition(val condition) -> add(
+                    gridFilterConditionView(condition, ui, childPath, erase)
+                )
+                case Group(val nested) -> add(
+                    gridFilterGroupView(nested, ui, childPath, Some(erase))
+                )
+                case All(val childKey) -> add(
+                    filterRow {
+                        key = childKey
+                        item(ui.message("所有记录")) { grow = 1.0 }
+                        add(
+                            filterButton("删除", erase) {
+                                enabled = ui.structural
+                                fonts = ui.input.fonts
+                                theme = ui.input.theme
+                                semantics =
+                                    gridFilterControl(childKey, "remove", f"删除条件 ${childPath}")
+                            }
+                        )
+                    }
+                )
+            }
+        }
+        add(
+            filterRow {
+                add(
+                    filterButton("添加条件", { ui.addCondition(group) }) {
+                        enabled = ui.structural && ui.firstColumn()?.filterable == Some(true)
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        variant = ButtonVariant.Outline
+                        semantics = gridFilterControl(group.key, "add", f"${title} 添加条件")
+                    }
+                )
+                add(
+                    filterButton("添加条件组", { ui.addGroup(group) }) {
+                        enabled = ui.structural
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        variant = ButtonVariant.Outline
+                        semantics = gridFilterControl(group.key, "add-group", f"${title} 添加条件组")
+                    }
+                )
+                spacing = 8.0 * density
+            }
+        )
+        padding = Insets.all(8.0 * density)
+        spacing = 8.0 * density
+        alignment = CrossAlignment.Stretch
+    }
+}

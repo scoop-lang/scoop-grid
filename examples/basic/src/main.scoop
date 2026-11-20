@@ -7,6 +7,7 @@ import scoop.ui.*
 import scoop.ui.component.*
 import scoop.ui.style.*
 import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
 
 private class SampleRow(val id: Long, val name: String, val amount: Long)
 
@@ -134,7 +135,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
         val handle = this.handle
         val lastEdit = this.lastEdit
         val theme = currentThemeSource().read(scope)
-        val content =
+        val table =
             column {
                 label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
                 add(gridQuickFilter(model) { this.handle = Some(handle) })
@@ -168,6 +169,19 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 add(gridPager(model) { this.handle = Some(handle) })
                 label(handle.editError ?: lastEdit.value)
             }
+        val content =
+            row {
+                item(table) { grow = 1.0 }
+                frame(
+                    gridFilterPanel(model) {
+                        this.handle = Some(handle)
+                        height = 500.0
+                    }
+                ) { width = Some(420.0) }
+                spacing = 16.0
+                padding = Insets.all(12.0)
+                alignment = CrossAlignment.Start
+            }
         return styled(content) {
             style { background = Some(Paint(theme.tokens.palette.background.background)) }
         }
@@ -176,6 +190,24 @@ private class GridExample(scope: ComponentScope): Component(scope) {
 
 fun main() {
     context(ThemeSource(shadcnTheme())) {
-        runUiApplication("Scoop Grid — 100,000 rows × 40 columns", { scope -> GridExample(scope) })
+        val application =
+            Application(applicationOptions { lastWindowPolicy = LastWindowPolicy.Exit })
+        UiHost(onRootError = { _, error -> throw error }) {
+            host,
+            active,
+            event -> when (event) {
+                case Resumed -> host.attach(
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid — 100,000 rows × 40 columns"
+                            size = LogicalSize(1360.0, 760.0)
+                        }
+                    ),
+                    { scope -> GridExample(scope) }
+                )
+                case Window(_, WindowEvent.CloseRequested) -> active.requestExit()
+                else -> {}
+            }
+        }.use { host -> application.run(host) }
     }
 }

@@ -1,0 +1,218 @@
+package scoop.grid.tests.filters
+
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridFiltersWindowTest {
+    @Test
+    fun `native filters preserve typed drafts selections and edit transactions`() {
+        val probe = FilterProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(1, probe.submissions)
+            assertEquals(20000L, probe.encodings)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+internal class FilterProbe: Closeable {
+    var rows = FilterRows()
+    var queryEvents = 0
+    var expectedEvents = 0
+    val original =
+        DataGridState(
+            rows,
+            filterColumns(this),
+            initialFilterQuery(),
+            Some { _ -> queryEvents += 1 }
+        )
+    val selected = state(original)
+    val model: DataGridState<FilterRow> get() = selected.value
+    val handle = DataGridHandle()
+    val enabled = state(true)
+    var frame: ComponentScope? = None
+    var editor: GridTextEditor<Long>? = None
+    var submissions = 0
+    var encodings = 0L
+    var finished = false
+    val address = GridCellAddress(ViewKey.Number(1L), GridColumnId("amount"))
+    var pending: GridCommit<FilterRow>? = None
+    var pendingRows: FilterRows? = None
+    var expected = initialFilterQuery()
+    var phase = 0
+    var waiting = false
+    var retry = false
+    val diagnostic: String get() =
+        f"filters phase=${phase}, waiting=${waiting}, retry=${retry}, events=${queryEvents}/${
+            expectedEvents
+        }"
+    var active: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var calls: NativeCalls? = None
+    var root: NativeNode? = None
+    var view: ViewProbe? = None
+    var field: NativeNode? = None
+    var upper: NativeNode? = None
+    var apply: NativeNode? = None
+    var clear: NativeNode? = None
+    var revert: NativeNode? = None
+    var control: NativeNode? = None
+    var option: NativeNode? = None
+    var collection: NativeNode? = None
+    var firstChoice: NativeNode? = None
+    var lastChoice: NativeNode? = None
+    private val held = ArrayList<NativeNode>()
+
+    fun save(change: GridChange<FilterRow, Long>, completion: GridCommit<FilterRow>) {
+        submissions += 1
+        pending = Some(completion)
+        pendingRows =
+            Some(rows.replacing(FilterRow(change.row.index, change.row.name, change.value)))
+    }
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                active = Some(application)
+                application.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
+                )
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid typed filters"
+                            size = LogicalSize(1200.0, 760.0)
+                        }
+                    )
+                window = Some(native)
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> view = Some(ViewProbe(pointer))
+                            }
+                        }
+                    }
+                }
+                ui = host.attach(native, { mount -> FilterScene(this, mount) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(application.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(
+                Some(f"${diagnostic}, nativeFocus=${window?.isFocused ?: false}")
+            )
+            else -> {}
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        held.add(node);
+        return node
+    }
+    fun identified(id: String): NativeNode =
+        keep(root!!.find(id) ?: fail(Some(f"missing id ${id} at ${phase}")))
+    fun find(
+        node: NativeNode,
+        name: String,
+        value: Boolean = false,
+        role: String? = None
+    ): NativeNode? {
+        if (
+            node.flag(0) &&
+                node.text(
+                    if (value)
+                        1
+                    else
+                        0,
+                    Some(name)
+                ) &&
+                (role == None || node.text(2, role))
+        )
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val found = find(keep(node.child(index)), name, value, role)
+            when (found) {
+                case Some(_) -> return found;
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun named(name: String): NativeNode =
+        find(root!!, name) ?: fail(Some(f"missing ${name} at ${phase}"))
+    fun menu(name: String): NativeNode =
+        find(root!!, name, role = Some("AXMenuItem")) ?:
+            fail(Some(f"missing menu ${name} at ${phase}"))
+    fun caption(text: String) {
+        when (find(root!!, text, true)) {
+            case Some(_) -> {}
+            case None -> {
+                named(text);
+                Unit
+            }
+        }
+    }
+    fun value(node: NativeNode?, text: String) {
+        assertTrue(node!!.text(1, Some(text)), Some(f"draft at ${phase}: ${text}"))
+    }
+    fun count(expectedCount: Long) {
+        assertEquals(expectedCount, model.result.ordered.count, Some(f"rows at ${phase}"))
+    }
+    fun key(code: Int, text: String) {
+        assertEquals(0, filterKey(window!!, code, text))
+    }
+    fun expect(filter: GridFilter) {
+        val next = GridQuery(expected.sorting, filter, expected.quickFilter, expected.pagination)
+        if (expected != next)
+            expectedEvents += 1
+        expected = next
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in held)
+            node.close()
+        view?.close()
+    }
+}

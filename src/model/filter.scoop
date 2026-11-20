@@ -3,7 +3,7 @@ package scoop.grid
 import scoop.datetime.LocalDate
 
 /** Query data only; cell values stay in their concrete typed column. */
-public enum GridLiteral: Equals<GridLiteral> {
+public enum GridLiteral: Equals<GridLiteral>, Hash {
     Text(String), Integer(Long), Number(Double), BooleanValue(Boolean), Date(LocalDate), Empty
     public override operator fun equals(other: GridLiteral): Boolean =
         when ((this, other)) {
@@ -14,6 +14,21 @@ public enum GridLiteral: Equals<GridLiteral> {
             case(Date(val a), Date(val b)) -> a == b
             case(Empty, Empty) -> true
             else -> false
+        }
+    public override fun hash(): Long =
+        when (this) {
+            case Text(val value) -> value.hash()
+            case Integer(val value) -> value.hash()
+            case Number(val value) -> if (value == 0.0)
+                0L
+            else
+                value.toBits().hash()
+            case BooleanValue(val value) -> if (value)
+                1L
+            else
+                0L
+            case Date(val value) -> value.hash()
+            case Empty -> 0L
         }
 }
 
