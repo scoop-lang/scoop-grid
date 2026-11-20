@@ -47,6 +47,10 @@ scoop test --release .
 
 集合条件的“加载候选”按完整本地数据读取该列，候选列表按视口构造。可搜索、选中当前列表或清空选择；搜索不会丢弃列表外已选值。重名标签仍保留不同的真实值，缺值和空字符串分别显示。数据或列定义替换后提示重新加载；查询、分页和调宽复用已加载的候选。自定义 `GridValues<T>` 须同时提供字面量解码 `literal` 和编码 `encode`，不使用格式化文字作为候选身份。
 
+`gridColumnsPanel(model, handle) { ... }` 提供虚拟列列表、显隐、前移／后移、逻辑 Start／End 冻结、明确列宽、恢复列定义宽度和“适应视口”。列表同时标明列上仍在生效的排序和筛选。列宽输入按 Enter 或点击应用才发布，空值恢复 Fixed／Auto／Fraction；改变列状态保留查询结果。“适应视口”先满足最小宽度，再按当前宽度为权重分配余量，最大宽度受限时允许余白，最小宽度总和过大时保留横向滚动。
+
+用户列操作经 `handle.setColumnState`、`handle.moveColumn` 和 `handle.fitColumns` 检查当前编辑及实际视口，返回 `GridColumnActionResult`。DataGrid 的 `minimumCenterWidth` 默认保留 80 个逻辑单位；冻结宽度增长侵入该空间时拒绝，窄窗口仍可解除或缩小冻结。程序主动更新模型可用 `setColumnStates` 一次安装完整列状态，任何一项无效时保留原状态。表头拖动、拖动调宽和内容自动测宽继续实施。
+
 浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。双击或 Enter／F2 进入可编辑列的编辑器；Enter／F2 也可进入自定义单元格的真实控件。编辑中的 Enter／Tab、点击其他格和失焦会先尝试提交，校验失败保留草稿。Escape 先交给输入法，再取消草稿；内部控件先处理自己的键盘与文本输入。
 
 列通过 `edit = Some(gridEdit<Row, T>(...))` 明确声明编辑器、校验和有类型的应用回调。内置 `gridTextEditor`、`gridLongEditor`、`gridDoubleEditor` 复用原生文本编辑器；`gridBooleanEditor`、`gridDateEditor` 和 `gridChoiceEditor<T>` 分别复用 Checkbox、DatePicker 和 Select。`GridEditor<T>` 可接入自定义控件。应用用 `GridCommit<Row>.accept(nextSource)` 发布真实数据快照，或 `reject(message)` 保留草稿；异步 completion 只完成原会话一次，取消／卸载后的结果返回 false。`handle.editingCell`、`editError` 和 `isSubmitting` 可用于响应式状态栏。
@@ -72,9 +76,11 @@ scoop check --tests --release tests-cones/query-controls
 scoop test --release tests-cones/query-controls
 scoop check --tests --release tests-cones/filters
 scoop test --release tests-cones/filters
+scoop check --tests --release tests-cones/columns
+scoop test --release tests-cones/columns
 ```
 
-原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交。
+原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、调宽／显隐／顺序／冻结、窄窗口与编辑提交。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

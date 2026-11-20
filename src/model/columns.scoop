@@ -2,8 +2,15 @@ package scoop.grid
 
 import scoop.collections.HashMap
 
-public enum GridPin {
+public enum GridPin: Equals<GridPin> {
     None, Start, End
+    public override operator fun equals(other: GridPin): Boolean =
+        when ((this, other)) {
+            case(None, None) -> true
+            case(Start, Start) -> true
+            case(End, End) -> true
+            else -> false
+        }
 }
 
 public class GridColumnState public constructor(
@@ -11,7 +18,19 @@ public class GridColumnState public constructor(
     public val visible: Boolean = true,
     public val width: Double? = None,
     public val pin: GridPin = GridPin.None
-)
+): Equals<GridColumnState> {
+    public override operator fun equals(other: GridColumnState): Boolean =
+        id == other.id && visible == other.visible && width == other.width && pin == other.pin
+}
+
+internal fun gridOrderedColumnStates(values: Array<GridColumnState>): Array<GridColumnState> {
+    val result = ArrayList<GridColumnState>()
+    for (pin in [GridPin.Start, GridPin.None, GridPin.End])
+        for (entry in values)
+            if (entry.pin == pin)
+                result.add(entry)
+    return result.toArray()
+}
 
 internal class GridColumns<Row>(val values: Array<GridColumn<Row>>) {
     private val lookup = HashMap<GridColumnId, GridColumn<Row>>()

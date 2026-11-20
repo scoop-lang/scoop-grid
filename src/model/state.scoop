@@ -155,22 +155,42 @@ public class DataGridState<Row> public constructor(
     }
     public fun setColumnState(value: GridColumnState) {
         presentation.checkMutation()
-        val definition = column(value.id)
-        val width =
-            when (value.width) {
-                case Some(val amount) -> Some(definition.size.constrain(amount))
-                case None -> None
-            }
-        val resolved = GridColumnState(value.id, value.visible, width, value.pin)
-        presentation.value =
+        column(value.id)
+        setColumnStates(
             Array<GridColumnState>(presentation.value.size) {
                 index ->
                 val old = presentation.value[index]
                 if (old.id == value.id)
-                    resolved
+                    value
                 else
                     old
             }
+        )
+    }
+    public fun setColumnStates(values: Array<GridColumnState>) {
+        presentation.checkMutation()
+        val definitions = computed.value.columns
+        gridRequire(
+            values.size == definitions.values.size,
+            "column state must include every column"
+        )
+        val seen = HashSet<GridColumnId>()
+        val next =
+            Array<GridColumnState>(values.size) {
+                index ->
+                val entry = values[index]
+                val definition = definitions.get(entry.id)
+                gridRequire(seen.add(entry.id), "duplicate column state")
+                val width =
+                    when (entry.width) {
+                        case Some(val amount) -> Some(definition.size.constrain(amount))
+                        case None -> None
+                    }
+                GridColumnState(entry.id, entry.visible, width, entry.pin)
+            }
+        if (gridArrayEqual(presentation.value, next))
+            return
+        presentation.value = next
         changed()
     }
     public fun moveColumn(id: GridColumnId, index: Long) {
@@ -187,7 +207,7 @@ public class DataGridState<Row> public constructor(
                 others.add(item)
         val entry =
             moving ?: throw IllegalArgumentException(Some("grid column has no presentation state"))
-        presentation.value =
+        val next =
             Array<GridColumnState>(old.size) {
                 at -> if (at == index)
                     entry
@@ -199,6 +219,9 @@ public class DataGridState<Row> public constructor(
                             at - 1L
                     ]
             }
+        if (gridArrayEqual(old, next))
+            return
+        presentation.value = next
         changed()
     }
     private fun notify(old: GridQuery, next: GridQuery) {

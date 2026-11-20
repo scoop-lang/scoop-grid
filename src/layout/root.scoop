@@ -136,9 +136,10 @@ Element<GridMeasurePlan>(scope) {
             plan.scroll.snapshot.offset
         )
         val session = props.value.session
+        val input = props.value
         context.onFrameComplete {
             frame -> if (frame.submission == FrameSubmission.Accepted)
-                session.accept(plan)
+                session.accept(plan, input)
         }
         val line = props.value.columns.appearance.density
         val border = props.value.columns.appearance.theme.tokens.palette.border

@@ -1,0 +1,113 @@
+package scoop.grid.tests.columns
+
+import scoop.grid.*
+import scoop.test.*
+
+internal fun ColumnsProbe.accepted() {
+    if (finished || waiting || !(window?.isFocused ?: false))
+        return
+    waiting = true
+    retry = false
+    when (phase) {
+        case 1 -> calls!!.post(control!!, phase)
+        case 3 -> calls!!.post(field!!, phase, 1, "150")
+        case 5 -> calls!!.post(apply!!, phase)
+        case 7 -> calls!!.post(control!!, phase)
+        case 9 -> calls!!.post(pin!!, phase)
+        case 11 -> calls!!.post(option!!, phase)
+        case 13 -> calls!!.post(field!!, phase, 1, "300")
+        case 15 -> calls!!.post(apply!!, phase)
+        case 17 -> calls!!.post(field!!, phase, 1, "80")
+        case 19 -> calls!!.post(apply!!, phase)
+        case 21 -> calls!!.post(visible!!, phase)
+        case 23 -> calls!!.post(visible!!, phase)
+        case 25 -> calls!!.post(field!!, phase, 1, "")
+        case 27 -> calls!!.post(field!!, phase, 2)
+        case 30 -> calls!!.post(fit!!, phase)
+        case 32 -> calls!!.post(restore!!, phase)
+        case 34 -> calls!!.post(fit!!, phase)
+        case 36 -> calls!!.post(last!!, phase, 16)
+        case 38 -> calls!!.post(field!!, phase, 1, "70")
+        case 40 -> calls!!.post(apply!!, phase)
+        case 43 -> calls!!.post(pin!!, phase)
+        case 45 -> calls!!.post(option!!, phase)
+        case 47 -> calls!!.post(control!!, phase, 16)
+        case 49 -> calls!!.post(field!!, phase, 1, "NaN")
+        case 51 -> calls!!.post(apply!!, phase)
+        case 53 -> calls!!.post(restore!!, phase)
+        case 56 -> calls!!.post(visible!!, phase)
+        case 58 -> calls!!.post(fit!!, phase)
+        case 60 -> calls!!.post(fit!!, phase)
+        case 62 -> calls!!.post(fit!!, phase)
+        case 66 -> calls!!.post(fit!!, phase)
+        case 67 -> calls!!.post(fit!!, phase, 2)
+        case 70 -> calls!!.post(fit!!, phase)
+        case 72 -> calls!!.post(visible!!, phase)
+        case 74 -> calls!!.post(fit!!, phase)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun ColumnsProbe.completed(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(
+        if (phase == 30 || phase == 56 || phase == 60 || phase == 66)
+            0
+        else
+            1,
+        result,
+        Some(f"action at ${phase}")
+    )
+    waiting = false
+    if (retry) {
+        frame!!.requestFrame();
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 29 -> assertTrue(view!!.preedit())
+        case 31 -> key(53, "\u001b")
+        case 42 -> width.value = 120.0
+        case 47 -> width.value = 500.0
+        case 55 -> {
+            assertTrue(handle.beginEdit(address));
+            editor!!.state.replaceAll("bad")
+        }
+        case 58 -> editor!!.state.replaceAll("123")
+        case 61 -> {
+            val next = pendingRows!!;
+            assertTrue(pending!!.accept(next));
+            rows = next
+        }
+        case 64 -> selected.value =
+            DataGridState(
+                rows,
+                columnDefinitions(this),
+                columnQuery(),
+                Some { _ -> queryEvents += 1 }
+            )
+        case 65 -> enabled.value = false
+        case 67 -> enabled.value = true
+        case 69 -> {
+            val states = model.columnState
+            model.setColumnStates(
+                Array<GridColumnState>(states.size) {
+                    index -> GridColumnState(
+                        states[index].id,
+                        false,
+                        states[index].width,
+                        states[index].pin
+                    )
+                }
+            )
+        }
+        case 76 -> {
+            finished = true;
+            ui!!.close();
+            active!!.requestExit();
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}

@@ -3,6 +3,10 @@ package scoop.grid
 import scoop.platform.concurrent.currentThreadId
 import scoop.ui.*
 
+public enum GridColumnActionResult {
+    Applied, Rejected(String)
+}
+
 public struct GridCellAddress(val row: ViewKey, val column: GridColumnId): Equals<
     GridCellAddress
 >, Hash {
@@ -79,6 +83,25 @@ public class DataGridHandle public constructor() {
         guard.checkMutation()
         target?.cancel()
     }
+    public fun setColumnState(value: GridColumnState): GridColumnActionResult {
+        guard.checkMutation()
+        return target?.setColumnState(value) ?: GridColumnActionResult.Rejected("网格未挂载")
+    }
+    public fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult {
+        guard.checkMutation()
+        return target?.moveColumn(id, index) ?: GridColumnActionResult.Rejected("网格未挂载")
+    }
+    public fun fitColumns(): GridColumnActionResult {
+        guard.checkMutation()
+        return target?.fitColumns() ?: GridColumnActionResult.Rejected("网格未挂载")
+    }
+    internal fun usesColumns(values: Array<GridColumnState>): Boolean {
+        checkThread()
+        return when (val current = target?.columnStates ?: None) {
+            case Some(val states) -> states === values
+            case None -> false
+        }
+    }
     internal fun bind(value: GridMount) {
         checkThread()
         when (target) {
@@ -108,10 +131,14 @@ internal interface GridMount {
     val editingCell: GridCellAddress?
     val editError: String?
     val submitting: Boolean
+    val columnStates: Array<GridColumnState>?
     fun focus(address: GridCellAddress): Boolean
     fun cancel()
     fun beginEdit(address: GridCellAddress): Boolean
     fun commitEdit(): GridEditAttempt
     fun cancelEdit(): Boolean
     fun pasteCell(address: GridCellAddress, text: String): GridPasteResult
+    fun setColumnState(value: GridColumnState): GridColumnActionResult
+    fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult
+    fun fitColumns(): GridColumnActionResult
 }

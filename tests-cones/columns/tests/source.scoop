@@ -1,0 +1,50 @@
+package scoop.grid.tests.columns
+
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal fun columnRows(): TableRows<Long> =
+    TableRows(
+        Array<TableRecord<Long>>(10L) { index -> TableRecord(ViewKey.Number(index), index + 1L) }
+    )
+
+internal fun columnQuery(): GridQuery =
+    GridQuery(
+        [GridSort(GridColumnId("c1"))],
+        GridFilter.Column(GridColumnId("c2"), GridCondition.Missing(false))
+    )
+
+internal fun columnDefinitions(probe: ColumnsProbe): Array<GridColumn<Long>> =
+    Array<GridColumn<Long>>(300L) {
+        index -> gridColumn<Long, Long>(
+            GridColumnId(f"c${index}"),
+            if (index == 1L)
+                "Amount"
+            else
+                f"Column ${index}",
+            {
+                row -> if (index == 1L)
+                    row
+                else
+                    row + index
+            },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(100.0), 50.0, Some(300.0)),
+            edit =
+                if (index == 1L)
+                    Some(
+                        gridEdit<Long, Long>(
+                            {
+                                value ->
+                                val editor = gridLongEditor(value)
+                                probe.editor = Some(editor)
+                                editor
+                            },
+                            { change, completion -> probe.save(change, completion) }
+                        )
+                    )
+                else
+                    None
+        )
+    }

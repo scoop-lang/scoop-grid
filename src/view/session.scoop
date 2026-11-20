@@ -26,6 +26,7 @@ internal class GridSession<Row>: GridMount {
     var theme: ThemeSource? = None
     var entry: FocusHandle? = None
     val editing = GridEditCoordinator<Row>(this)
+    private val columnActions = GridColumnActions<Row>(this)
     private var owner: ComponentScope? = None
     private var model: DataGridState<Row>? = None
     private val rows: TableSource<Row>? get() = model?.result?.rows
@@ -37,10 +38,18 @@ internal class GridSession<Row>: GridMount {
     private val cells = HashMap<GridCellAddress, GridCellFocus>()
     private var pageRows = 1L
     private var onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit }
-    fun accept(plan: GridMeasurePlan) {
-        if (active)
+    fun accept(plan: GridMeasurePlan, input: GridRootProps<Row>) {
+        if (active) {
             pageRows = max(1L, (plan.bodyHeight / plan.rowHeight).toLong())
+            columnActions.accept(plan, input)
+        }
     }
+    public override val columnStates: Array<GridColumnState>? get() = columnActions.states
+    public override fun setColumnState(value: GridColumnState): GridColumnActionResult =
+        columnActions.change(value)
+    public override fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult =
+        columnActions.move(id, index)
+    public override fun fitColumns(): GridColumnActionResult = columnActions.fit()
     fun navigate(address: GridCellAddress, key: KeyEvent): Boolean {
         if (!active || !enabled)
             return false
@@ -138,6 +147,7 @@ internal class GridSession<Row>: GridMount {
             context.consume()
     }
     fun update(input: GridRootProps<Row>) {
+        columnActions.update(input)
         model = Some(input.input.state)
         columns = Some(input.columns)
         theme = Some(input.theme)
@@ -162,6 +172,7 @@ internal class GridSession<Row>: GridMount {
         }
     }
     fun unmount() {
+        columnActions.close()
         editing.close()
         reference?.unbind(this)
         reference = None

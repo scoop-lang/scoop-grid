@@ -18,7 +18,8 @@ public class DataGridProps<Row> public constructor(
     public val theme: ThemeSource? = None,
     public val onEditEnd: (GridEditEnd) -> Unit = { _ -> Unit },
     public val onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit },
-    public val multiSortModifier: GridMultiSortModifier = GridMultiSortModifier.Shift
+    public val multiSortModifier: GridMultiSortModifier = GridMultiSortModifier.Shift,
+    public val minimumCenterWidth: Double = 80.0
 ) {
     init {
         gridRequire(height.isFinite() && height >= 0.0, "invalid grid height")
@@ -32,6 +33,10 @@ public class DataGridProps<Row> public constructor(
         gridRequire(rowHeight.isFinite() && rowHeight > 0.0, "invalid grid row height")
         gridRequire(headerHeight.isFinite() && headerHeight >= 0.0, "invalid grid header height")
         gridRequire(overscan.isFinite() && overscan >= 0.0, "invalid grid overscan")
+        gridRequire(
+            minimumCenterWidth.isFinite() && minimumCenterWidth >= 0.0,
+            "invalid grid center minimum width"
+        )
     }
 }
 
@@ -49,6 +54,7 @@ public class DataGridBuilder internal constructor() {
     public var onEditEnd: (GridEditEnd) -> Unit = { _ -> Unit }
     public var onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit }
     public var multiSortModifier: GridMultiSortModifier = GridMultiSortModifier.Shift
+    public var minimumCenterWidth: Double = 80.0
     public var key: ViewKey = ViewKey.Position
     internal fun <Row> snapshot(state: DataGridState<Row>): DataGridProps<Row> =
         DataGridProps(
@@ -65,7 +71,8 @@ public class DataGridBuilder internal constructor() {
             theme,
             onEditEnd,
             onPasteResult,
-            multiSortModifier
+            multiSortModifier,
+            minimumCenterWidth
         )
 }
 

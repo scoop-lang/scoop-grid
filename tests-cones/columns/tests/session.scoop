@@ -1,0 +1,232 @@
+package scoop.grid.tests.columns
+
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridColumnsWindowTest {
+    @Test
+    fun `native column tools preserve identities queries and edit transactions`() {
+        val probe = ColumnsProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(1, probe.submissions)
+            assertEquals(0, probe.queryEvents)
+        } catch (error: Throwable) {
+            println(probe.diagnostic);
+            throw error
+        }
+        finally {
+            probe.close()
+        }
+    }
+}
+
+internal class ColumnsProbe: Closeable {
+    var rows = columnRows()
+    var queryEvents = 0
+    val original =
+        DataGridState(rows, columnDefinitions(this), columnQuery(), Some { _ -> queryEvents += 1 })
+    val originalResult = original.result
+    val selected = state(original)
+    val model: DataGridState<Long> get() = selected.value
+    val handle = DataGridHandle()
+    val enabled = state(true)
+    val width = state(500.0)
+    var frame: ComponentScope? = None
+    var editor: GridTextEditor<Long>? = None
+    var submissions = 0
+    var finished = false
+    val address = GridCellAddress(ViewKey.Number(0L), GridColumnId("c1"))
+    var pending: GridCommit<Long>? = None
+    var pendingRows: TableRows<Long>? = None
+    var phase = 0
+    var waiting = false
+    var retry = false
+    val diagnostic: String get() =
+        f"columns phase=${phase}, waiting=${waiting}, retry=${retry}, queryEvents=${queryEvents}"
+    var active: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var calls: NativeCalls? = None
+    var root: NativeNode? = None
+    var view: ViewProbe? = None
+    var grid: NativeNode? = None
+    var collection: NativeNode? = None
+    var cell: NativeNode? = None
+    var field: NativeNode? = None
+    var apply: NativeNode? = None
+    var restore: NativeNode? = None
+    var fit: NativeNode? = None
+    var pin: NativeNode? = None
+    var visible: NativeNode? = None
+    var control: NativeNode? = None
+    var option: NativeNode? = None
+    var last: NativeNode? = None
+    private val held = ArrayList<NativeNode>()
+    init {
+        original.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))
+        original.setColumnState(GridColumnState(GridColumnId("c299"), pin = GridPin.End))
+    }
+    fun save(change: GridChange<Long, Long>, completion: GridCommit<Long>) {
+        submissions += 1
+        pending = Some(completion)
+        val before = rows
+        pendingRows =
+            Some(
+                TableRows(
+                    Array<TableRecord<Long>>(before.count) {
+                        index -> TableRecord(
+                            before.keyAt(index),
+                            if (before.keyAt(index) == change.address.row)
+                                change.value
+                            else
+                                before.rowAt(index)
+                        )
+                    }
+                )
+            )
+    }
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                active = Some(application)
+                application.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
+                )
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid column tools";
+                            size = LogicalSize(960.0, 660.0)
+                        }
+                    )
+                window = Some(native)
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> view = Some(ViewProbe(pointer))
+                            }
+                        }
+                    }
+                }
+                ui = host.attach(native, { mount -> ColumnsScene(this, mount) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(application.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(
+                Some(f"${diagnostic}, nativeFocus=${window?.isFocused ?: false}")
+            )
+            else -> {}
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        held.add(node);
+        return node
+    }
+    fun identified(id: String): NativeNode =
+        keep(root!!.find(id) ?: fail(Some(f"missing id ${id} at ${phase}")))
+    fun find(
+        node: NativeNode,
+        name: String,
+        value: Boolean = false,
+        role: String? = None
+    ): NativeNode? {
+        if (
+            node.flag(0) &&
+                node.text(
+                    if (value)
+                        1
+                    else
+                        0,
+                    Some(name)
+                ) &&
+                (role == None || node.text(2, role))
+        )
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val found = find(keep(node.child(index)), name, value, role)
+            when (found) {
+                case Some(_) -> return found;
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun named(name: String): NativeNode =
+        find(root!!, name) ?: fail(Some(f"missing ${name} at ${phase}"))
+    fun menu(name: String): NativeNode =
+        find(root!!, name, role = Some("AXMenuItem")) ?:
+            fail(Some(f"missing menu ${name} at ${phase}"))
+    fun caption(text: String) {
+        when (find(root!!, text, true)) {
+            case Some(_) -> {};
+            case None -> {
+                named(text);
+                Unit
+            }
+        }
+    }
+    fun value(text: String) {
+        assertTrue(field!!.text(1, Some(text)), Some(f"width draft at ${phase}: ${text}"))
+    }
+    fun entry(id: String): GridColumnState {
+        for (entry in model.columnState)
+            if (entry.id.value == id)
+                return entry
+        return fail(Some(f"missing state ${id}"))
+    }
+    fun controls(id: String) {
+        field = Some(identified(f"grid-columns-${id}-width"))
+        apply = Some(identified(f"grid-columns-${id}-apply"))
+        restore = Some(identified(f"grid-columns-${id}-restore"))
+        pin = Some(identified(f"grid-columns-${id}-pin"))
+    }
+    fun key(code: Int, text: String) {
+        assertEquals(0, columnKey(window!!, code, text))
+    }
+    public override fun close() {
+        calls?.close();
+        for (node in held)
+            node.close();
+        view?.close()
+    }
+}

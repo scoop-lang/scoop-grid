@@ -1,0 +1,56 @@
+package scoop.grid.tests.columns
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+
+internal class ColumnsScene(private val probe: ColumnsProbe, scope: ComponentScope): Component(
+    scope
+) {
+    public override fun render(): View {
+        val probe = this.probe
+        return element(
+            { mount -> ColumnsLayout(probe, mount) },
+            [
+                gridColumnsPanel(probe.model, probe.handle) {
+                    height = 260.0
+                    enabled = probe.enabled.value
+                },
+                dataGrid(probe.model) {
+                    handle = Some(probe.handle)
+                    width = Some(probe.width.value)
+                    height = 340.0
+                    rowHeight = 32.0
+                    headerHeight = 32.0
+                    minimumCenterWidth = 100.0
+                    enabled = probe.enabled.value
+                }
+            ]
+        )
+    }
+}
+
+private class ColumnsLayout(private val probe: ColumnsProbe, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    init {
+        probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(420.0, 620.0)))
+        context.placeChild(0L, Point(12.0, 12.0))
+        context.measureChild(1L, Constraints(maxWidth = Some(500.0), maxHeight = Some(340.0)))
+        context.placeChild(1L, Point(448.0, 12.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(960.0, 660.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted)
+                probe.accepted()
+        }
+    }
+}

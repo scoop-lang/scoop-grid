@@ -1,0 +1,370 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.text.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.text.TextEditorState
+import scoop.ui.component.button as columnsButton
+import scoop.ui.component.input as columnsInput
+import scoop.ui.component.select as columnsSelect
+import scoop.ui.component.virtualList as columnsList
+
+public class GridColumnsPanelProps<Row> public constructor(
+    public val state: DataGridState<Row>,
+    public val handle: DataGridHandle,
+    public val height: Double = 256.0,
+    public val enabled: Boolean = true,
+    public val fonts: FontCollection? = None,
+    public val theme: ThemeSource? = None
+) {
+    init {
+        gridRequire(height.isFinite() && height > 0.0, "invalid columns panel height")
+    }
+}
+
+public class GridColumnsPanel<Row> public constructor(
+    private val props: Props<GridColumnsPanelProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private var selected = props.value.state.columnState[0L].id
+    private var model = props.value.state
+    private var shown = selected
+    private var appliedWidth = props.value.state.columnState[0L].width
+    private var draft = TextEditorState(gridColumnWidthText(appliedWidth))
+    private val revision = state(0L)
+    private var message: String? = None
+    private var ambient: ThemeSource? = None
+    public override fun onMount() {
+        when (props.value.theme) {
+            case None -> ambient = Some(currentThemeSource())
+            case Some(_) -> {}
+        }
+    }
+    private fun available(): Boolean =
+        scope.isMounted &&
+            props.value.enabled &&
+            props.value.handle.usesColumns(props.value.state.columnState) &&
+            !props.value.handle.isSubmitting &&
+            !draft.isComposing
+    private fun report(value: GridColumnActionResult) {
+        if (!scope.isMounted)
+            return
+        message =
+            when (value) {
+                case Applied -> None
+                case Rejected(val text) -> Some(text)
+            }
+        revision.value += 1L
+    }
+    private fun choose(id: GridColumnId): Boolean {
+        if (!available() || gridColumnStateIndex(props.value.state.columnState, id) == None)
+            return false
+        selected = id
+        message = None
+        revision.value += 1L
+        return true
+    }
+    private fun entry(id: GridColumnId): GridColumnState? {
+        val states = props.value.state.columnState
+        return when (val index = gridColumnStateIndex(states, id)) {
+            case Some(val at) -> Some(states[at])
+            case None -> None
+        }
+    }
+    private fun show(id: GridColumnId, visible: Boolean) {
+        if (!available())
+            return
+        val current = entry(id) ?: return
+        report(
+            props.value.handle.setColumnState(
+                GridColumnState(id, visible, current.width, current.pin)
+            )
+        )
+    }
+    private fun pin(id: GridColumnId, value: GridPin) {
+        if (!available() || selected != id)
+            return
+        val current = entry(id) ?: return
+        report(
+            props.value.handle.setColumnState(
+                GridColumnState(id, current.visible, current.width, value)
+            )
+        )
+    }
+    private fun setWidth(restore: Boolean = false) {
+        if (!available())
+            return
+        val current = entry(selected) ?: return
+        val text =
+            if (restore)
+                ""
+            else
+                draft.committedText.trim()
+        val width =
+            if (text == "")
+                None
+            else {
+                val number = text.toDoubleOrNone()
+                when (number) {
+                    case Some(val value) -> if (value.isFinite() && value >= 0.0)
+                        Some(value)
+                    else {
+                        report(GridColumnActionResult.Rejected("请输入非负的有限列宽"));
+                        return
+                    }
+                    case None -> {
+                        report(GridColumnActionResult.Rejected("请输入非负的有限列宽"));
+                        return
+                    }
+                }
+            }
+        val result =
+            props.value.handle.setColumnState(
+                GridColumnState(selected, current.visible, width, current.pin)
+            )
+        report(result)
+        when (result) {
+            case Applied -> if (restore && scope.isMounted) {
+                draft = TextEditorState()
+                revision.value += 1L
+            }
+            case Rejected(_) -> {}
+        }
+    }
+    private fun move(forward: Boolean) {
+        if (!available())
+            return
+        val states = props.value.state.columnState
+        val ordered = gridOrderedColumnStates(states)
+        val index = gridColumnStateIndex(ordered, selected) ?: return
+        val destination =
+            if (forward)
+                index + 1L
+            else
+                index - 1L
+        if (
+            destination <
+                0L ||
+                destination >=
+                ordered.size ||
+                ordered[destination].pin !=
+                ordered[index].pin
+        )
+            return
+        val target = gridColumnStateIndex(states, ordered[destination].id) ?: return
+        report(props.value.handle.moveColumn(selected, target))
+    }
+    private fun fit() {
+        if (available())
+            report(props.value.handle.fitColumns())
+    }
+    public override fun render(): View {
+        revision.value
+        val input = props.value
+        val states = input.state.columnState
+        val ordered = gridOrderedColumnStates(states)
+        val index = gridColumnStateIndex(ordered, selected) ?: 0L
+        val current = ordered[index]
+        selected = current.id
+        if (model !== input.state || shown != selected || appliedWidth != current.width) {
+            model = input.state
+            shown = selected
+            appliedWidth = current.width
+            draft = TextEditorState(gridColumnWidthText(current.width))
+            message = None
+        }
+        val appearance =
+            GridAppearance(
+                (input.theme ?: (ambient ?: currentThemeSource())).read(scope),
+                input.fonts ?: scope.defaultFonts,
+                scope.layoutDirection
+            )
+        val active = available()
+        val definition = input.state.column(selected)
+        val title = definition.title
+        val widthDraft = draft
+        val source =
+            GridColumnChoices(
+                input,
+                ordered,
+                selected,
+                appearance,
+                active,
+                { id -> choose(id) },
+                { id, visible -> show(id, visible) }
+            )
+        return column {
+            add(
+                columnsButton("适应视口", { this @GridColumnsPanel.fit() }) {
+                    enabled = active
+                    fonts = input.fonts
+                    theme = input.theme
+                    semantics =
+                        ComponentSemantics(
+                            name = Some("所有可见列适应视口"),
+                            automationId = Some("grid-columns-fit")
+                        )
+                }
+            )
+            when (this @GridColumnsPanel.message) {
+                case Some(val text) -> add(gridColumnsLabel(text, appearance))
+                case None -> {}
+            }
+            add(
+                columnsList(source, ItemExtent.Fixed(40.0 * appearance.density)) {
+                    key = ViewKey.Text("grid-columns-list")
+                    height = Some(input.height * appearance.density)
+                    enabled = active
+                    theme = input.theme
+                    navigation = ItemNavigation.Roving()
+                    itemSemantics = Some(source.semantics())
+                    collectionSemantics =
+                        ComponentSemantics(
+                            name = Some("网格列"),
+                            automationId = Some("grid-columns-list")
+                        )
+                }
+            )
+            add(gridColumnsLabel(f"设置：${title}", appearance))
+            row {
+                key = ViewKey.Text(f"grid-columns-placement-${current.id.value}")
+                item(
+                    columnsSelect(
+                        binding<GridPin?>(
+                            { this @GridColumnsPanel.entry(current.id)?.pin },
+                            {
+                                next -> when (next) {
+                                    case Some(val pin) -> this @GridColumnsPanel.pin(
+                                        current.id,
+                                        pin
+                                    );
+                                    case None -> {}
+                                }
+                            }
+                        ),
+                        [
+                            Choice(ViewKey.Text("none"), GridPin.None, "不冻结"),
+                            Choice(ViewKey.Text("start"), GridPin.Start, "冻结在开头"),
+                            Choice(ViewKey.Text("end"), GridPin.End, "冻结在末尾")
+                        ]
+                    ) {
+                        enabled = active
+                        width = Some(144.0 * appearance.density)
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = gridColumnControl(current.id, "pin", f"${title} 列冻结位置")
+                    }
+                ) { grow = 1.0 }
+                add(
+                    columnsButton("前移", { this @GridColumnsPanel.move(false) }) {
+                        enabled = active && index > 0L && ordered[index - 1L].pin == current.pin
+                        variant = ButtonVariant.Outline
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = gridColumnControl(current.id, "previous", f"前移 ${title} 列")
+                    }
+                )
+                add(
+                    columnsButton("后移", { this @GridColumnsPanel.move(true) }) {
+                        enabled =
+                            active &&
+                                index +
+                                1L <
+                                ordered.size &&
+                                ordered[index + 1L].pin ==
+                                current.pin
+                        variant = ButtonVariant.Outline
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = gridColumnControl(current.id, "next", f"后移 ${title} 列")
+                    }
+                )
+                spacing = 6.0 * appearance.density
+            }
+            row {
+                key = ViewKey.Text(f"grid-columns-width-${current.id.value}")
+                item(
+                    columnsInput(widthDraft) {
+                        enabled =
+                            input.enabled &&
+                                input.handle.usesColumns(states) &&
+                                !input.handle.isSubmitting
+                        placeholder = "列定义宽度"
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = gridColumnControl(current.id, "width", f"${title} 列宽")
+                        onSubmit = { _ -> this @GridColumnsPanel.setWidth() }
+                    }
+                ) { grow = 1.0 }
+                add(
+                    columnsButton("应用", { this @GridColumnsPanel.setWidth() }) {
+                        enabled = active
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = gridColumnControl(current.id, "apply", f"应用 ${title} 列宽")
+                    }
+                )
+                add(
+                    columnsButton("恢复", { this @GridColumnsPanel.setWidth(true) }) {
+                        enabled = active
+                        fonts = input.fonts
+                        theme = input.theme
+                        variant = ButtonVariant.Outline
+                        semantics = gridColumnControl(current.id, "restore", f"恢复 ${title} 列定义宽度")
+                    }
+                )
+                spacing = 6.0 * appearance.density
+            }
+            spacing = 8.0 * appearance.density
+            alignment = CrossAlignment.Stretch
+        }
+    }
+}
+
+internal fun gridColumnWidthText(width: Double?): String =
+    when (width) {
+        case Some(val number) -> f"${number}"
+        case None -> ""
+    }
+
+internal fun gridColumnsLabel(text: String, appearance: GridAppearance): View =
+    component(
+        LabelProps(
+            LabelText.Plain(text, None),
+            Some(appearance.fonts),
+            baseStyle = Some(appearance.body)
+        ),
+        { props, scope -> Label(props, scope) }
+    )
+
+internal fun gridColumnControl(id: GridColumnId, part: String, name: String): ComponentSemantics =
+    ComponentSemantics(name = Some(name), automationId = Some(f"grid-columns-${id.value}-${part}"))
+
+public class GridColumnsPanelBuilder internal constructor() {
+    public var height: Double = 256.0
+    public var enabled: Boolean = true
+    public var fonts: FontCollection? = None
+    public var theme: ThemeSource? = None
+    public var key: ViewKey = ViewKey.Position
+    internal fun <Row> snapshot(
+        state: DataGridState<Row>,
+        handle: DataGridHandle
+    ): GridColumnsPanelProps<Row> =
+        GridColumnsPanelProps(state, handle, height, enabled, fonts, theme)
+}
+
+public fun <Row> gridColumnsPanel(
+    state: DataGridState<Row>,
+    handle: DataGridHandle,
+    configure: GridColumnsPanelBuilder.() -> Unit = {}
+): View {
+    val builder = GridColumnsPanelBuilder()
+    builder.configure()
+    return component(
+        builder.snapshot(state, handle),
+        { props, scope -> GridColumnsPanel(props, scope) },
+        builder.key
+    )
+}

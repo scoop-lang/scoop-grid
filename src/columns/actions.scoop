@@ -1,0 +1,228 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.math.max
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class GridAcceptedColumns<Row>(
+    val model: DataGridState<Row>,
+    val width: Double,
+    val appearance: GridAppearance
+)
+
+/** Column actions use the last displayed viewport and publish one model update. */
+internal class GridColumnActions<Row>(private val session: GridSession<Row>): Closeable {
+    private var input: GridRootProps<Row>? = None
+    private var accepted: GridAcceptedColumns<Row>? = None
+    val states: Array<GridColumnState>? get() =
+        when (input) {
+            case Some(val current) -> Some(current.input.state.columnState)
+            case None -> None
+        }
+    fun update(value: GridRootProps<Row>) {
+        when (accepted) {
+            case Some(val old) -> if (old.model !== value.input.state)
+                accepted = None
+            case None -> {}
+        }
+        input = Some(value)
+    }
+    fun accept(plan: GridMeasurePlan, value: GridRootProps<Row>) {
+        val current = input ?: return
+        if (current.columns === value.columns && current.input.state === value.input.state)
+            accepted =
+                Some(
+                    GridAcceptedColumns(
+                        value.input.state,
+                        plan.columns.viewport,
+                        value.columns.appearance
+                    )
+                )
+    }
+    private fun current(): GridRootProps<Row>? =
+        if (session.active && session.enabled)
+            input
+        else
+            None
+    fun change(value: GridColumnState): GridColumnActionResult {
+        val current = current() ?: return GridColumnActionResult.Rejected("网格未挂载或已禁用")
+        val model = current.input.state
+        val definition =
+            model.findColumn(value.id) ?: return GridColumnActionResult.Rejected("列已移除")
+        val width =
+            when (value.width) {
+                case Some(val number) -> {
+                    if (!number.isFinite() || number < 0.0)
+                        return GridColumnActionResult.Rejected("请输入非负的有限列宽")
+                    Some(definition.size.constrain(number))
+                }
+                case None -> None
+            }
+        val entry = GridColumnState(value.id, value.visible, width, value.pin)
+        val before = model.columnState
+        val next =
+            Array<GridColumnState>(before.size) {
+                index -> if (before[index].id == value.id)
+                    entry
+                else
+                    before[index]
+            }
+        return publish(current, before, next)
+    }
+    fun move(id: GridColumnId, index: Long): GridColumnActionResult {
+        val current = current() ?: return GridColumnActionResult.Rejected("网格未挂载或已禁用")
+        val model = current.input.state
+        val before = model.columnState
+        val oldIndex =
+            gridColumnStateIndex(before, id) ?: return GridColumnActionResult.Rejected("列已移除")
+        if (index < 0L || index >= before.size)
+            return GridColumnActionResult.Rejected("列位置超出范围")
+        if (oldIndex == index)
+            return GridColumnActionResult.Applied
+        when (val error = editError(current, before, model.columns)) {
+            case Some(val message) -> return GridColumnActionResult.Rejected(message)
+            case None -> {}
+        }
+        model.moveColumn(id, index)
+        return GridColumnActionResult.Applied
+    }
+    fun fit(): GridColumnActionResult {
+        val current = current() ?: return GridColumnActionResult.Rejected("网格未挂载或已禁用")
+        val viewport = accepted ?: return GridColumnActionResult.Rejected("请等待网格完成布局")
+        val model = current.input.state
+        val before = model.columnState
+        val plan = GridColumnsPlan(model.columns, before, viewport.appearance)
+        if (plan.columns.size == 0L)
+            return GridColumnActionResult.Rejected("没有可见列")
+        val geometry = plan.resolve(viewport.width)
+        val density = viewport.appearance.density
+        val sizes = Array<TableColumnSize>(plan.columns.size) { index -> plan.columns[index].size }
+        val weights = Array<Double>(plan.columns.size) { index -> geometry.widths[index] / density }
+        val widths = gridFitColumnWidths(sizes, weights, viewport.width / density)
+        val byId = HashMap<GridColumnId, Double>()
+        for (index in 0L ..< plan.columns.size)
+            byId.put(plan.columns[index].id, widths[index])
+        val next =
+            Array<GridColumnState>(before.size) {
+                index ->
+                val entry = before[index]
+                when (val width = byId[entry.id]) {
+                    case Some(_) -> GridColumnState(entry.id, entry.visible, width, entry.pin)
+                    case None -> entry
+                }
+            }
+        return publish(current, before, next)
+    }
+    private fun publish(
+        current: GridRootProps<Row>,
+        before: Array<GridColumnState>,
+        next: Array<GridColumnState>
+    ): GridColumnActionResult {
+        if (gridArrayEqual(before, next))
+            return GridColumnActionResult.Applied
+        val model = current.input.state
+        val definitions = model.columns
+        when (accepted) {
+            case Some(val viewport) -> {
+                val oldLayout =
+                    GridColumnsPlan(definitions, before, viewport.appearance).resolve(
+                        viewport.width
+                    )
+                val newLayout =
+                    GridColumnsPlan(definitions, next, viewport.appearance).resolve(viewport.width)
+                if (
+                    !gridFrozenGrowthAllowed(
+                        oldLayout,
+                        newLayout,
+                        current.input.minimumCenterWidth * viewport.appearance.density
+                    )
+                )
+                    return GridColumnActionResult.Rejected("冻结列占用过宽；请先缩小或解除其他冻结列")
+            }
+            case None -> {
+                for (index in 0L ..< next.size)
+                    if (
+                        next[index].visible &&
+                            next[index].pin !=
+                            GridPin.None &&
+                            next[index] !=
+                            before[index]
+                    )
+                        return GridColumnActionResult.Rejected("请等待网格完成布局")
+            }
+        }
+        when (val error = editError(current, before, definitions)) {
+            case Some(val message) -> return GridColumnActionResult.Rejected(message)
+            case None -> {}
+        }
+        model.setColumnStates(next)
+        return GridColumnActionResult.Applied
+    }
+    private fun editError(
+        current: GridRootProps<Row>,
+        before: Array<GridColumnState>,
+        definitions: Array<GridColumn<Row>>
+    ): String? {
+        val attempt = session.commitEdit()
+        when (attempt) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return Some("请先完成当前单元格的编辑或保存，再操作列")
+        }
+        val latest = this.current() ?: return Some("网格已关闭或禁用")
+        if (
+            latest.input.state !==
+                current.input.state ||
+                current.input.state.columnState !==
+                before ||
+                current.input.state.columns !==
+                definitions
+        )
+            return Some("列配置已更新，请重试")
+        return None
+    }
+    public override fun close() {
+        input = None;
+        accepted = None
+    }
+}
+
+internal fun gridColumnStateIndex(values: Array<GridColumnState>, id: GridColumnId): Long? {
+    for (index in 0L ..< values.size)
+        if (values[index].id == id)
+            return Some(index)
+    return None
+}
+
+internal fun gridFitColumnWidths(
+    sizes: Array<TableColumnSize>,
+    weights: Array<Double>,
+    width: Double
+): Array<Double> {
+    gridRequire(sizes.size == weights.size, "fit weights must match columns")
+    val tracks =
+        Array<TableColumnSize>(sizes.size) {
+            index -> TableColumnSize(
+                GridTrack.Fraction(
+                    if (weights[index] > 0.0)
+                        weights[index]
+                    else
+                        1.0
+                ),
+                sizes[index].minimum,
+                sizes[index].maximum
+            )
+        }
+    return TableTracks(tracks, Array<Double>(sizes.size) { _ -> 0.0 }).resolve(width).values
+}
+
+internal fun gridFrozenGrowthAllowed(
+    before: GridColumnLayout,
+    after: GridColumnLayout,
+    minimumCenter: Double
+): Boolean {
+    val previous = before.startWidth + before.endWidth
+    val next = after.startWidth + after.endWidth
+    return next <= previous || next <= max(0.0, after.viewport - minimumCenter)
+}
