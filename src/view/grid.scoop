@@ -95,7 +95,8 @@ public class DataGrid<Row> public constructor(
                 result.topCount,
                 result.bottomCount,
                 input.columnSpans,
-                selection
+                selection,
+                input.state.cellRangeBounds
             )
         val header =
             GridHeaderCells(

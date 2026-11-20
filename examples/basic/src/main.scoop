@@ -232,6 +232,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
         val table =
             column {
                 label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
+                label("Shift＋方向键或点击扩展选区，Command / Ctrl＋C 复制，Escape 清除选区")
                 add(gridQuickFilter(model) { this.handle = Some(handle) })
                 row {
                     add(
@@ -301,6 +302,14 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                                         case Rejected(val message) -> message
                                     }
                             }
+                        onCopyResult =
+                            {
+                                result -> lastEdit.value =
+                                    when (result) {
+                                        case Copied -> "已复制单元格"
+                                        case Rejected(val message) -> message
+                                    }
+                            }
                     }
                 )
                 add(gridPager(model) { this.handle = Some(handle) })
@@ -319,6 +328,26 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                                     }
                                 }
                         ) { enabled = model.selectedRowKeys.size > 0L }
+                    )
+                    add(
+                        gridPinButton(
+                            "复制选区",
+                            onClick =
+                                {
+                                    handle.copyCells();
+                                    Unit
+                                }
+                        ) { enabled = model.cellRange != None }
+                    )
+                    add(
+                        gridPinButton(
+                            "清除选区",
+                            onClick =
+                                {
+                                    if (handle.clearCellRange())
+                                        lastEdit.value = "已清除单元格选区"
+                                }
+                        ) { enabled = model.cellRange != None }
                     )
                 }
                 label(handle.editError ?: lastEdit.value)

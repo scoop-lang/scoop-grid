@@ -1,0 +1,139 @@
+package scoop.grid.tests.range
+
+import scoop.collections.HashSet
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal struct RangeRecord(val key: Long, val value: Long)
+
+internal class RangeRows(private val probe: RangeProbe): TableSource<RangeRecord> {
+    public override val count: Long get() = 100000000L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(value)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): RangeRecord {
+        probe.reads += 1L
+        return RangeRecord(index, index)
+    }
+}
+
+internal fun rangeRows(offset: Long = 0L): TableRows<RangeRecord> =
+    TableRows(
+        Array<TableRecord<RangeRecord>>(12L) {
+            index -> TableRecord(ViewKey.Number(index), RangeRecord(index, index + offset))
+        }
+    )
+
+internal fun rangeAddress(row: Long, column: Long = 0L): GridCellAddress =
+    GridCellAddress(ViewKey.Number(row), GridColumnId(f"c${column}"))
+
+internal fun rangeColumns(probe: RangeProbe): Array<GridColumn<RangeRecord>> =
+    Array<GridColumn<RangeRecord>>(80L) {
+        index ->
+        val id = GridColumnId(f"c${index}")
+        val size = TableColumnSize(GridTrack.Fixed(120.0))
+        if (index == 2L)
+            gridActionColumn<RangeRecord>(
+                id,
+                "Action",
+                {
+                    row -> rangeObserved(
+                        probe,
+                        row.key,
+                        index,
+                        button("Action", onClick = { probe.clicks += 1 })
+                    )
+                },
+                size
+            )
+        else
+            if (index == 1L)
+                gridColumn<RangeRecord, Long>(
+                    id,
+                    "Value",
+                    { row -> row.value },
+                    gridLongValues(),
+                    size,
+                    cell =
+                        Some {
+                            row -> rangeObserved(probe, row.key, index, label(row.value.toString()))
+                        },
+                    edit =
+                        Some(
+                            gridEdit<RangeRecord, Long>(
+                                {
+                                    value ->
+                                    val editor = gridLongEditor(value)
+                                    probe.editor = Some(editor)
+                                    editor
+                                },
+                                { change, completion -> probe.save(change, completion) }
+                            )
+                        )
+                )
+            else
+                gridColumn<RangeRecord, String>(
+                    id,
+                    f"Column ${index}",
+                    {
+                        row ->
+                        if (probe.failCopy)
+                            throw IllegalStateException(Some("copy formatting failed"))
+                        f"R${row.value}C${index}"
+                    },
+                    gridTextValues(),
+                    size,
+                    cell =
+                        Some {
+                            row -> rangeObserved(
+                                probe,
+                                row.key,
+                                index,
+                                label(f"R${row.value}C${index}")
+                            )
+                        },
+                    exportable = index != 3L
+                )
+    }
+
+private fun rangeObserved(probe: RangeProbe, row: Long, column: Long, content: View): View {
+    probe.built += 1L
+    return element(
+        rangeAddress(row, column),
+        { props, scope -> RangeObserved(probe.live, props, scope) },
+        [content]
+    )
+}
+
+private class RangeObserved(
+    private val live: HashSet<GridCellAddress>,
+    private val props: Props<GridCellAddress>,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    private val address = props.value
+    public override fun onMount() {
+        assertTrue(live.add(address))
+    }
+    public override fun onUnmount() {
+        assertTrue(live.remove(address))
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val child = context.measureChild(0L, constraints)
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(child, Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+    }
+}

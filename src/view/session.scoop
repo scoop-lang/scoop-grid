@@ -11,6 +11,8 @@ import scoop.ui.style.ThemeSource
 import scoop.window.KeyEvent
 import scoop.window.ElementState
 import scoop.window.MouseButton
+import scoop.window.LogicalKey
+import scoop.window.NamedKey
 import scoop.window.clipboard
 import scoop.window.WindowException
 
@@ -45,6 +47,63 @@ internal class GridSession<Row>: GridMount {
     private val cells = HashMap<GridCellAddress, GridCellFocus>()
     private var pageRows = 1L
     private var onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit }
+    private var onCopyResult: (GridCopyResult) -> Unit = { _ -> Unit }
+    public override val cellRange: GridCellRange? get() = model?.cellRange ?: None
+    public override fun setCellRange(value: GridCellRange?): Boolean {
+        if (!active || !enabled || !inputEnabled || editingCell != None)
+            return false
+        return model?.setCellRange(value) ?: false
+    }
+    fun selectCell(address: GridCellAddress, extend: Boolean, before: GridCellAddress?) {
+        val current = model ?: return
+        val target = anchor(address) ?: return
+        val origin =
+            if (extend)
+                current.cellRange?.anchor ?: (before ?: target)
+            else
+                target
+        editing.leave {
+            if (active && enabled && inputEnabled && usesModel(current) && valid(target)) {
+                if (current.setCellRange(Some(GridCellRange(origin, target))))
+                    requestCell(target)
+            }
+        }
+    }
+    public override fun copyCells(
+        fallback: GridCellAddress?,
+        includeHeaders: Boolean
+    ): GridCopyResult {
+        val result = copyToClipboard(fallback, includeHeaders)
+        onCopyResult(result)
+        return result
+    }
+    private fun copyToClipboard(
+        fallback: GridCellAddress?,
+        includeHeaders: Boolean
+    ): GridCopyResult {
+        if (!active || !enabled || !inputEnabled)
+            return GridCopyResult.Rejected("网格未挂载或已禁用")
+        if (editingCell != None)
+            return GridCopyResult.Rejected("请先完成当前单元格编辑")
+        val current = model ?: return GridCopyResult.Rejected("网格未挂载")
+        val scope = owner ?: return GridCopyResult.Rejected("网格未挂载")
+        return try {
+            val address =
+                when (fallback) {
+                    case Some(_) -> fallback
+                    case None -> focused
+                }
+            val text =
+                current.copyText(address, includeHeaders) ?:
+                    return GridCopyResult.Rejected("没有可复制的单元格")
+            if (!active || !enabled || !inputEnabled)
+                return GridCopyResult.Rejected("网格已关闭或禁用")
+            scope.nativeWindow.clipboard.writeText(text)
+            GridCopyResult.Copied
+        } catch (error: Exception) {
+            GridCopyResult.Rejected(error.message ?: "无法复制单元格")
+        }
+    }
     fun usesModel(value: DataGridState<Row>): Boolean =
         when (model) {
             case Some(val current) -> current === value
@@ -173,7 +232,13 @@ internal class GridSession<Row>: GridMount {
             return false
         val source = rows ?: return false
         val plan = columns ?: return false
-        val command = gridNavigation(key, plan.appearance.direction) ?: return false
+        val extending =
+            key.modifiers.shift &&
+                key.logicalKey !=
+                LogicalKey.Named(NamedKey.Tab) &&
+                editingCell ==
+                None
+        val command = gridNavigation(key, plan.appearance.direction, extending) ?: return false
         val row = source.indexOfKey(address.row) ?: return false
         val column = plan.indexOf(address.column) ?: return false
         val range = span(address) ?: return false
@@ -200,11 +265,15 @@ internal class GridSession<Row>: GridMount {
         when (next) {
             case None -> {
                 when (editing.current) {
-                    case None -> return false
+                    case None -> {
+                        model?.clearCellRange()
+                        return false
+                    }
                     case Some(_) -> when (command) {
                         case Tab(val reverse) -> {
                             editing.submit(
                                 Some {
+                                    model?.clearCellRange()
                                     owner?.moveFocus(reverse);
                                     Unit
                                 }
@@ -218,10 +287,24 @@ internal class GridSession<Row>: GridMount {
             case Some(_) -> {}
         }
         val target = next!!
+        if (extending) {
+            val current = model ?: return false
+            val end = GridCellAddress(source.keyAt(target.row), plan.columns[target.column].id)
+            if (
+                current.setCellRange(Some(GridCellRange(current.cellRange?.anchor ?: address, end)))
+            )
+                requestCell(end)
+            return true
+        }
         if (target.row != row || target.column != column) {
             val address = GridCellAddress(source.keyAt(target.row), plan.columns[target.column].id)
-            editing.leave { restore(address, target.row) }
-        }
+            editing.leave {
+                model?.clearCellRange()
+                restore(address, target.row)
+            }
+        } else
+            if (editingCell == None)
+                model?.clearCellRange()
         return true
     }
     public override val active: Boolean get() = owner?.isMounted ?: false
@@ -305,6 +388,7 @@ internal class GridSession<Row>: GridMount {
         theme = Some(input.theme)
         enabled = input.input.enabled
         onPasteResult = input.input.onPasteResult
+        onCopyResult = input.input.onCopyResult
         editing.update(input.input)
         columnReorder.update(input)
         columnSizing.update(input)

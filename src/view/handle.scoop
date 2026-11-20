@@ -11,6 +11,10 @@ public enum GridRowActionResult {
     Applied, Rejected(String)
 }
 
+public enum GridCopyResult {
+    Copied, Rejected(String)
+}
+
 public struct GridCellAddress(val row: ViewKey, val column: GridColumnId): Equals<
     GridCellAddress
 >, Hash {
@@ -59,6 +63,22 @@ public class DataGridHandle public constructor() {
     public val isSubmitting: Boolean get() {
         checkThread()
         return target?.submitting ?: false
+    }
+    public val cellRange: GridCellRange? get() {
+        checkThread()
+        return target?.cellRange ?: None
+    }
+    public fun setCellRange(value: GridCellRange?): Boolean {
+        guard.checkMutation()
+        return target?.setCellRange(value) ?: false
+    }
+    public fun clearCellRange(): Boolean = setCellRange(None)
+    public fun copyCells(
+        fallback: GridCellAddress? = None,
+        includeHeaders: Boolean = false
+    ): GridCopyResult {
+        guard.checkMutation()
+        return target?.copyCells(fallback, includeHeaders) ?: GridCopyResult.Rejected("网格未挂载")
     }
     public fun beginEdit(address: GridCellAddress): Boolean {
         guard.checkMutation()
@@ -164,6 +184,7 @@ internal interface GridMount {
     val editingCell: GridCellAddress?
     val editError: String?
     val submitting: Boolean
+    val cellRange: GridCellRange?
     val columnStates: Array<GridColumnState>?
     fun focus(address: GridCellAddress): Boolean
     fun cancel()
@@ -171,6 +192,8 @@ internal interface GridMount {
     fun commitEdit(): GridEditAttempt
     fun cancelEdit(): Boolean
     fun pasteCell(address: GridCellAddress, text: String): GridPasteResult
+    fun setCellRange(value: GridCellRange?): Boolean
+    fun copyCells(fallback: GridCellAddress?, includeHeaders: Boolean): GridCopyResult
     fun setColumnState(value: GridColumnState): GridColumnActionResult
     fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult
     fun moveColumnGroup(id: GridColumnGroupId, index: Long): GridColumnActionResult

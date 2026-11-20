@@ -14,7 +14,8 @@ internal class GridDataCellProps<Row>(
     val wraps: Boolean,
     val enabled: Boolean,
     val columnSpan: Long,
-    val selection: GridSelectionView<Row>?
+    val selection: GridSelectionView<Row>?,
+    val range: GridCellRangeBounds?
 )
 
 /** One stable cell element hosts either its display content or its actual editor. */
@@ -79,7 +80,8 @@ internal class GridDataCell<Row>(
                     ),
                 enabled = input.enabled,
                 columnSpan = input.columnSpan,
-                selectedRow = input.selection?.selected?.contains(input.key) ?: false
+                selectedRow = input.selection?.selected?.contains(input.key) ?: false,
+                range = input.range
             ),
             { props, scope -> GridCell(props, scope) },
             [

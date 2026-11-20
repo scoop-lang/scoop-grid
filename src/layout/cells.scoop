@@ -32,7 +32,8 @@ internal class GridRowCells<Row>(
     private val policy: GridRowPolicy<Row>,
     private val enabled: Boolean,
     private val spans: GridRowSpans,
-    private val selection: GridSelectionView<Row>?
+    private val selection: GridSelectionView<Row>?,
+    private val range: GridCellRangeBounds?
 ): ItemSource {
     public override val count: Long get() = spans.count
     public override fun keyAt(index: Long): ViewKey =
@@ -64,7 +65,8 @@ internal class GridRowCells<Row>(
                 spans.contributes(columnIndex, policy.contributors),
                 enabled,
                 spans.span(columnIndex).count,
-                selection
+                selection,
+                range
             ),
             { props, scope -> GridDataCell(props, scope) }
         )
@@ -227,7 +229,8 @@ internal class GridCellProps<Row>(
     val headers: Array<SemanticNodeId> = [],
     val enabled: Boolean = true,
     val columnSpan: Long = 1L,
-    val selectedRow: Boolean = false
+    val selectedRow: Boolean = false,
+    val range: GridCellRangeBounds? = None
 )
 
 internal class GridCell<Row>(
@@ -265,6 +268,8 @@ internal class GridCell<Row>(
     private var registered: GridCellAddress? = None
     private var doubleClick = false
     private var additiveSort = false
+    private var extendRange = false
+    private var rangeAnchor: GridCellAddress? = None
     init {
         scope.routeChildren(area)
         scope.routeSemanticsChildren(Some(semantics))
@@ -284,8 +289,15 @@ internal class GridCell<Row>(
                     ) -> {
                         additiveSort =
                             gridAdditiveSort(pointer.state.modifiers, props.value.multiSortModifier)
-                        if (state == ElementState.Pressed)
+                        if (state == ElementState.Pressed) {
                             doubleClick = clicks >= 2
+                            extendRange = pointer.state.modifiers.shift
+                            rangeAnchor =
+                                when (val range = props.value.session?.cellRange ?: None) {
+                                    case Some(val value) -> Some(value.anchor)
+                                    case None -> props.value.session?.focused ?: None
+                                }
+                        }
                     }
                     case Contact(InputContactEvent.Began(val value)) -> additiveSort =
                         gridAdditiveSort(value.pointer.modifiers, props.value.multiSortModifier)
@@ -296,6 +308,8 @@ internal class GridCell<Row>(
                     case Pointer(InputPointerEvent.Cancelled(_, _)) -> {
                         doubleClick = false
                         additiveSort = false
+                        extendRange = false
+                        rangeAnchor = None
                     }
                     else -> {}
                 }
@@ -306,7 +320,11 @@ internal class GridCell<Row>(
                 event -> when (event) {
                     case Pointer(
                         InputPointerEvent.Button(_, MouseButton.Left, ElementState.Released, _)
-                    ) -> doubleClick = false
+                    ) -> {
+                        doubleClick = false
+                        extendRange = false
+                        rangeAnchor = None
+                    }
                     else -> {}
                 }
             }
@@ -352,7 +370,12 @@ internal class GridCell<Row>(
         }
         semantics.bindReference(input.headerReference)
         area.scope.textCommandAvailability =
-            Some(TextCommandAvailability(paste = input.editable && !input.submitting))
+            Some(
+                TextCommandAvailability(
+                    copy = input.address != None && input.enabled,
+                    paste = input.editable && !input.submitting
+                )
+            )
         semantics.update(
             SemanticProperties(
                 enabled = input.drag?.enabled ?: input.enabled,
@@ -383,6 +406,14 @@ internal class GridCell<Row>(
                         None,
                 error = input.error,
                 busy = input.submitting,
+                selected =
+                    if (input.address == None)
+                        None
+                    else
+                        Some(
+                            input.range?.intersects(input.row, input.column, input.columnSpan) ?:
+                                false
+                        ),
                 cell =
                     if (input.address == None)
                         input.headerCell
@@ -414,16 +445,21 @@ internal class GridCell<Row>(
         when (props.value.activate) {
             case Some(val action) -> action(additiveSort)
             case None -> when (props.value.address) {
-                case Some(val address) -> if (doubleClick && props.value.editable)
+                case Some(val address) -> if (doubleClick && !extendRange && props.value.editable)
                     props.value.session?.beginEdit(address)
                 else
-                    props.value.session?.focus(address)
+                    props.value.session?.selectCell(address, extendRange, rangeAnchor)
                 case None -> handle.requestFocus()
             }
         }
     }
     private fun keyboard(context: RoutedEventContext, event: InputEvent) {
         val address = props.value.address ?: return headerKey(context, event)
+        if (handle.hasFocus && gridCopyCommand(event)) {
+            props.value.session?.copyCells(Some(address), false)
+            context.consume()
+            return
+        }
         if (handle.hasFocus && gridPasteCommand(event)) {
             props.value.session?.pasteClipboard(address)
             context.consume()
@@ -454,6 +490,19 @@ internal class GridCell<Row>(
             return
         }
         if (gridPlainKey(key)) {
+            if (
+                handle.hasFocus &&
+                    key.logicalKey ==
+                    LogicalKey.Named(NamedKey.Escape) &&
+                    (session?.cellRange ?: None) !=
+                    None &&
+                    (session?.editingCell ?: None) ==
+                    None
+            ) {
+                session?.setCellRange(None)
+                context.consume()
+                return
+            }
             if (
                 handle.hasFocus &&
                     (
@@ -592,14 +641,18 @@ internal class GridCell<Row>(
         val input = props.value
         val bounds = Rect(0.0, 0.0, context.size.width, context.size.height)
         val palette = input.appearance.theme.tokens.palette
+        val selected = input.range?.intersects(input.row, input.column, input.columnSpan) ?: false
         val background =
             if (input.address == None)
                 palette.muted.background
             else
-                if (input.selectedRow)
-                    palette.muted.background
+                if (selected)
+                    palette.accent.background
                 else
-                    palette.background.background
+                    if (input.selectedRow)
+                        palette.muted.background
+                    else
+                        palette.background.background
         val focused = handle.isFocusVisible
         val line = input.appearance.density
         context.clipRect(clip)
@@ -626,6 +679,52 @@ internal class GridCell<Row>(
         context.place(area, focusBounds)
         context.semantics(semantics, bounds)
         context.children()
+        if (selected) {
+            val range = input.range!!
+            val top = input.row == range.firstRow
+            val bottom = input.row == range.lastRow
+            val start =
+                range.firstColumn >=
+                    input.column &&
+                    range.firstColumn -
+                    input.column <
+                    input.columnSpan
+            val end =
+                range.lastColumn >=
+                    input.column &&
+                    range.lastColumn -
+                    input.column <
+                    input.columnSpan
+            val left =
+                if (input.appearance.direction == LayoutDirection.Rtl)
+                    end
+                else
+                    start
+            val right =
+                if (input.appearance.direction == LayoutDirection.Rtl)
+                    start
+                else
+                    end
+            context.draw {
+                paint ->
+                val stroke = min(line, min(bounds.width, bounds.height))
+                val ink = Paint(palette.ring)
+                if (top)
+                    paint.canvas.drawRect(Rect(0.0, 0.0, bounds.width, stroke), ink)
+                if (bottom)
+                    paint.canvas.drawRect(
+                        Rect(0.0, bounds.height - stroke, bounds.width, stroke),
+                        ink
+                    )
+                if (left)
+                    paint.canvas.drawRect(Rect(0.0, 0.0, stroke, bounds.height), ink)
+                if (right)
+                    paint.canvas.drawRect(
+                        Rect(bounds.width - stroke, 0.0, stroke, bounds.height),
+                        ink
+                    )
+            }
+        }
         if (focused || (headerDrag?.moving ?: false))
             context.draw {
                 paint ->

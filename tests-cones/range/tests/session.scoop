@@ -1,0 +1,367 @@
+package scoop.grid.tests.range
+
+import scoop.collections.HashSet
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.tests.window.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridRangeWindowTest {
+    @Test
+    fun `one rectangle composes with virtual cells native copy and editing`() {
+        val probe = RangeProbe()
+        @Unsafe
+        {
+            val clipboard = saveNativeClipboard() ?: fail(Some("cannot save clipboard"))
+            try {
+                context(ThemeSource(shadcnTheme())) {
+                    UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                        host -> Application().run(host)
+                    }
+                }
+                assertTrue(probe.finished)
+                assertFalse(probe.handle.isAttached)
+                assertEquals(0L, probe.live.size)
+            } catch (error: Throwable) {
+                println(probe.diagnostic)
+                reportRangeFailure(error)
+                throw error
+            } finally {
+                probe.close()
+                assertEquals(0, restoreNativeClipboard(clipboard))
+            }
+        }
+    }
+}
+
+private fun reportRangeFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        reportRangeFailure(error.primaryFailure)
+        reportRangeFailure(error.cleanupFailure)
+    } else
+        if (error is AssertionFailure) {
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        } else
+            if (error is Exception) {
+                println(error.message ?: "exception")
+                error.printStackTrace()
+            }
+}
+
+internal class RangeProbe: Closeable {
+    var reads = 0L
+    var built = 0L
+    var clicks = 0
+    var failCopy = false
+    val live = HashSet<GridCellAddress>()
+    val selected =
+        state(
+            DataGridState(
+                RangeRows(this),
+                rangeColumns(this),
+                pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(99999999L)]),
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        )
+    val model: DataGridState<RangeRecord> get() = selected.value
+    var records = rangeRows()
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val outside = FocusHandle()
+    val enabled = state(true)
+    val direction = state(LayoutDirection.Ltr)
+    val spans = state(false)
+    var editor: GridTextEditor<Long>? = None
+    var pending: GridCommit<RangeRecord>? = None
+    var pendingRows: TableRows<RangeRecord>? = None
+    var submissions = 0
+    var copies = 0
+    var beforeCopies = 0
+    var lastCopy: GridCopyResult? = None
+    var before = 0L
+    var frame: ComponentScope? = None
+    var phase = 0
+    var waiting = false
+    var waitingInput = false
+    var retry = false
+    var initialized = false
+    var acceptedFrames = 0
+    var focusEvents = 0
+    var windowFocused = false
+    var finished = false
+    var application: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var view: Ptr<Unit>? = None
+    var calls: NativeCalls? = None
+    var root: NativeNode? = None
+    var table: NativeNode? = None
+    var far: NativeNode? = None
+    var node: NativeNode? = None
+    var pointer = Point(0.0, 0.0)
+    private val held = ArrayList<NativeNode>()
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(30L)
+    val diagnostic: String get() =
+        f"range phase=${phase}, waiting=${waiting}, waitingInput=${waitingInput}, initialized=${
+            initialized
+        }, frames=${acceptedFrames}, windowFocused=${windowFocused}, focusEvents=${
+            focusEvents
+        }, retry=${retry}, copies=${copies}, reads=${reads}, built=${built}, focused=${
+            handle.focusedCell != None
+        }, editing=${handle.editingCell != None}"
+    init {
+        freeze(model)
+    }
+    private fun freeze(value: DataGridState<RangeRecord>) {
+        value.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))
+        value.setColumnState(GridColumnState(GridColumnId("c79"), pin = GridPin.End))
+    }
+    fun small(): DataGridState<RangeRecord> {
+        val value =
+            DataGridState(
+                records,
+                rangeColumns(this),
+                pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(11L)]),
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        freeze(value)
+        return value
+    }
+    fun copied(result: GridCopyResult) {
+        copies += 1
+        lastCopy = Some(result)
+    }
+    fun save(change: GridChange<RangeRecord, Long>, completion: GridCommit<RangeRecord>) {
+        submissions += 1
+        pending = Some(completion)
+        val before = records
+        pendingRows =
+            Some(
+                TableRows(
+                    Array<TableRecord<RangeRecord>>(before.count) {
+                        index ->
+                        val row = before.rowAt(index)
+                        TableRecord(
+                            before.keyAt(index),
+                            if (before.keyAt(index) == change.address.row)
+                                RangeRecord(row.key, change.value)
+                            else
+                                row
+                        )
+                    }
+                )
+            )
+    }
+    fun event(host: UiHost, active: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                application = Some(active)
+                active.setControlFlow(ControlFlow.WaitUntil(timeout))
+                val native =
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid cell range"
+                            size = LogicalSize(640.0, 360.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> RangeScene(this, scope) })
+                val menu = active.createMenu()
+                val edit = menu.insert(MenuItemDescription("Edit", kind = MenuItemKind.Submenu))
+                menu.insert(
+                    MenuItemDescription("Range Copy", command = MenuCommand.Role(MenuRole.Copy)),
+                    Some(edit)
+                )
+                active.attachMenuBar(menu)
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> {
+                                    view = Some(pointer)
+                                    root = Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                                }
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(active.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Exiting -> {
+                println(diagnostic)
+                flushOutput()
+            }
+            case Window(_, WindowEvent.Focused(val focused)) -> {
+                focusEvents += 1
+                windowFocused = focused
+                if (focused)
+                    frame?.requestFrame()
+            }
+            case NewEvents(StartCause.Deadline) -> fail(Some(diagnostic))
+            else -> {}
+        }
+    }
+    fun keep(value: NativeNode): NativeNode {
+        held.add(value);
+        return value
+    }
+    fun cell(row: Long, column: Long): NativeNode =
+        keep(
+            table!!.cell(row, column) ?:
+                fail(Some(f"missing range cell ${row}:${column} at ${phase}"))
+        )
+    fun findTable(node: NativeNode): NativeNode? {
+        if (node.text(2, Some("AXTable")))
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val found = findTable(keep(node.child(index)))
+            when (found) {
+                case Some(_) -> return found
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun prepareClick(row: Long, column: Long) {
+        @Unsafe
+        {
+            pointer =
+                Point(
+                    nativeRangeCoordinate(view!!, row, column, true),
+                    nativeRangeCoordinate(view!!, row, column, false)
+                )
+        }
+        assertTrue(pointer.x.isFinite() && pointer.y.isFinite())
+    }
+    fun click(shift: Boolean = false) {
+        @Unsafe
+        {
+            assertEquals(0, nativeEditorPointer(view!!, pointer.x, pointer.y, true, 1, shift))
+            assertEquals(0, nativeEditorPointer(view!!, pointer.x, pointer.y, false, 1, shift))
+        }
+        inputQueued()
+    }
+    fun key(code: Int, shift: Boolean = false, primary: Boolean = false) {
+        val text =
+            when (code) {
+                case 0 -> "a"
+                case 8 -> "c"
+                case 53 -> "\u001b"
+                case 115 -> "\uf729"
+                case 119 -> "\uf72b"
+                case 123 -> "\uf702"
+                case 124 -> "\uf703"
+                case 125 -> "\uf701"
+                else -> fail(Some(f"unexpected native key ${code}"))
+            }
+        val flags =
+            (
+                if (shift)
+                    1
+                else
+                    0
+            ) +
+                (
+                    if (primary)
+                        8
+                    else
+                        0
+                )
+        @Unsafe
+        {
+            text.withUtf8Bytes {
+                bytes,
+                length -> @Unsafe
+                {
+                    assertEquals(0, nativeEditorKey(view!!, code, bytes, length, flags))
+                }
+            }
+        }
+        inputQueued()
+    }
+    fun menuCopy() {
+        @Unsafe
+        {
+            assertTrue(nativeRangeMenuCopy(view!!))
+        }
+        inputQueued()
+    }
+    private fun inputQueued() {
+        waitingInput = true
+        // Native events are dispatched before the next owner mailbox batch.
+        assertTrue(
+            application!!.proxy().post {
+                _ ->
+                waitingInput = false
+                if (!finished)
+                    frame?.requestFrame()
+            }
+        )
+    }
+    fun copiedText(value: String) {
+        val actual = window!!.clipboard.readText()
+        assertEquals(
+            Some(value),
+            actual,
+            Some(
+                f"copy phase=${phase}, callbacks=${copies}, expected=${value}, actual=${
+                    actual ?: "<none>"
+                }"
+            )
+        )
+    }
+    fun selectedRange(a: GridCellAddress, b: GridCellAddress) {
+        assertEquals(Some(GridCellRange(a, b)), model.cellRange)
+        assertEquals(model.cellRange, handle.cellRange)
+    }
+    fun copiedOk(result: GridCopyResult) {
+        when (result) {
+            case Copied -> {}
+            case Rejected(val reason) -> fail(Some(reason))
+        }
+    }
+    fun rejected(result: GridCopyResult) {
+        when (result) {
+            case Rejected(_) -> {}
+            case Copied -> fail(Some("unexpected copy success"))
+        }
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in held)
+            node.close()
+        held.clear()
+    }
+}
+
+@Extern(name = "scoop_grid_range_coordinate")
+private fun nativeRangeCoordinate(
+    view: Ptr<Unit>,
+    row: Long,
+    column: Long,
+    horizontal: Boolean
+): Double
+
+@Extern(name = "scoop_grid_range_menu_copy")
+private fun nativeRangeMenuCopy(view: Ptr<Unit>): Boolean

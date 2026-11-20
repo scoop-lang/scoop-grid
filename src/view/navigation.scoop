@@ -13,7 +13,11 @@ internal enum GridNavigation {
 
 internal struct GridCellIndex(val row: Long, val column: Long)
 
-internal fun gridNavigation(key: KeyEvent, direction: LayoutDirection): GridNavigation? {
+internal fun gridNavigation(
+    key: KeyEvent,
+    direction: LayoutDirection,
+    extend: Boolean = false
+): GridNavigation? {
     if (key.state != ElementState.Pressed || key.synthetic)
         return None
     val m = key.modifiers
@@ -34,7 +38,7 @@ internal fun gridNavigation(key: KeyEvent, direction: LayoutDirection): GridNavi
             None
         else
             Some(GridNavigation.Tab(m.shift))
-    if (m.shift)
+    if (m.shift && !extend)
         return None
     return when (key.logicalKey) {
         case Named(NamedKey.Home) -> Some(GridNavigation.Edge(false, primary))

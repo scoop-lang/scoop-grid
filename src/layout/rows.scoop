@@ -19,7 +19,8 @@ internal class GridRows<Row>(
     val topCount: Long = 0L,
     val bottomCount: Long = 0L,
     val columnSpans: ((Row) -> Array<GridColumnSpan>)? = None,
-    val selection: GridSelectionView<Row>? = None
+    val selection: GridSelectionView<Row>? = None,
+    val range: GridCellRangeBounds? = None
 ): ItemSource {
     public override val count: Long get() = source.count
     public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
@@ -29,7 +30,18 @@ internal class GridRows<Row>(
         val key = keyAt(index)
         val spans = spansFor(row)
         val cells =
-            GridRowCells(row, key, index, columns, session, policy, enabled, spans, selection)
+            GridRowCells(
+                row,
+                key,
+                index,
+                columns,
+                session,
+                policy,
+                enabled,
+                spans,
+                selection,
+                range
+            )
         return lazyElement(
             cells,
             GridRowProps(row, index, key, columns, session, policy, spans, selection),
@@ -93,13 +105,26 @@ internal class GridRows<Row>(
                             key, column ->
                             val index = source.indexOfKey(gridRowKey(key))
                             when (index) {
-                                case Some(val at) -> Some(
-                                    SemanticItemProperties(
-                                        value = columns.columns[column].text(source.rowAt(at)),
-                                        enabled = enabled,
-                                        focusable = true
+                                case Some(val at) -> {
+                                    val row = source.rowAt(at)
+                                    val span = spansFor(row).span(column)
+                                    Some(
+                                        SemanticItemProperties(
+                                            value = columns.columns[column].text(row),
+                                            enabled = enabled,
+                                            focusable = true,
+                                            selected =
+                                                Some(
+                                                    range?.intersects(
+                                                        at,
+                                                        span.column,
+                                                        span.count
+                                                    ) ?:
+                                                        false
+                                                )
+                                        )
                                     )
-                                )
+                                }
                                 case None -> None
                             }
                         },

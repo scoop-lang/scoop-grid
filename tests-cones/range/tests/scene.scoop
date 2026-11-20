@@ -1,0 +1,67 @@
+package scoop.grid.tests.range
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class RangeScene(private val probe: RangeProbe, scope: ComponentScope): Component(scope) {
+    public override fun render(): View {
+        val probe = this.probe
+        return element(
+            { mount -> RangePanel(probe, mount) },
+            [
+                direction(
+                    dataGrid(probe.model) {
+                        height = 320.0
+                        width = Some(640.0)
+                        rowHeight = 32.0
+                        headerHeight = 32.0
+                        scroll = Some(probe.scroll)
+                        handle = Some(probe.handle)
+                        enabled = probe.enabled.value
+                        selectionCheckboxes = false
+                        onCopyResult = { result -> probe.copied(result) }
+                        columnSpans =
+                            if (probe.spans.value)
+                                Some {
+                                    row -> if (row.key == 1L)
+                                        [GridColumnSpan([GridColumnId("c4"), GridColumnId("c5")])]
+                                    else
+                                        []
+                                }
+                            else
+                                None
+                    },
+                    probe.direction.value
+                ),
+                button("Outside grid", onClick = {}) { focus = FocusOptions(Some(probe.outside)) }
+            ]
+        )
+    }
+}
+
+private class RangePanel(private val probe: RangeProbe, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    init {
+        probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(640.0, 320.0)))
+        context.placeChild(0L, Point(0.0, 0.0))
+        context.measureChild(1L, Constraints.tight(Size(180.0, 40.0)))
+        context.placeChild(1L, Point(0.0, 320.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(640.0, 360.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+        context.onFrameComplete {
+            result -> if (result.submission == FrameSubmission.Accepted)
+                probe.accepted()
+        }
+    }
+}
