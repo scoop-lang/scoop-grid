@@ -69,6 +69,8 @@ internal class ColumnsProbe: Closeable {
     val direction = state(LayoutDirection.Ltr)
     val scroll = ScrollState()
     val enabled = state(true)
+    val localized = state(false)
+    var localizedColumns: Array<GridColumnState>? = None
     val width = state(500.0)
     var frame: ComponentScope? = None
     var editor: GridTextEditor<Long>? = None

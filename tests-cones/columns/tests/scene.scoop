@@ -17,6 +17,31 @@ internal class ColumnsScene(private val probe: ColumnsProbe, scope: ComponentSco
                     gridColumnsPanel(probe.model, probe.handle) {
                         height = 260.0
                         enabled = probe.enabled.value
+                        if (probe.localized.value)
+                            labels =
+                                GridColumnsLabels(
+                                    fit = "Fit",
+                                    fitName = "Fit visible columns",
+                                    name = "Columns",
+                                    widthName = { title -> f"Width of ${title}" },
+                                    pinStart = "Start",
+                                    pinEnd = "End",
+                                    unpinned = "Unpinned",
+                                    sort =
+                                        {
+                                            priority,
+                                            direction -> if (
+                                                direction == GridSortDirection.Ascending
+                                            )
+                                                f"order=${priority}:up"
+                                            else
+                                                f"order=${priority}:down"
+                                        },
+                                    filtered = "filtered",
+                                    decorate = { title, status -> f"${title} | ${status}" },
+                                    invalidWidth = "Width must be finite and nonnegative",
+                                    error = { text -> f"Problem:${text}" }
+                                )
                     },
                     dataGrid(probe.model) {
                         handle = Some(probe.handle)

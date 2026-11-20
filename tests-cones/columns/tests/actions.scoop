@@ -78,12 +78,23 @@ internal fun ColumnsProbe.completed(tag: Int, result: Int) {
     }
     when (phase) {
         case 29 -> {
+            localizedColumns = Some(model.columnState)
+            localized.value = true
             assertTrue(view!!.preedit())
             inputQueued()
         }
-        case 31 -> key(53, "\u001b")
+        case 31 -> {
+            localized.value = false
+            key(53, "\u001b")
+        }
         case 42 -> width.value = 120.0
-        case 47 -> width.value = 500.0
+        case 43 -> localized.value = true
+        case 47 -> {
+            localized.value = false
+            width.value = 500.0
+        }
+        case 49 -> localized.value = true
+        case 53 -> localized.value = false
         case 55 -> {
             assertTrue(handle.beginEdit(address));
             editor!!.state.replaceAll("bad")

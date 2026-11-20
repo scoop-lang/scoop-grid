@@ -69,18 +69,18 @@ internal class GridFilterScalar(initial: GridLiteral) {
         date.value = value
         dateDraft.reset(value?.toString() ?: "")
     }
-    fun value(kind: GridValueKind): GridLiteral =
+    fun value(kind: GridValueKind, labels: GridFilterLabels = GridFilterLabels()): GridLiteral =
         when (kind) {
             case Text -> GridLiteral.Text(text.committedText)
             case Integer -> GridLiteral.Integer(
                 text.committedText.trim().toLongOrNone() ?:
-                    throw IllegalArgumentException(Some("请输入有效整数"))
+                    throw IllegalArgumentException(Some(labels.invalidInteger))
             )
             case Number -> {
                 val value =
                     text.committedText.trim().toDoubleOrNone() ?:
-                        throw IllegalArgumentException(Some("请输入有效数值"))
-                gridRequire(value.isFinite(), "请输入有限数值")
+                        throw IllegalArgumentException(Some(labels.invalidNumber))
+                gridRequire(value.isFinite(), labels.nonfiniteNumber)
                 when (original) {
                     case Integer(_) -> if (text.committedText == gridFilterLiteralText(original))
                         original
@@ -92,7 +92,7 @@ internal class GridFilterScalar(initial: GridLiteral) {
             case BooleanValue -> GridLiteral.BooleanValue(boolean.value)
             case Date -> GridLiteral.Date(
                 LocalDate.parseOrNone(text.committedText.trim()) ?:
-                    throw IllegalArgumentException(Some("请输入有效日期（YYYY-MM-DD）"))
+                    throw IllegalArgumentException(Some(labels.invalidDate))
             )
         }
 }
@@ -140,12 +140,18 @@ internal class GridFilterConditionDraft(
         caseSensitive.value = false
         values.reset()
     }
-    fun condition(kind: GridValueKind): GridCondition =
+    fun condition(
+        kind: GridValueKind,
+        labels: GridFilterLabels = GridFilterLabels()
+    ): GridCondition =
         when (operation.value) {
             case Missing -> GridCondition.Missing(true)
             case Present -> GridCondition.Missing(false)
             case In -> GridCondition.In(values.selectedValues())
-            case Between -> GridCondition.Between(first.value(kind), second.value(kind))
+            case Between -> GridCondition.Between(
+                first.value(kind, labels),
+                second.value(kind, labels)
+            )
             case Contains -> GridCondition.Text(
                 GridTextMatch.Contains,
                 first.text.committedText,
@@ -161,7 +167,10 @@ internal class GridFilterConditionDraft(
                 first.text.committedText,
                 caseSensitive.value
             )
-            else -> GridCondition.Compare(gridFilterComparison(operation.value), first.value(kind))
+            else -> GridCondition.Compare(
+                gridFilterComparison(operation.value),
+                first.value(kind, labels)
+            )
         }
 }
 

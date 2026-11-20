@@ -32,7 +32,15 @@ internal fun FilterProbe.inspect(tag: Int) {
             assertEquals(0L, last.count)
             assertEquals(10000L, encodings)
         }
-        case 4 -> assertEquals(1L, firstChoice!!.numericValue)
+        case 4 -> {
+            assertEquals(1L, firstChoice!!.numericValue)
+            assertTrue(firstChoice!!.same(identified("grid-filter-1-choice-0")))
+            assertTrue(collection!!.same(identified("grid-filter-1-values")))
+            assertTrue(collection!!.text(0, Some("Rule 1 Tag candidates")))
+            assertTrue(apply!!.text(0, Some("Apply conditions")))
+            assertEquals(10000L, encodings)
+            caption("chosen:1; shown:10000")
+        }
         case 6 -> {
             assertEquals(1L, control!!.numericValue)
             assertEquals(2L, collection!!.trait(4))
@@ -80,11 +88,22 @@ internal fun FilterProbe.inspect(tag: Int) {
         }
         case 25 -> retry = !field!!.flag(4)
         case 26 -> {
+            if (!field!!.text(0, Some("Rule 1 Name value"))) {
+                retry = true
+                return
+            }
+            assertTrue(field!!.flag(4))
+            assertTrue(field!!.same(named("Rule 1 Name value")))
             value(field, "中😀");
             assertFalse(apply!!.flag(1));
             assertFalse(control!!.flag(1))
         }
         case 28 -> {
+            if (!field!!.text(0, Some("条件 1 Name 筛选值"))) {
+                retry = true
+                return
+            }
+            assertTrue(field!!.flag(4))
             value(field, "");
             assertTrue(apply!!.flag(1))
         }
@@ -94,7 +113,7 @@ internal fun FilterProbe.inspect(tag: Int) {
             value(field, "0")
             control = Some(named("条件 1 Amount 筛选方式"))
         }
-        case 34 -> option = Some(menu("闭区间"))
+        case 34 -> option = Some(menu("Within range"))
         case 36 -> {
             field = Some(named("条件 1 Amount 下限"))
             upper = Some(named("条件 1 Amount 上限"))
@@ -142,7 +161,7 @@ internal fun FilterProbe.inspect(tag: Int) {
         }
         case 74 -> value(upper, "2026-11-31")
         case 76 -> {
-            caption("请输入有效日期（YYYY-MM-DD）");
+            caption("Problem:Use an ISO date");
             value(upper, "2026-11-31")
         }
         case 78 -> value(upper, "2026-11-03")

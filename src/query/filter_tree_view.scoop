@@ -17,6 +17,7 @@ internal class GridFilterUi<Row>(
     val active: () -> Boolean,
     val failed: (String) -> Unit
 ) {
+    val labels: GridFilterLabels get() = input.labels
     val enabled: Boolean get() = input.enabled
     val structural: Boolean get() = enabled && !draft.composing
     fun message(text: String): View =
@@ -64,10 +65,16 @@ internal class GridFilterUi<Row>(
     }
 }
 
-internal fun <Row> gridFilterKind(model: DataGridState<Row>, id: GridColumnId): GridValueKind {
-    val column = model.findColumn(id) ?: throw IllegalArgumentException(Some(f"筛选列已移除：${id.value}"))
-    gridRequire(column.filterable, f"列不可筛选：${column.title}")
-    return column.valueKind ?: throw IllegalArgumentException(Some(f"列没有可筛选的值：${column.title}"))
+internal fun <Row> gridFilterKind(
+    model: DataGridState<Row>,
+    id: GridColumnId,
+    labels: GridFilterLabels
+): GridValueKind {
+    val column =
+        model.findColumn(id) ?: throw IllegalArgumentException(Some(labels.columnRemoved(id.value)))
+    gridRequire(column.filterable, labels.columnUnfilterable(column.title))
+    return column.valueKind ?:
+        throw IllegalArgumentException(Some(labels.columnWithoutValue(column.title)))
 }
 
 internal fun gridFilterControl(key: ViewKey, part: String, name: String): ComponentSemantics =
@@ -89,11 +96,12 @@ internal fun <Row> gridFilterGroupView(
     remove: (() -> Unit)?
 ): View {
     val density = ui.appearance.density
+    val labels = ui.labels
     val title =
         if (path == "")
-            "筛选条件"
+            labels.name
         else
-            f"条件组 ${path}"
+            labels.groupTitle(path)
     return filterColumn {
         key = group.key
         add(
@@ -111,25 +119,30 @@ internal fun <Row> gridFilterGroupView(
                             }
                         ),
                         [
-                            Choice(ViewKey.Text("and"), true, "所有条件（AND）"),
-                            Choice(ViewKey.Text("or"), false, "任一条件（OR）")
+                            Choice(ViewKey.Text("and"), true, labels.allConditions),
+                            Choice(ViewKey.Text("or"), false, labels.anyCondition)
                         ]
                     ) {
                         enabled = ui.structural
                         width = Some(184.0 * density)
                         fonts = ui.input.fonts
                         theme = ui.input.theme
-                        semantics = gridFilterControl(group.key, "join", f"${title} 组合方式")
+                        semantics = gridFilterControl(group.key, "join", labels.joinName(title))
                     }
                 ) { grow = 1.0 }
                 when (remove) {
                     case Some(val action) -> add(
-                        filterButton("删除组", action) {
+                        filterButton(labels.removeGroup, action) {
                             enabled = ui.structural
                             fonts = ui.input.fonts
                             theme = ui.input.theme
                             variant = ButtonVariant.Outline
-                            semantics = gridFilterControl(group.key, "remove", f"删除${title}")
+                            semantics =
+                                gridFilterControl(
+                                    group.key,
+                                    "remove",
+                                    labels.removeGroupName(title)
+                                )
                         }
                     )
                     case None -> {}
@@ -142,9 +155,9 @@ internal fun <Row> gridFilterGroupView(
             add(
                 ui.message(
                     if (path == "")
-                        "尚未添加条件"
+                        labels.emptyRoot
                     else
-                        "请添加条件或删除该组"
+                        labels.emptyGroup
                 )
             )
         for (index in 0L ..< children.size) {
@@ -169,14 +182,18 @@ internal fun <Row> gridFilterGroupView(
                 case All(val childKey) -> add(
                     filterRow {
                         key = childKey
-                        item(ui.message("所有记录")) { grow = 1.0 }
+                        item(ui.message(labels.allRecords)) { grow = 1.0 }
                         add(
-                            filterButton("删除", erase) {
+                            filterButton(labels.removeCondition, erase) {
                                 enabled = ui.structural
                                 fonts = ui.input.fonts
                                 theme = ui.input.theme
                                 semantics =
-                                    gridFilterControl(childKey, "remove", f"删除条件 ${childPath}")
+                                    gridFilterControl(
+                                        childKey,
+                                        "remove",
+                                        labels.removeConditionName(childPath)
+                                    )
                             }
                         )
                     }
@@ -186,21 +203,23 @@ internal fun <Row> gridFilterGroupView(
         add(
             filterRow {
                 add(
-                    filterButton("添加条件", { ui.addCondition(group) }) {
+                    filterButton(labels.addCondition, { ui.addCondition(group) }) {
                         enabled = ui.structural && ui.firstColumn()?.filterable == Some(true)
                         fonts = ui.input.fonts
                         theme = ui.input.theme
                         variant = ButtonVariant.Outline
-                        semantics = gridFilterControl(group.key, "add", f"${title} 添加条件")
+                        semantics =
+                            gridFilterControl(group.key, "add", labels.addConditionName(title))
                     }
                 )
                 add(
-                    filterButton("添加条件组", { ui.addGroup(group) }) {
+                    filterButton(labels.addGroup, { ui.addGroup(group) }) {
                         enabled = ui.structural
                         fonts = ui.input.fonts
                         theme = ui.input.theme
                         variant = ButtonVariant.Outline
-                        semantics = gridFilterControl(group.key, "add-group", f"${title} 添加条件组")
+                        semantics =
+                            gridFilterControl(group.key, "add-group", labels.addGroupName(title))
                     }
                 )
                 spacing = 8.0 * density

@@ -28,7 +28,7 @@ internal fun <Row> gridFilterConditionView(
                 None
             case None -> None
         }
-    val title = f"条件 ${path} ${column?.title ?: node.column.value.value}"
+    val title = ui.labels.conditionTitle(path, column?.title ?: node.column.value.value)
     val density = ui.appearance.density
     return filterColumn {
         key = node.key
@@ -44,7 +44,7 @@ internal fun <Row> gridFilterConditionView(
                                         case Some(val id) -> node.setColumn(
                                             id,
                                             gridFilterDefault(
-                                                gridFilterKind(ui.input.state, id),
+                                                gridFilterKind(ui.input.state, id, ui.labels),
                                                 ui.referenceDate
                                             )
                                         )
@@ -58,8 +58,9 @@ internal fun <Row> gridFilterConditionView(
                         width = Some(140.0 * density)
                         fonts = ui.input.fonts
                         theme = ui.input.theme
-                        unavailableText = "列已不可用"
-                        semantics = gridFilterControl(node.key, "column", f"${title} 筛选列")
+                        unavailableText = ui.labels.unavailableColumn
+                        semantics =
+                            gridFilterControl(node.key, "column", ui.labels.columnName(title))
                     }
                 ) { grow = 1.0 }
                 item(
@@ -74,22 +75,28 @@ internal fun <Row> gridFilterConditionView(
                                     }
                             }
                         ),
-                        gridFilterOperators(kind, node.operation.value)
+                        gridFilterOperators(kind, node.operation.value, ui.labels)
                     ) {
                         enabled = ui.structural && kind != None
                         width = Some(132.0 * density)
                         fonts = ui.input.fonts
                         theme = ui.input.theme
-                        semantics = gridFilterControl(node.key, "operator", f"${title} 筛选方式")
+                        semantics =
+                            gridFilterControl(node.key, "operator", ui.labels.operatorName(title))
                     }
                 ) { grow = 1.0 }
                 add(
-                    filterButton("删除", remove) {
+                    filterButton(ui.labels.removeCondition, remove) {
                         enabled = ui.structural
                         fonts = ui.input.fonts
                         theme = ui.input.theme
                         variant = ButtonVariant.Outline
-                        semantics = gridFilterControl(node.key, "remove", f"删除条件 ${path}")
+                        semantics =
+                            gridFilterControl(
+                                node.key,
+                                "remove",
+                                ui.labels.removeConditionName(path)
+                            )
                     }
                 )
                 spacing = 8.0 * density
@@ -97,7 +104,7 @@ internal fun <Row> gridFilterConditionView(
             }
         )
         when (kind) {
-            case None -> add(ui.message("此列已不可用，请选择另一列或删除条件"))
+            case None -> add(ui.message(ui.labels.unavailableColumnHelp))
             case Some(val valueKind) -> when (node.operation.value) {
                 case Missing -> {}
                 case Present -> {}
@@ -111,10 +118,10 @@ internal fun <Row> gridFilterConditionView(
                                 ui,
                                 node.key,
                                 "value",
-                                f"${title} 下限"
+                                ui.labels.lowerName(title)
                             )
                         ) { grow = 1.0 }
-                        add(ui.message("至"))
+                        add(ui.message(ui.labels.betweenSeparator))
                         item(
                             gridFilterScalarView(
                                 node.second,
@@ -122,7 +129,7 @@ internal fun <Row> gridFilterConditionView(
                                 ui,
                                 node.key,
                                 "upper",
-                                f"${title} 上限"
+                                ui.labels.upperName(title)
                             )
                         ) { grow = 1.0 }
                         spacing = 8.0 * density
@@ -136,7 +143,7 @@ internal fun <Row> gridFilterConditionView(
                         ui,
                         node.key,
                         "value",
-                        f"${title} 筛选值"
+                        ui.labels.valueName(title)
                     )
                 )
             }
@@ -171,11 +178,11 @@ private fun <Row> gridFilterCaseView(
                 enabled = ui.enabled
                 theme = ui.input.theme
                 labelTarget = Some(node.caseTarget)
-                semantics = gridFilterControl(node.key, "case", f"${title} 区分大小写")
+                semantics = gridFilterControl(node.key, "case", ui.labels.caseName(title))
             }
         )
         add(
-            filterFieldLabel("区分大小写", node.caseTarget) {
+            filterFieldLabel(ui.labels.caseSensitive, node.caseTarget) {
                 fonts = ui.input.fonts;
                 theme = ui.input.theme
             }
@@ -204,7 +211,10 @@ private fun <Row> gridFilterScalarView(
                         }
                 }
             ),
-            [Choice(ViewKey.Text("true"), true, "是"), Choice(ViewKey.Text("false"), false, "否")]
+            [
+                Choice(ViewKey.Text("true"), true, ui.labels.yes),
+                Choice(ViewKey.Text("false"), false, ui.labels.no)
+            ]
         ) {
             enabled = ui.enabled
             fonts = ui.input.fonts
@@ -226,17 +236,17 @@ private fun <Row> gridFilterScalarView(
             fonts = ui.input.fonts
             theme = ui.input.theme
             referenceDate = Some(ui.referenceDate)
-            placeholder = "YYYY-MM-DD"
+            placeholder = ui.labels.datePlaceholder
             semantics = gridFilterControl(nodeKey, part, title)
             calendarButtonSemantics =
-                gridFilterControl(nodeKey, f"${part}-calendar", f"${title} 日历")
+                gridFilterControl(nodeKey, f"${part}-calendar", ui.labels.calendarName(title))
             parser =
                 Some {
                     text,
                     _,
                     _ -> when (LocalDate.parseOrNone(text.trim())) {
                         case Some(val date) -> DatePickerParse.Date(date)
-                        case None -> DatePickerParse.Invalid("请输入有效日期（YYYY-MM-DD）")
+                        case None -> DatePickerParse.Invalid(ui.labels.invalidDate)
                     }
                 }
             format =
@@ -256,32 +266,34 @@ private fun <Row> gridFilterScalarView(
             theme = ui.input.theme
             placeholder =
                 when (kind) {
-                    case Integer -> "整数"
-                    case Number -> "数值"
-                    else -> "文字"
+                    case Integer -> ui.labels.integerPlaceholder
+                    case Number -> ui.labels.numberPlaceholder
+                    else -> ui.labels.textPlaceholder
                 }
             semantics = gridFilterControl(nodeKey, part, title)
         }
     }
 
-private fun gridFilterOperators(kind: GridValueKind?, current: GridFilterOperator): Array<
-    Choice<GridFilterOperator>
-> {
+private fun gridFilterOperators(
+    kind: GridValueKind?,
+    current: GridFilterOperator,
+    labels: GridFilterLabels
+): Array<Choice<GridFilterOperator>> {
     val choices =
         [
-            Choice(ViewKey.Text("eq"), GridFilterOperator.Equal, "等于"),
-            Choice(ViewKey.Text("ne"), GridFilterOperator.NotEqual, "不等于"),
-            Choice(ViewKey.Text("lt"), GridFilterOperator.Less, "小于"),
-            Choice(ViewKey.Text("le"), GridFilterOperator.LessOrEqual, "小于或等于"),
-            Choice(ViewKey.Text("gt"), GridFilterOperator.Greater, "大于"),
-            Choice(ViewKey.Text("ge"), GridFilterOperator.GreaterOrEqual, "大于或等于"),
-            Choice(ViewKey.Text("between"), GridFilterOperator.Between, "闭区间"),
-            Choice(ViewKey.Text("contains"), GridFilterOperator.Contains, "包含"),
-            Choice(ViewKey.Text("starts"), GridFilterOperator.StartsWith, "开头是"),
-            Choice(ViewKey.Text("ends"), GridFilterOperator.EndsWith, "结尾是"),
-            Choice(ViewKey.Text("missing"), GridFilterOperator.Missing, "缺值"),
-            Choice(ViewKey.Text("present"), GridFilterOperator.Present, "非缺值"),
-            Choice(ViewKey.Text("in"), GridFilterOperator.In, "属于集合")
+            Choice(ViewKey.Text("eq"), GridFilterOperator.Equal, labels.equal),
+            Choice(ViewKey.Text("ne"), GridFilterOperator.NotEqual, labels.notEqual),
+            Choice(ViewKey.Text("lt"), GridFilterOperator.Less, labels.less),
+            Choice(ViewKey.Text("le"), GridFilterOperator.LessOrEqual, labels.lessOrEqual),
+            Choice(ViewKey.Text("gt"), GridFilterOperator.Greater, labels.greater),
+            Choice(ViewKey.Text("ge"), GridFilterOperator.GreaterOrEqual, labels.greaterOrEqual),
+            Choice(ViewKey.Text("between"), GridFilterOperator.Between, labels.between),
+            Choice(ViewKey.Text("contains"), GridFilterOperator.Contains, labels.contains),
+            Choice(ViewKey.Text("starts"), GridFilterOperator.StartsWith, labels.startsWith),
+            Choice(ViewKey.Text("ends"), GridFilterOperator.EndsWith, labels.endsWith),
+            Choice(ViewKey.Text("missing"), GridFilterOperator.Missing, labels.missing),
+            Choice(ViewKey.Text("present"), GridFilterOperator.Present, labels.present),
+            Choice(ViewKey.Text("in"), GridFilterOperator.In, labels.inSet)
         ]
     val result = ArrayList<Choice<GridFilterOperator>>()
     for (choice in choices) {

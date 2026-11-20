@@ -25,14 +25,17 @@ internal enum GridFilterNode {
             case Condition(val condition) -> condition.composing
             case Group(val group) -> group.composing
         }
-    fun filter(kind: (GridColumnId) -> GridValueKind): GridFilter =
+    fun filter(
+        kind: (GridColumnId) -> GridValueKind,
+        labels: GridFilterLabels = GridFilterLabels()
+    ): GridFilter =
         when (this) {
             case All(_) -> GridFilter.All
             case Condition(val condition) -> GridFilter.Column(
                 condition.column.value,
-                condition.condition(kind(condition.column.value))
+                condition.condition(kind(condition.column.value), labels)
             )
-            case Group(val group) -> group.filter(kind, false)
+            case Group(val group) -> group.filter(kind, false, labels)
         }
 }
 
@@ -76,13 +79,18 @@ internal class GridFilterGroupDraft(
                 next.add(child)
         children.value = next.toArray()
     }
-    fun filter(kind: (GridColumnId) -> GridValueKind, root: Boolean): GridFilter {
+    fun filter(
+        kind: (GridColumnId) -> GridValueKind,
+        root: Boolean,
+        labels: GridFilterLabels
+    ): GridFilter {
         val current = children.value
         if (current.size == 0L) {
-            gridRequire(root, "请为嵌套条件组添加条件，或删除该组")
+            gridRequire(root, labels.emptyNestedGroup)
             return GridFilter.All
         }
-        val filters = Array<GridFilter>(current.size) { index -> current[index].filter(kind) }
+        val filters =
+            Array<GridFilter>(current.size) { index -> current[index].filter(kind, labels) }
         if (root && singularRoot.value && filters.size == 1L)
             return filters[0L]
         return if (conjunction.value)
@@ -95,7 +103,10 @@ internal class GridFilterGroupDraft(
 internal class GridFilterDraft(filter: GridFilter, val keys: GridFilterKeys) {
     val root = gridFilterRoot(filter, keys)
     val composing: Boolean get() = root.composing
-    fun filter(kind: (GridColumnId) -> GridValueKind): GridFilter = root.filter(kind, true)
+    fun filter(
+        kind: (GridColumnId) -> GridValueKind,
+        labels: GridFilterLabels = GridFilterLabels()
+    ): GridFilter = root.filter(kind, true, labels)
 }
 
 private fun gridFilterRoot(filter: GridFilter, keys: GridFilterKeys): GridFilterGroupDraft =

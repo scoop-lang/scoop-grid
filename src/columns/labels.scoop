@@ -1,0 +1,47 @@
+package scoop.grid
+
+/** Labels never determine a column's identity, position or pin value. */
+public class GridColumnsLabels public constructor(
+    public val invalidWidth: String = "请输入非负的有限列宽",
+    public val measuring: String = "正在测量可见内容…",
+    public val measured: String = "已适应可见内容",
+    public val cancelled: String = "内容测宽已取消，请重试",
+    public val fit: String = "适应视口",
+    public val fitName: String = "所有可见列适应视口",
+    public val name: String = "网格列",
+    public val title: (String) -> String = { column -> f"设置：${column}" },
+    public val groupTitle: (String) -> String = { group -> f"列组：${group}" },
+    public val previousGroup: String = "前移组",
+    public val previousGroupName: (String) -> String = { group -> f"前移 ${group} 列组" },
+    public val nextGroup: String = "后移组",
+    public val nextGroupName: (String) -> String = { group -> f"后移 ${group} 列组" },
+    public val unpinned: String = "不冻结",
+    public val pinStart: String = "冻结在开头",
+    public val pinEnd: String = "冻结在末尾",
+    public val pinName: (String) -> String = { column -> f"${column} 列冻结位置" },
+    public val previous: String = "前移",
+    public val previousName: (String) -> String = { column -> f"前移 ${column} 列" },
+    public val next: String = "后移",
+    public val nextName: (String) -> String = { column -> f"后移 ${column} 列" },
+    public val widthPlaceholder: String = "列定义宽度",
+    public val widthName: (String) -> String = { column -> f"${column} 列宽" },
+    public val apply: String = "应用",
+    public val applyName: (String) -> String = { column -> f"应用 ${column} 列宽" },
+    public val restore: String = "恢复",
+    public val restoreName: (String) -> String = { column -> f"恢复 ${column} 列定义宽度" },
+    public val fitContent: String = "适应可见内容",
+    public val fitContentName: (String) -> String = { column -> f"${column} 列适应可见内容" },
+    public val visibleName: (String) -> String = { column -> f"显示 ${column} 列" },
+    public val chooseName: (String) -> String = { column -> f"设置 ${column} 列" },
+    public val sort: (Long, GridSortDirection) -> String =
+        {
+            priority,
+            direction -> if (direction == GridSortDirection.Ascending)
+                f"排序 ${priority}↑"
+            else
+                f"排序 ${priority}↓"
+        },
+    public val filtered: String = "筛选中",
+    public val decorate: (String, String) -> String = { title, status -> f"${title} · ${status}" },
+    public val error: (String) -> String = { message -> message }
+)

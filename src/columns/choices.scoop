@@ -29,12 +29,7 @@ internal class GridColumnChoices<Row>(
         collectGridFilterColumns(input.state.query.filter, filtered)
         val sorts = input.state.query.sorting
         for (index in 0L ..< sorts.size) {
-            val direction =
-                if (sorts[index].direction == GridSortDirection.Ascending)
-                    "↑"
-                else
-                    "↓"
-            sorting.put(sorts[index].column, f"排序 ${index + 1L}${direction}")
+            sorting.put(sorts[index].column, input.labels.sort(index + 1L, sorts[index].direction))
         }
     }
     public override val count: Long get() = entries.size
@@ -50,11 +45,11 @@ internal class GridColumnChoices<Row>(
     private fun caption(id: GridColumnId): String {
         var text = titles[positions[id]!!]
         when (val sort = sorting[id]) {
-            case Some(val label) -> text += f" · ${label}";
+            case Some(val label) -> text = input.labels.decorate(text, label);
             case None -> {}
         }
         if (id in filtered)
-            text += " · 筛选中"
+            text = input.labels.decorate(text, input.labels.filtered)
         return text
     }
     private fun visible(id: GridColumnId): Boolean {
@@ -76,7 +71,12 @@ internal class GridColumnChoices<Row>(
                 ) {
                     enabled = source.enabled
                     theme = source.input.theme
-                    semantics = gridColumnControl(entry.id, "visible", f"显示 ${title} 列")
+                    semantics =
+                        gridColumnControl(
+                            entry.id,
+                            "visible",
+                            source.input.labels.visibleName(title)
+                        )
                 }
             )
             item(
@@ -95,7 +95,8 @@ internal class GridColumnChoices<Row>(
                             ButtonVariant.Ghost
                     fonts = source.input.fonts
                     theme = source.input.theme
-                    semantics = gridColumnControl(entry.id, "choose", f"设置 ${title} 列")
+                    semantics =
+                        gridColumnControl(entry.id, "choose", source.input.labels.chooseName(title))
                 }
             ) { grow = 1.0 }
             spacing = 6.0 * source.appearance.density

@@ -22,8 +22,8 @@ internal fun <Row> gridFilterSetView(
     val list = values.list
     val loadText =
         when (list) {
-            case Some(_) -> "重新加载"
-            case None -> "加载候选"
+            case Some(_) -> ui.labels.reloadCandidates
+            case None -> ui.labels.loadCandidates
         }
     val fresh =
         when (list) {
@@ -42,9 +42,12 @@ internal fun <Row> gridFilterSetView(
                         {
                             if (ui.active() && !values.search.isComposing) {
                                 try {
-                                    values.load(ui.input.state.filterValues(node.column.value))
+                                    values.load(
+                                        ui.input.state.filterValues(node.column.value),
+                                        ui.labels
+                                    )
                                 } catch (error: IllegalArgumentException) {
-                                    ui.failed(error.message ?: "无法加载候选")
+                                    ui.failed(error.message ?: ui.labels.loadFailed)
                                 }
                             }
                         }
@@ -53,12 +56,12 @@ internal fun <Row> gridFilterSetView(
                         fonts = ui.input.fonts
                         theme = ui.input.theme
                         variant = ButtonVariant.Outline
-                        semantics = gridFilterControl(node.key, "load", f"${title} 加载候选")
+                        semantics = gridFilterControl(node.key, "load", ui.labels.loadName(title))
                     }
                 )
                 add(
                     filterButton(
-                        "选中当前列表",
+                        ui.labels.selectShown,
                         {
                             if (ui.active() && fresh)
                                 values.selectShown()
@@ -68,12 +71,17 @@ internal fun <Row> gridFilterSetView(
                         fonts = ui.input.fonts
                         theme = ui.input.theme
                         variant = ButtonVariant.Outline
-                        semantics = gridFilterControl(node.key, "select-all", f"${title} 选中当前列表")
+                        semantics =
+                            gridFilterControl(
+                                node.key,
+                                "select-all",
+                                ui.labels.selectShownName(title)
+                            )
                     }
                 )
                 add(
                     filterButton(
-                        "清空选择",
+                        ui.labels.clearSelection,
                         {
                             if (ui.active())
                                 values.clearSelection()
@@ -83,7 +91,12 @@ internal fun <Row> gridFilterSetView(
                         fonts = ui.input.fonts
                         theme = ui.input.theme
                         variant = ButtonVariant.Outline
-                        semantics = gridFilterControl(node.key, "select-none", f"${title} 清空选择")
+                        semantics =
+                            gridFilterControl(
+                                node.key,
+                                "select-none",
+                                ui.labels.clearSelectionName(title)
+                            )
                     }
                 )
                 spacing = 6.0 * density
@@ -96,40 +109,46 @@ internal fun <Row> gridFilterSetView(
                         enabled = ui.enabled
                         fonts = ui.input.fonts
                         theme = ui.input.theme
-                        placeholder = "查找候选"
-                        semantics = gridFilterControl(node.key, "search", f"${title} 查找候选")
+                        placeholder = ui.labels.searchPlaceholder
+                        semantics =
+                            gridFilterControl(node.key, "search", ui.labels.searchName(title))
                         onSubmit =
                             {
                                 _ -> if (ui.active() && fresh)
-                                    values.applySearch()
+                                    values.applySearch(ui.labels)
                             }
                     }
                 ) { grow = 1.0 }
                 add(
                     filterButton(
-                        "查找",
+                        ui.labels.search,
                         {
                             if (ui.active() && fresh)
-                                values.applySearch()
+                                values.applySearch(ui.labels)
                         }
                     ) {
                         enabled = ui.enabled && fresh && !values.search.isComposing
                         fonts = ui.input.fonts
                         theme = ui.input.theme
-                        semantics = gridFilterControl(node.key, "search-apply", f"${title} 查找")
+                        semantics =
+                            gridFilterControl(
+                                node.key,
+                                "search-apply",
+                                ui.labels.searchApplyName(title)
+                            )
                     }
                 )
                 spacing = 6.0 * density
             }
         )
         when (list) {
-            case None -> add(ui.message(f"已选 ${values.selected.size} 项；点击加载候选"))
+            case None -> add(ui.message(ui.labels.unloadedStatus(values.selected.size)))
             case Some(val current) -> if (!fresh)
-                add(ui.message("候选已过期，请重新加载；已选值仍保留"))
+                add(ui.message(ui.labels.staleCandidates))
             else {
-                add(ui.message(f"已选 ${values.selected.size} 项 · 当前列表 ${current.indices.size} 项"))
+                add(ui.message(ui.labels.loadedStatus(values.selected.size, current.indices.size)))
                 if (current.indices.size == 0L)
-                    add(ui.message("没有匹配的候选"))
+                    add(ui.message(ui.labels.emptyCandidates))
                 val source = GridFilterChoiceSource(node, ui, current, values.selected)
                 add(
                     filterList(source, ItemExtent.Fixed(36.0 * density)) {
@@ -140,7 +159,7 @@ internal fun <Row> gridFilterSetView(
                         navigation = ItemNavigation.Roving()
                         itemSemantics = Some(source.semantics())
                         collectionSemantics =
-                            gridFilterControl(node.key, "values", f"${title} 集合候选")
+                            gridFilterControl(node.key, "values", ui.labels.candidatesName(title))
                     }
                 )
             }
@@ -199,7 +218,7 @@ private class GridFilterChoiceSource<Row>(
                 val value = list.snapshot.values[candidate]
                 Some(
                     SemanticItemProperties(
-                        name = Some(gridFilterValueLabel(value)),
+                        name = Some(gridFilterValueLabel(value, ui.labels)),
                         value = Some(gridFilterLiteralText(value.key)),
                         automationId = Some(gridFilterControlId(node.key, f"item-${candidate}")),
                         enabled = ui.enabled,
@@ -233,8 +252,8 @@ private class GridFilterChoiceCell<Row>(
         val input = props.value
         val source = input.source
         val entry = source.list.snapshot.values[input.index]
-        val caption = gridFilterValueLabel(entry)
         val ui = source.ui
+        val caption = gridFilterValueLabel(entry, ui.labels)
         val reference = target
         return filterRow {
             add(

@@ -82,12 +82,31 @@ internal fun ColumnsProbe.inspect(tag: Int) {
         case 26 -> value("")
         case 28 -> retry = !field!!.flag(4)
         case 29 -> {
+            if (!field!!.text(0, Some("Width of Amount"))) {
+                retry = true
+                return
+            }
+            assertTrue(field!!.flag(4))
+            assertTrue(field!!.same(identified("grid-columns-c1-width")))
+            assertTrue(model.columnState === localizedColumns!!)
+            assertTrue(fit!!.text(0, Some("Fit visible columns")))
+            assertTrue(collection!!.text(0, Some("Columns")))
+            assertTrue(identified("grid-columns-c1-item").text(0, Some("Amount | order=1:up")))
+            assertTrue(pin!!.text(1, Some("Start")))
             value("中😀");
             assertFalse(fit!!.flag(1));
             assertFalse(pin!!.flag(1));
             assertFalse(visible!!.flag(1))
         }
-        case 31 -> value("")
+        case 31 -> {
+            if (!field!!.text(0, Some("Amount 列宽"))) {
+                retry = true
+                return
+            }
+            assertTrue(field!!.flag(4))
+            assertTrue(model.columnState === localizedColumns!!)
+            value("")
+        }
         case 33 -> {
             assertEquals(None, entry("c1").width);
             value("")
@@ -113,7 +132,7 @@ internal fun ColumnsProbe.inspect(tag: Int) {
             assertEquals(GridPin.End, entry("c299").pin);
             assertEquals(Some(70.0), entry("c299").width)
         }
-        case 44 -> option = Some(menu("不冻结"))
+        case 44 -> option = Some(menu("Unpinned"))
         case 46 -> {
             assertEquals(GridPin.None, entry("c299").pin)
             control = Some(identified("grid-columns-c1-item"))
@@ -126,7 +145,7 @@ internal fun ColumnsProbe.inspect(tag: Int) {
         case 52 -> {
             value("NaN");
             assertEquals(Some(50.0), entry("c1").width);
-            caption("请输入非负的有限列宽")
+            caption("Problem:Width must be finite and nonnegative")
         }
         case 54 -> {
             value("");

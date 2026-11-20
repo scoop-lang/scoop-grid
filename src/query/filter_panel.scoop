@@ -17,7 +17,8 @@ public class GridFilterPanelProps<Row> public constructor(
     public val referenceDate: LocalDate? = None,
     public val enabled: Boolean = true,
     public val fonts: FontCollection? = None,
-    public val theme: ThemeSource? = None
+    public val theme: ThemeSource? = None,
+    public val labels: GridFilterLabels = GridFilterLabels()
 ) {
     init {
         gridRequire(
@@ -75,13 +76,16 @@ public class GridFilterPanel<Row> public constructor(
                 if (clear)
                     GridFilter.All
                 else
-                    draft.filter { id -> gridFilterKind(input.state, id) }
+                    draft.filter(
+                        { id -> gridFilterKind(input.state, id, input.labels) },
+                        input.labels
+                    )
             } catch (error: IllegalArgumentException) {
-                report(error.message ?: "筛选条件无效")
+                report(error.message ?: input.labels.invalidFilter)
                 return
             }
         if (!gridQueryReady(input.handle)) {
-            report("请先处理当前单元格的编辑，再应用筛选")
+            report(input.labels.finishEditing)
             return
         }
         if (!scope.isMounted || props.value.state !== input.state)
@@ -95,7 +99,7 @@ public class GridFilterPanel<Row> public constructor(
         } catch (error: IllegalArgumentException) {
             if (input.state.result !== before)
                 throw error
-            report(error.message ?: "筛选条件无效")
+            report(error.message ?: input.labels.invalidFilter)
             return
         }
         if (!scope.isMounted)
@@ -109,6 +113,7 @@ public class GridFilterPanel<Row> public constructor(
     public override fun render(): View {
         revision.value
         val input = props.value
+        val labels = input.labels
         val current = input.state.query.filter
         if (model !== input.state || current != applied) {
             model = input.state
@@ -144,39 +149,39 @@ public class GridFilterPanel<Row> public constructor(
         return column {
             row {
                 add(
-                    filterButton("应用筛选", { this @GridFilterPanel.apply() }) {
+                    filterButton(labels.apply, { this @GridFilterPanel.apply() }) {
                         enabled = available
                         fonts = input.fonts
                         theme = input.theme
                         semantics =
                             ComponentSemantics(
-                                name = Some("应用筛选"),
+                                name = Some(labels.applyName),
                                 automationId = Some("grid-filter-apply")
                             )
                     }
                 )
                 add(
-                    filterButton("还原草稿", { this @GridFilterPanel.revert() }) {
+                    filterButton(labels.revert, { this @GridFilterPanel.revert() }) {
                         enabled = input.enabled && !currentDraft.composing
                         variant = ButtonVariant.Outline
                         fonts = input.fonts
                         theme = input.theme
                         semantics =
                             ComponentSemantics(
-                                name = Some("还原筛选草稿"),
+                                name = Some(labels.revertName),
                                 automationId = Some("grid-filter-revert")
                             )
                     }
                 )
                 add(
-                    filterButton("清除筛选", { this @GridFilterPanel.apply(true) }) {
+                    filterButton(labels.clear, { this @GridFilterPanel.apply(true) }) {
                         enabled = available
                         variant = ButtonVariant.Outline
                         fonts = input.fonts
                         theme = input.theme
                         semantics =
                             ComponentSemantics(
-                                name = Some("清除筛选"),
+                                name = Some(labels.clearName),
                                 automationId = Some("grid-filter-clear")
                             )
                     }
@@ -185,7 +190,7 @@ public class GridFilterPanel<Row> public constructor(
                 alignment = CrossAlignment.Center
             }
             when (this @GridFilterPanel.message) {
-                case Some(val text) -> add(ui.message(text))
+                case Some(val text) -> add(ui.message(labels.error(text)))
                 case None -> {}
             }
             add(
@@ -196,7 +201,7 @@ public class GridFilterPanel<Row> public constructor(
                     enabled = input.enabled
                     semantics =
                         ComponentSemantics(
-                            name = Some("筛选条件"),
+                            name = Some(labels.name),
                             automationId = Some("grid-filter-tree")
                         )
                 }
@@ -215,6 +220,7 @@ public class GridFilterPanelBuilder internal constructor() {
     public var enabled: Boolean = true
     public var fonts: FontCollection? = None
     public var theme: ThemeSource? = None
+    public var labels: GridFilterLabels = GridFilterLabels()
     public var key: ViewKey = ViewKey.Position
     internal fun <Row> snapshot(state: DataGridState<Row>): GridFilterPanelProps<Row> =
         GridFilterPanelProps(
@@ -225,7 +231,8 @@ public class GridFilterPanelBuilder internal constructor() {
             referenceDate,
             enabled,
             fonts,
-            theme
+            theme,
+            labels
         )
 }
 

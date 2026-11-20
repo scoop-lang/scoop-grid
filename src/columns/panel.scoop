@@ -17,7 +17,8 @@ public class GridColumnsPanelProps<Row> public constructor(
     public val height: Double = 256.0,
     public val enabled: Boolean = true,
     public val fonts: FontCollection? = None,
-    public val theme: ThemeSource? = None
+    public val theme: ThemeSource? = None,
+    public val labels: GridColumnsLabels = GridColumnsLabels()
 ) {
     init {
         gridRequire(height.isFinite() && height > 0.0, "invalid columns panel height")
@@ -116,11 +117,11 @@ public class GridColumnsPanel<Row> public constructor(
                     case Some(val value) -> if (value.isFinite() && value >= 0.0)
                         Some(value)
                     else {
-                        report(GridColumnActionResult.Rejected("请输入非负的有限列宽"));
+                        report(GridColumnActionResult.Rejected(props.value.labels.invalidWidth));
                         return
                     }
                     case None -> {
-                        report(GridColumnActionResult.Rejected("请输入非负的有限列宽"));
+                        report(GridColumnActionResult.Rejected(props.value.labels.invalidWidth));
                         return
                     }
                 }
@@ -191,6 +192,7 @@ public class GridColumnsPanel<Row> public constructor(
     public override fun render(): View {
         revision.value
         val input = props.value
+        val labels = input.labels
         val states = input.state.columnState
         val ordered = gridOrderedColumnStates(states)
         val index = gridColumnStateIndex(ordered, selected) ?: 0L
@@ -230,10 +232,10 @@ public class GridColumnsPanel<Row> public constructor(
             when (fitting) {
                 case Some(val request) -> Some(
                     when (request.result) {
-                        case Pending -> "正在测量可见内容…"
-                        case Applied(_) -> "已适应可见内容"
-                        case Rejected(val text) -> text
-                        case Cancelled -> "内容测宽已取消，请重试"
+                        case Pending -> labels.measuring
+                        case Applied(_) -> labels.measured
+                        case Rejected(val text) -> labels.error(text)
+                        case Cancelled -> labels.cancelled
                     }
                 )
                 case None -> None
@@ -250,19 +252,19 @@ public class GridColumnsPanel<Row> public constructor(
             )
         return column {
             add(
-                columnsButton("适应视口", { this @GridColumnsPanel.fit() }) {
+                columnsButton(labels.fit, { this @GridColumnsPanel.fit() }) {
                     enabled = active
                     fonts = input.fonts
                     theme = input.theme
                     semantics =
                         ComponentSemantics(
-                            name = Some("所有可见列适应视口"),
+                            name = Some(labels.fitName),
                             automationId = Some("grid-columns-fit")
                         )
                 }
             )
             when (this @GridColumnsPanel.message) {
-                case Some(val text) -> add(gridColumnsLabel(text, appearance))
+                case Some(val text) -> add(gridColumnsLabel(labels.error(text), appearance))
                 case None -> {}
             }
             add(
@@ -275,12 +277,12 @@ public class GridColumnsPanel<Row> public constructor(
                     itemSemantics = Some(source.semantics())
                     collectionSemantics =
                         ComponentSemantics(
-                            name = Some("网格列"),
+                            name = Some(labels.name),
                             automationId = Some("grid-columns-list")
                         )
                 }
             )
-            add(gridColumnsLabel(f"设置：${title}", appearance))
+            add(gridColumnsLabel(labels.title(title), appearance))
             for (ancestor in tree.ancestors(current.id)) {
                 val group =
                     when (ancestor.key) {
@@ -293,30 +295,38 @@ public class GridColumnsPanel<Row> public constructor(
                 val after = tree.adjacentIndex(states, ancestor.key, true)
                 row {
                     key = ViewKey.Text(f"grid-column-group-${group.value}")
-                    item(gridColumnsLabel(f"列组：${ancestor.title}", appearance)) { grow = 1.0 }
+                    item(gridColumnsLabel(labels.groupTitle(ancestor.title), appearance)) {
+                        grow = 1.0
+                    }
                     add(
-                        columnsButton("前移组", { this @GridColumnsPanel.moveGroup(group, false) }) {
+                        columnsButton(
+                            labels.previousGroup,
+                            { this @GridColumnsPanel.moveGroup(group, false) }
+                        ) {
                             enabled = active && before != None
                             fonts = input.fonts;
                             theme = input.theme;
                             variant = ButtonVariant.Outline
                             semantics =
                                 ComponentSemantics(
-                                    name = Some(f"前移 ${ancestor.title} 列组"),
+                                    name = Some(labels.previousGroupName(ancestor.title)),
                                     automationId =
                                         Some(f"grid-column-group-${group.value}-previous")
                                 )
                         }
                     )
                     add(
-                        columnsButton("后移组", { this @GridColumnsPanel.moveGroup(group, true) }) {
+                        columnsButton(
+                            labels.nextGroup,
+                            { this @GridColumnsPanel.moveGroup(group, true) }
+                        ) {
                             enabled = active && after != None
                             fonts = input.fonts;
                             theme = input.theme;
                             variant = ButtonVariant.Outline
                             semantics =
                                 ComponentSemantics(
-                                    name = Some(f"后移 ${ancestor.title} 列组"),
+                                    name = Some(labels.nextGroupName(ancestor.title)),
                                     automationId = Some(f"grid-column-group-${group.value}-next")
                                 )
                         }
@@ -341,34 +351,35 @@ public class GridColumnsPanel<Row> public constructor(
                             }
                         ),
                         [
-                            Choice(ViewKey.Text("none"), GridPin.None, "不冻结"),
-                            Choice(ViewKey.Text("start"), GridPin.Start, "冻结在开头"),
-                            Choice(ViewKey.Text("end"), GridPin.End, "冻结在末尾")
+                            Choice(ViewKey.Text("none"), GridPin.None, labels.unpinned),
+                            Choice(ViewKey.Text("start"), GridPin.Start, labels.pinStart),
+                            Choice(ViewKey.Text("end"), GridPin.End, labels.pinEnd)
                         ]
                     ) {
                         enabled = active
                         width = Some(144.0 * appearance.density)
                         fonts = input.fonts
                         theme = input.theme
-                        semantics = gridColumnControl(current.id, "pin", f"${title} 列冻结位置")
+                        semantics = gridColumnControl(current.id, "pin", labels.pinName(title))
                     }
                 ) { grow = 1.0 }
                 add(
-                    columnsButton("前移", { this @GridColumnsPanel.move(false) }) {
+                    columnsButton(labels.previous, { this @GridColumnsPanel.move(false) }) {
                         enabled = active && previous != None
                         variant = ButtonVariant.Outline
                         fonts = input.fonts
                         theme = input.theme
-                        semantics = gridColumnControl(current.id, "previous", f"前移 ${title} 列")
+                        semantics =
+                            gridColumnControl(current.id, "previous", labels.previousName(title))
                     }
                 )
                 add(
-                    columnsButton("后移", { this @GridColumnsPanel.move(true) }) {
+                    columnsButton(labels.next, { this @GridColumnsPanel.move(true) }) {
                         enabled = active && next != None
                         variant = ButtonVariant.Outline
                         fonts = input.fonts
                         theme = input.theme
-                        semantics = gridColumnControl(current.id, "next", f"后移 ${title} 列")
+                        semantics = gridColumnControl(current.id, "next", labels.nextName(title))
                     }
                 )
                 spacing = 6.0 * appearance.density
@@ -381,39 +392,41 @@ public class GridColumnsPanel<Row> public constructor(
                             input.enabled &&
                                 input.handle.usesColumns(states) &&
                                 !input.handle.isSubmitting
-                        placeholder = "列定义宽度"
+                        placeholder = labels.widthPlaceholder
                         fonts = input.fonts
                         theme = input.theme
-                        semantics = gridColumnControl(current.id, "width", f"${title} 列宽")
+                        semantics = gridColumnControl(current.id, "width", labels.widthName(title))
                         onSubmit = { _ -> this @GridColumnsPanel.setWidth() }
                     }
                 ) { grow = 1.0 }
                 add(
-                    columnsButton("应用", { this @GridColumnsPanel.setWidth() }) {
+                    columnsButton(labels.apply, { this @GridColumnsPanel.setWidth() }) {
                         enabled = active
                         fonts = input.fonts
                         theme = input.theme
-                        semantics = gridColumnControl(current.id, "apply", f"应用 ${title} 列宽")
+                        semantics = gridColumnControl(current.id, "apply", labels.applyName(title))
                     }
                 )
                 add(
-                    columnsButton("恢复", { this @GridColumnsPanel.setWidth(true) }) {
+                    columnsButton(labels.restore, { this @GridColumnsPanel.setWidth(true) }) {
                         enabled = active
                         fonts = input.fonts
                         theme = input.theme
                         variant = ButtonVariant.Outline
-                        semantics = gridColumnControl(current.id, "restore", f"恢复 ${title} 列定义宽度")
+                        semantics =
+                            gridColumnControl(current.id, "restore", labels.restoreName(title))
                     }
                 )
                 spacing = 6.0 * appearance.density
             }
             add(
-                columnsButton("适应可见内容", { this @GridColumnsPanel.fitContent() }) {
+                columnsButton(labels.fitContent, { this @GridColumnsPanel.fitContent() }) {
                     enabled = active && current.visible && !(fitting?.isPending ?: false)
                     fonts = input.fonts
                     theme = input.theme
                     variant = ButtonVariant.Outline
-                    semantics = gridColumnControl(current.id, "content", f"${title} 列适应可见内容")
+                    semantics =
+                        gridColumnControl(current.id, "content", labels.fitContentName(title))
                 }
             )
             when (fitMessage) {
@@ -450,12 +463,13 @@ public class GridColumnsPanelBuilder internal constructor() {
     public var enabled: Boolean = true
     public var fonts: FontCollection? = None
     public var theme: ThemeSource? = None
+    public var labels: GridColumnsLabels = GridColumnsLabels()
     public var key: ViewKey = ViewKey.Position
     internal fun <Row> snapshot(
         state: DataGridState<Row>,
         handle: DataGridHandle
     ): GridColumnsPanelProps<Row> =
-        GridColumnsPanelProps(state, handle, height, enabled, fonts, theme)
+        GridColumnsPanelProps(state, handle, height, enabled, fonts, theme, labels)
 }
 
 public fun <Row> gridColumnsPanel(

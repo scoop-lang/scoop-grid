@@ -58,7 +58,7 @@ internal class GridFilterSetDraft(private val initial: Array<GridLiteral>) {
             result.add(key)
         return result.toArray()
     }
-    fun load(values: GridFilterValues) {
+    fun load(values: GridFilterValues, labels: GridFilterLabels = GridFilterLabels()) {
         val previous = list
         val key =
             when (previous) {
@@ -68,13 +68,14 @@ internal class GridFilterSetDraft(private val initial: Array<GridLiteral>) {
                     newKey()
                 case None -> newKey()
             }
-        shown.value = Some(matching(values, key))
+        shown.value = Some(matching(values, key, labels))
     }
-    fun applySearch() {
+    fun applySearch(labels: GridFilterLabels = GridFilterLabels()) {
         if (search.isComposing)
             return
         when (list) {
-            case Some(val current) -> shown.value = Some(matching(current.snapshot, current.key))
+            case Some(val current) -> shown.value =
+                Some(matching(current.snapshot, current.key, labels))
             case None -> {}
         }
     }
@@ -88,11 +89,19 @@ internal class GridFilterSetDraft(private val initial: Array<GridLiteral>) {
         nextListKey += 1L
         return result
     }
-    private fun matching(snapshot: GridFilterValues, key: ViewKey): GridFilterChoiceList {
+    private fun matching(
+        snapshot: GridFilterValues,
+        key: ViewKey,
+        labels: GridFilterLabels
+    ): GridFilterChoiceList {
         val needle = search.committedText.lowercaseAscii()
         val indices = ArrayList<Long>()
         for (index in 0L ..< snapshot.values.size)
-            if (gridFilterValueLabel(snapshot.values[index]).lowercaseAscii().contains(needle))
+            if (
+                gridFilterValueLabel(snapshot.values[index], labels).lowercaseAscii().contains(
+                    needle
+                )
+            )
                 indices.add(index)
         return GridFilterChoiceList(snapshot, indices.toArray(), key)
     }
@@ -105,11 +114,11 @@ private fun gridFilterSetCopy(values: Iterable<GridLiteral>): LinkedHashSet<Grid
     return result
 }
 
-internal fun gridFilterValueLabel(value: GridFilterValue): String =
+internal fun gridFilterValueLabel(value: GridFilterValue, labels: GridFilterLabels): String =
     when (value.key) {
-        case Empty -> "（缺值）"
+        case Empty -> labels.missingValue
         case Text(val text) -> if (text == "")
-            "（空字符串）"
+            labels.emptyText
         else
             value.label
         else -> value.label
