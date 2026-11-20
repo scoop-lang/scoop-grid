@@ -1,0 +1,238 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class SelectionRows(
+    public override val count: Long,
+    private val offset: Long = 0L
+): TableSource<Long> {
+    var reads = 0L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(value)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long {
+        reads += 1L
+        return index + offset
+    }
+}
+
+private fun selectionColumns(): Array<GridColumn<Long>> =
+    [gridColumn<Long, Long>(GridColumnId("value"), "Value", { row -> row }, gridLongValues())]
+
+private fun selectionKey(value: Long): ViewKey = ViewKey.Number(value)
+
+private fun selectionKeys(values: Array<Long>): Array<ViewKey> =
+    Array<ViewKey>(values.size) { index -> selectionKey(values[index]) }
+
+private fun expectSelection(model: DataGridState<Long>, keys: Array<Long>) {
+    assertEquals(keys.size, model.selectedRowKeys.size)
+    for (key in keys)
+        assertTrue(model.isRowSelected(selectionKey(key)))
+}
+
+@Test
+private class GridRowSelectionTest {
+    @Test
+    fun `disabled and single selection validate keys and notify only membership changes`() {
+        val source = SelectionRows(10L)
+        val disabled = DataGridState(source, selectionColumns())
+        assertFalse(disabled.setRowSelected(selectionKey(0L), true))
+        assertEquals(0L, disabled.pageSelectableRows)
+        assertFailsWith<IllegalArgumentException> { disabled.setSelectedRows(selectionKeys([0L])) }
+        val changes = ArrayList<Array<ViewKey>>()
+        val model =
+            DataGridState(
+                source,
+                selectionColumns(),
+                rowSelection = GridRowSelectionMode.Single,
+                onSelectionChange = Some { keys -> changes.add(keys) }
+            )
+        val result = model.result
+        assertTrue(model.setRowSelected(selectionKey(2L), true))
+        assertTrue(model.setRowSelected(selectionKey(2L), true))
+        assertEquals(1L, changes.size)
+        assertTrue(model.setRowSelected(selectionKey(3L), true, extend = true))
+        expectSelection(model, [3L])
+        assertFalse(model.selectPageRows(true))
+        assertFalse(model.selectRowRange(selectionKey(1L), selectionKey(4L)))
+        assertFalse(model.setRowSelected(selectionKey(10L), true))
+        assertFailsWith<IllegalArgumentException> { model.setSelectedRows(selectionKeys([1L, 2L])) }
+        assertFailsWith<IllegalArgumentException> { model.setRowSelected(ViewKey.Position, true) }
+        expectSelection(model, [3L])
+        model.clearRowSelection()
+        model.clearRowSelection()
+        assertEquals(3L, changes.size)
+        assertTrue(result === model.result)
+        assertEquals(0L, source.reads)
+    }
+
+    @Test
+    fun `page selection excludes extra fixed rows and survives filtering until actual deletion`() {
+        val model =
+            DataGridState(
+                SelectionRows(20L),
+                selectionColumns(),
+                GridQuery(pagination = GridPagination.Page(1L, 5L)),
+                pinnedRows = GridPinnedRows(selectionKeys([18L]), selectionKeys([0L])),
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        assertEquals(7L, model.result.rows.count)
+        val result = model.result
+        assertTrue(model.selectPageRows(true))
+        expectSelection(model, [5L, 6L, 7L, 8L, 9L])
+        assertTrue(result === model.result)
+        assertEquals(CheckState.Checked, model.pageRowSelection)
+        assertTrue(model.setRowSelected(selectionKey(18L), true))
+        model.setPage(2L)
+        assertEquals(CheckState.Unchecked, model.pageRowSelection)
+        assertTrue(model.selectPageRows(true))
+        expectSelection(model, [5L, 6L, 7L, 8L, 9L, 18L, 10L, 11L, 12L, 13L, 14L])
+        model.setQuery(GridQuery(quickFilter = "18", pagination = GridPagination.Page(0L, 5L)))
+        assertEquals(CheckState.Checked, model.pageRowSelection)
+        assertEquals(11L, model.selectedRowKeys.size)
+        model.replaceData(SelectionRows(10L))
+        expectSelection(model, [5L, 6L, 7L, 8L, 9L])
+        assertEquals(0L, model.result.rows.count)
+        assertEquals(CheckState.Unchecked, model.pageRowSelection)
+        model.setQuery(GridQuery(pagination = GridPagination.Page(0L, 5L)))
+        assertTrue(model.selectPageRows(false))
+        expectSelection(model, [5L, 6L, 7L, 8L, 9L])
+        model.setPage(1L)
+        assertTrue(model.selectPageRows(false))
+        expectSelection(model, [])
+    }
+
+    @Test
+    fun `range selection follows current fixed and sorted order and skips ineligible rows`() {
+        val model =
+            DataGridState(
+                SelectionRows(8L),
+                selectionColumns(),
+                GridQuery([GridSort(GridColumnId("value"), GridSortDirection.Descending)]),
+                pinnedRows = GridPinnedRows(selectionKeys([2L]), selectionKeys([6L])),
+                rowSelection = GridRowSelectionMode.Multiple,
+                selectable = Some { row -> row % 2L == 0L }
+            )
+        assertTrue(model.selectRowRange(selectionKey(2L), selectionKey(0L)))
+        expectSelection(model, [2L, 4L, 0L])
+        assertTrue(model.selectRowRange(selectionKey(0L), selectionKey(2L), false))
+        expectSelection(model, [])
+        assertTrue(model.setRowSelected(selectionKey(2L), true))
+        assertTrue(model.setRowSelected(selectionKey(0L), true, extend = true))
+        expectSelection(model, [2L, 4L, 0L])
+        assertTrue(model.setRowSelected(selectionKey(0L), false, extend = true))
+        expectSelection(model, [])
+        assertTrue(model.setRowSelected(selectionKey(6L), true))
+        model.setQuery(GridQuery(quickFilter = "0"))
+        assertTrue(model.setRowSelected(selectionKey(0L), true, extend = true))
+        expectSelection(model, [6L, 0L])
+        assertFalse(model.selectRowRange(selectionKey(6L), selectionKey(0L)))
+    }
+
+    @Test
+    fun `complete selection updates are atomic and data replacement rechecks eligibility`() {
+        val model =
+            DataGridState(
+                SelectionRows(6L),
+                selectionColumns(),
+                rowSelection = GridRowSelectionMode.Multiple,
+                selectable = Some { row -> row % 2L == 0L }
+            )
+        model.setSelectedRows(selectionKeys([0L, 2L]))
+        val selected = model.selectedRowKeys
+        assertFailsWith<IllegalArgumentException> { model.setSelectedRows(selectionKeys([0L, 0L])) }
+        assertFailsWith<IllegalArgumentException> { model.setSelectedRows(selectionKeys([0L, 3L])) }
+        assertFailsWith<IllegalArgumentException> { model.setSelectedRows(selectionKeys([0L, 6L])) }
+        assertTrue(selected === model.selectedRowKeys)
+        model.setSelectedRows(selectionKeys([2L, 0L]))
+        assertTrue(selected === model.selectedRowKeys)
+        assertFalse(model.setRowSelected(selectionKey(1L), true))
+        model.replaceData(SelectionRows(6L, 1L))
+        expectSelection(model, [])
+        assertTrue(model.setRowSelected(selectionKey(1L), true))
+        assertFalse(model.setRowSelected(selectionKey(0L), true))
+    }
+
+    @Test
+    fun `page eligibility is cached across repaint selection and column-only changes`() {
+        val source = SelectionRows(20L)
+        val model =
+            DataGridState(
+                source,
+                selectionColumns(),
+                GridQuery(pagination = GridPagination.Page(0L, 5L)),
+                rowSelection = GridRowSelectionMode.Multiple,
+                selectable = Some { row -> row % 2L == 0L }
+            )
+        assertEquals(3L, model.pageSelectableRows)
+        assertEquals(5L, source.reads)
+        for (index in 0L ..< 10L)
+            assertEquals(CheckState.Unchecked, model.pageRowSelection)
+        assertEquals(5L, source.reads)
+        assertTrue(model.setRowSelected(selectionKey(0L), true))
+        assertEquals(6L, source.reads)
+        model.setColumnState(GridColumnState(GridColumnId("value"), width = Some(200.0)))
+        assertEquals(CheckState.Indeterminate, model.pageRowSelection)
+        assertEquals(6L, source.reads)
+        model.setPage(1L)
+        assertEquals(2L, model.pageSelectableRows)
+        assertEquals(11L, source.reads)
+        assertEquals(CheckState.Unchecked, model.pageRowSelection)
+        assertEquals(11L, source.reads)
+    }
+
+    @Test
+    fun `default selection and header state do not scan a huge lazy source`() {
+        val source = SelectionRows(100000000L)
+        val queries = ArrayList<GridQuery>()
+        val model =
+            DataGridState(
+                source,
+                selectionColumns(),
+                onQueryChange = Some { query -> queries.add(query) },
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        assertEquals(CheckState.Unchecked, model.pageRowSelection)
+        assertEquals(100000000L, model.pageSelectableRows)
+        assertTrue(model.setRowSelected(selectionKey(99999999L), true))
+        assertTrue(model.setRowSelected(selectionKey(0L), true))
+        assertEquals(CheckState.Indeterminate, model.pageRowSelection)
+        assertEquals(0L, source.reads)
+        val next = SelectionRows(99999999L)
+        model.replaceData(next)
+        expectSelection(model, [0L])
+        assertEquals(0L, next.reads)
+        assertEquals(0L, queries.size)
+    }
+
+    @Test
+    fun `failed source eligibility evaluation does not publish data or selection`() {
+        val model =
+            DataGridState(
+                SelectionRows(3L),
+                selectionColumns(),
+                rowSelection = GridRowSelectionMode.Multiple,
+                selectable =
+                    Some {
+                        row ->
+                        if (row >= 100L)
+                            throw IllegalArgumentException(Some("invalid business row"))
+                        true
+                    }
+            )
+        assertTrue(model.setRowSelected(selectionKey(0L), true))
+        val result = model.result
+        val selected = model.selectedRowKeys
+        assertFailsWith<IllegalArgumentException> { model.replaceData(SelectionRows(3L, 100L)) }
+        assertTrue(result === model.result)
+        assertTrue(selected === model.selectedRowKeys)
+    }
+}

@@ -87,6 +87,23 @@ public class DataGridHandle public constructor() {
         guard.checkMutation()
         target?.cancel()
     }
+    public fun setRowSelected(
+        key: ViewKey,
+        value: Boolean,
+        extend: Boolean = false
+    ): GridRowActionResult {
+        guard.checkMutation()
+        gridRequire(key != ViewKey.Position, "row selection requires an explicit key")
+        return target?.setRowSelected(key, value, extend) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun selectPageRows(value: Boolean): GridRowActionResult {
+        guard.checkMutation()
+        return target?.selectPageRows(value) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun clearRowSelection(): GridRowActionResult {
+        guard.checkMutation()
+        return target?.clearRowSelection() ?: GridRowActionResult.Rejected("网格未挂载")
+    }
     public fun pinRow(key: ViewKey, pin: GridRowPin): GridRowActionResult {
         guard.checkMutation()
         return target?.pinRow(key, pin) ?: GridRowActionResult.Rejected("网格未挂载")
@@ -160,4 +177,7 @@ internal interface GridMount {
     fun fitColumns(): GridColumnActionResult
     fun fitColumnToContent(id: GridColumnId): GridColumnFit
     fun pinRow(key: ViewKey, pin: GridRowPin): GridRowActionResult
+    fun setRowSelected(key: ViewKey, value: Boolean, extend: Boolean): GridRowActionResult
+    fun selectPageRows(value: Boolean): GridRowActionResult
+    fun clearRowSelection(): GridRowActionResult
 }

@@ -71,6 +71,20 @@ public class DataGrid<Row> public constructor(
             }
         rowPolicy = Some(policy)
         val result = input.state.result
+        val selection =
+            if (input.state.rowSelection == GridRowSelectionMode.Disabled)
+                None
+            else
+                Some(
+                    GridSelectionView(
+                        input.state,
+                        session,
+                        input.enabled,
+                        input.selectionCheckboxes,
+                        source,
+                        layout.appearance
+                    )
+                )
         val rows =
             GridRows(
                 result.rows,
@@ -80,7 +94,8 @@ public class DataGrid<Row> public constructor(
                 input.enabled,
                 result.topCount,
                 result.bottomCount,
-                input.columnSpans
+                input.columnSpans,
+                selection
             )
         val header =
             GridHeaderCells(
@@ -89,7 +104,8 @@ public class DataGrid<Row> public constructor(
                 session,
                 input.multiSortModifier,
                 input.enabled,
-                source
+                source,
+                selection
             )
         val previousCell: GridCellAddress? =
             when (session.requested) {

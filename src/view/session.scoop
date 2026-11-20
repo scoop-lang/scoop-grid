@@ -45,6 +45,48 @@ internal class GridSession<Row>: GridMount {
     private val cells = HashMap<GridCellAddress, GridCellFocus>()
     private var pageRows = 1L
     private var onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit }
+    fun usesModel(value: DataGridState<Row>): Boolean =
+        when (model) {
+            case Some(val current) -> current === value
+            case None -> false
+        }
+    val rowSelectionEnabled: Boolean get() =
+        when (model) {
+            case Some(val value) -> value.rowSelection != GridRowSelectionMode.Disabled
+            case None -> false
+        }
+    fun isRowSelected(key: ViewKey): Boolean = model?.isRowSelected(key) ?: false
+    public override fun setRowSelected(
+        key: ViewKey,
+        value: Boolean,
+        extend: Boolean
+    ): GridRowActionResult {
+        if (!enabled || !inputEnabled)
+            return GridRowActionResult.Rejected("网格未启用")
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        return if (current.setRowSelected(key, value, extend))
+            GridRowActionResult.Applied
+        else
+            GridRowActionResult.Rejected("当前记录不可选择")
+    }
+    public override fun selectPageRows(value: Boolean): GridRowActionResult {
+        if (!enabled || !inputEnabled)
+            return GridRowActionResult.Rejected("网格未启用")
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        return if (current.selectPageRows(value))
+            GridRowActionResult.Applied
+        else
+            GridRowActionResult.Rejected("当前网格未启用多行选择")
+    }
+    public override fun clearRowSelection(): GridRowActionResult {
+        if (!enabled || !inputEnabled)
+            return GridRowActionResult.Rejected("网格未启用")
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        if (current.rowSelection == GridRowSelectionMode.Disabled)
+            return GridRowActionResult.Rejected("当前网格未启用行选择")
+        current.clearRowSelection()
+        return GridRowActionResult.Applied
+    }
     fun accept(
         plan: GridMeasurePlan,
         input: GridRootProps<Row>,

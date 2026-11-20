@@ -46,7 +46,19 @@
 
 `setColumnState` 更新一列，`setColumnStates` 一次安装完整列状态数组；后者必须恰好包含当前所有列，每列一次，数组顺序即新的用户顺序。全部引用与宽度成功解析后才发布，失败保留原数组；内容完全相同的更新复用原数组。两者均保留查询和查询结果。直接模型操作可设置超出当前窗口的冻结宽度，布局仍按既有窄窗口规则裁剪。
 
-替换列先验证新集合，保留存活列的宽度、顺序、显隐和冻结，新增列追加。查询中删除的列引用被删除；AND／OR 中删除后为空的组合被移除，不伪造恒真子句。存活列的类型合同变化后重新检查其查询，错误时整个替换不发布。选择和层级行为尚未由本文件发布。
+替换列先验证新集合，保留存活列的宽度、顺序、显隐和冻结，新增列追加。查询中删除的列引用被删除；AND／OR 中删除后为空的组合被移除，不伪造恒真子句。存活列的类型合同变化后重新检查其查询，错误时整个替换不发布。矩形选区和层级行为尚未由本文件发布。
+
+## 业务行选择
+
+`DataGridState(..., rowSelection = GridRowSelectionMode.Single／Multiple)` 启用业务行选择，缺省 Disabled。可选 `selectable: (Row) -> Boolean` 只依赖当前不可变记录；没有该回调表示所有业务记录可选。选择保存稳定 key，与真实焦点及单元格范围独立。`selectedRowKeys`、`isRowSelected(key)` 可观察当前选择，`onSelectionChange` 只在集合确实改变时通知。
+
+`setRowSelected(key, value, extend = false)` 返回是否接受操作；Single 选中一项时清理旧项。Multiple 的 extend 从最近普通行选择的锚点按当前呈现顺序扩展，跳过不可选记录；锚点已不在当前结果时按普通单行操作处理。也可用 `selectRowRange(anchor, end, value)` 明确选择或取消一个业务行范围。`setSelectedRows(keys)` 原子安装完整集合，拒绝重复、未知、不可选 key 或与模式不符的数量；`clearRowSelection()` 清空。
+
+`selectPageRows(value)` 只用于 Multiple，目标是 `result.pageRows` 的可选记录，不包括额外显示的页外固定行。`pageRowSelection` 返回现有 CheckState 三态，`pageSelectableRows` 是对应数量。全量无条件可选时从页计数和已选 key 得到状态；有自定义条件时按不可变页快照复用一次资格计数，不在滚动或普通重绘时重新扫描。
+
+过滤、排序、分页和固定行变化保留业务选择；完整本地来源删除记录或将其变为不可选时清理对应 key。选择动作不重新运行查询，也不构造离屏 View。业务模型方法供应用主动更新；挂载的 `DataGridHandle.setRowSelected`、`selectPageRows` 和 `clearRowSelection` 返回 GridRowActionResult，拒绝未挂载或禁用的操作。
+
+默认在首个可见数据列的内容前组合真实 Checkbox，Multiple 同列的叶表头提供“选择当前页”三态控件；`selectionCheckboxes = false` 隐藏这些配套控件，保留选择事实、选中行底色和原生选择能力。Shift＋Checkbox 从选择锚点扩展，浏览格的 Shift＋Space 切换当前业务行；自动重复不反复切换，也不把该空格交给单元格编辑。Checkbox 的输入归属优先，点击不会重复触发单元格或表头动作；普通编辑提交规则仍适用。原生 Table 的选择快照只报告当前结果中的已选行，离屏 SetSelected 与 Checkbox 共用当前模型动作，不要求先挂载行。
 
 ## 列操作与工具面板
 

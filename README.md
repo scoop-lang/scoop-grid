@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。选择与分析功能继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行单选／多选、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。矩形选择与分析功能继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -43,6 +43,12 @@ scoop test --release .
 原生窗口使用 `dataGrid(model) { height = 480.0; handle = Some(handle) }`，其中 `handle` 是可选的 `DataGridHandle`。`handle.focusCell(GridCellAddress(rowKey, columnId))` 定位到真实单元格；焦点在成功布局后完成。Grid 使用应用的 `ThemeSource`，自定义单元格继续组合普通 View。
 
 原生无障碍支持按行列读取离屏值，以及明确的 Realize／Reveal／Focus。读取不创建 View；显露使用表头和冻结区扣除后的实际空间，RTL 沿逻辑 Start／End 解析。`pendingCell`、`isPending` 与 `cancelFocus()` 同样覆盖原生焦点请求。
+
+`DataGridState(..., rowSelection = GridRowSelectionMode.Multiple)` 启用业务行多选，`Single` 启用单选，默认 `Disabled`。首个可见业务列显示 Checkbox，Shift＋点击按当前结果顺序扩展行范围；浏览格的 Shift＋Space 切换该行。多选表头的三态 Checkbox 只选择当前页的合格记录，不包含额外固定行。`selectable = Some { row -> ... }` 可限定不可变记录的选择资格；`selectionCheckboxes = false` 隐藏控件，保留选中底色和原生行选择动作。
+
+应用读取 `selectedRowKeys`／`isRowSelected(key)`，或订阅 `onSelectionChange`；主动更新使用 `setRowSelected`、`setSelectedRows`、`selectRowRange`、`selectPageRows` 与 `clearRowSelection`。过滤、排序、翻页和固定保留业务 key 选择，完整本地来源真正删除记录时清理。选择与当前单元格焦点独立，不重跑查询、不因选择离屏记录而构造 View。默认全部可选时，单行选择和表头状态计算也不扫描数据来源。
+
+界面操作可用 `handle.setRowSelected`、`handle.selectPageRows` 和 `handle.clearRowSelection`，未挂载或禁用时返回 `GridRowActionResult.Rejected`。真实点击遵守当前编辑的提交／拒绝规则；直接模型和原生行选择动作本身不会隐式改写编辑草稿。[十万行示例](examples/basic/src/main.scoop) 展示已选条数与清空入口。
 
 点击表头在升序、降序和无排序之间切换。默认按住 Shift 追加或调整多列排序，表头同时显示方向和优先级；可用 `multiSortModifier = GridMultiSortModifier.Primary` 改为平台主修饰键。真实表头焦点下的 Enter／Space 使用同一规则，并先处理当前编辑会话。
 
@@ -123,6 +129,8 @@ scoop check --tests --release tests-cones/pinned
 scoop test --release tests-cones/pinned
 scoop check --tests --release tests-cones/spans
 scoop test --release tests-cones/spans
+scoop check --tests --release tests-cones/selection
+scoop test --release tests-cones/selection
 ```
 
 原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合，`pinned` 覆盖顶部／底部固定、分页去重、筛选／删除、可变高度、原生身份与编辑保留，以及零正文和三段内容测宽。

@@ -5,6 +5,7 @@ import scoop.collections.HashMap
 import scoop.ui.state
 import scoop.ui.ViewKey
 import scoop.ui.component.TableSource
+import scoop.ui.component.CheckState
 
 public class DataGridState<Row> public constructor(
     source: TableSource<Row>,
@@ -12,7 +13,10 @@ public class DataGridState<Row> public constructor(
     query: GridQuery = GridQuery(),
     public val onQueryChange: ((GridQuery) -> Unit)? = None,
     headers: Array<GridHeaderNode>? = None,
-    pinnedRows: GridPinnedRows = GridPinnedRows()
+    pinnedRows: GridPinnedRows = GridPinnedRows(),
+    public val rowSelection: GridRowSelectionMode = GridRowSelectionMode.Disabled,
+    private val selectable: ((Row) -> Boolean)? = None,
+    public val onSelectionChange: ((Array<ViewKey>) -> Unit)? = None
 ) {
     private val computed =
         state(
@@ -36,6 +40,157 @@ public class DataGridState<Row> public constructor(
         )
     private val observers = ArrayList<GridModelObserver>()
     private val filterCandidates = HashMap<GridColumnId, GridFilterValues>()
+    private val selection = state(GridSelectedRows([]))
+    private var selectionAnchor: ViewKey? = None
+    private var selectablePage: GridSelectablePage<Row>? = None
+    internal val selectedRows: GridSelectedRows get() = selection.value
+    public val selectedRowKeys: Array<ViewKey> get() = selection.value.keys
+    public fun isRowSelected(key: ViewKey): Boolean = selection.value.contains(key)
+    internal fun acceptsRow(row: Row): Boolean = selectable?.invoke(row) ?: true
+    public fun isRowSelectable(key: ViewKey): Boolean {
+        if (rowSelection == GridRowSelectionMode.Disabled)
+            return false
+        val index = source.indexOfKey(key) ?: return false
+        return selectable?.invoke(source.rowAt(index)) ?: true
+    }
+    public fun setSelectedRows(keys: Array<ViewKey>) {
+        selection.checkMutation()
+        gridRequire(
+            rowSelection != GridRowSelectionMode.Disabled || keys.size == 0L,
+            "row selection is disabled"
+        )
+        gridRequire(
+            rowSelection != GridRowSelectionMode.Single || keys.size <= 1L,
+            "single row selection has multiple keys"
+        )
+        val next = GridSelectedRows(keys)
+        for (key in keys)
+            gridRequire(isRowSelectable(key), "selected row is absent or not selectable")
+        selectionAnchor = None
+        publishSelection(next)
+    }
+    public fun setRowSelected(key: ViewKey, value: Boolean, extend: Boolean = false): Boolean {
+        selection.checkMutation()
+        gridRequire(key != ViewKey.Position, "row selection requires an explicit key")
+        if (rowSelection == GridRowSelectionMode.Disabled || source.indexOfKey(key) == None)
+            return false
+        if (value && !isRowSelectable(key))
+            return false
+        if (extend && rowSelection == GridRowSelectionMode.Multiple) {
+            when (selectionAnchor) {
+                case Some(val anchor) -> if (
+                    result.rows.indexOfKey(anchor) != None && result.rows.indexOfKey(key) != None
+                )
+                    return selectRowRange(anchor, key, value)
+                case None -> {}
+            }
+        }
+        selectionAnchor = Some(key)
+        val next = ArrayList<ViewKey>()
+        if (!value || rowSelection == GridRowSelectionMode.Multiple)
+            for (old in selection.value.keys)
+                if (old != key)
+                    next.add(old)
+        if (value)
+            next.add(key)
+        publishSelection(GridSelectedRows(next.toArray()))
+        return true
+    }
+    public fun clearRowSelection() {
+        selection.checkMutation()
+        selectionAnchor = None
+        publishSelection(GridSelectedRows([]))
+    }
+    public fun selectRowRange(anchor: ViewKey, end: ViewKey, value: Boolean = true): Boolean {
+        selection.checkMutation()
+        if (rowSelection != GridRowSelectionMode.Multiple)
+            return false
+        val rows = result.rows
+        val first = rows.indexOfKey(anchor) ?: return false
+        val last = rows.indexOfKey(end) ?: return false
+        val start =
+            if (first < last)
+                first
+            else
+                last
+        val stop =
+            if (first < last)
+                last
+            else
+                first
+        val targeted = HashSet<ViewKey>()
+        val keys = ArrayList<ViewKey>()
+        for (index in start .. stop) {
+            val key = rows.keyAt(index)
+            if (isRowSelectable(key)) {
+                targeted.add(key)
+                keys.add(key)
+            }
+        }
+        changeSelection(targeted, keys.toArray(), value)
+        return true
+    }
+    public fun selectPageRows(value: Boolean): Boolean {
+        selection.checkMutation()
+        if (rowSelection != GridRowSelectionMode.Multiple)
+            return false
+        val rows = result.pageRows
+        val targeted = HashSet<ViewKey>()
+        val keys = ArrayList<ViewKey>()
+        for (index in 0L ..< rows.count) {
+            val key = rows.keyAt(index)
+            if (isRowSelectable(key)) {
+                targeted.add(key)
+                keys.add(key)
+            }
+        }
+        changeSelection(targeted, keys.toArray(), value)
+        selectionAnchor = None
+        return true
+    }
+    private fun changeSelection(targeted: HashSet<ViewKey>, keys: Array<ViewKey>, value: Boolean) {
+        val next = ArrayList<ViewKey>()
+        for (old in selection.value.keys)
+            if (value || !targeted.contains(old))
+                next.add(old)
+        if (value)
+            for (key in keys)
+                if (!selection.value.contains(key))
+                    next.add(key)
+        publishSelection(GridSelectedRows(next.toArray()))
+    }
+    private fun publishSelection(next: GridSelectedRows) {
+        if (selection.value.same(next))
+            return
+        selection.value = next
+        onSelectionChange?.invoke(next.keys)
+    }
+    public val pageSelectableRows: Long get() {
+        if (rowSelection == GridRowSelectionMode.Disabled)
+            return 0L
+        val rows = result.pageRows
+        val test = selectable ?: return rows.count
+        when (selectablePage) {
+            case Some(val cached) -> if (cached.source === rows)
+                return cached.count
+            case None -> {}
+        }
+        var total = 0L
+        for (index in 0L ..< rows.count)
+            if (test(rows.rowAt(index)))
+                total += 1L
+        selectablePage = Some(GridSelectablePage(rows, total))
+        return total
+    }
+    public val pageRowSelection: CheckState get() {
+        val total = pageSelectableRows
+        val rows = result.pageRows
+        var count = 0L
+        for (key in selection.value.keys)
+            if (rows.indexOfKey(key) != None)
+                count += 1L
+        return gridSelectionState(count, total)
+    }
     public val query: GridQuery get() = computed.value.query
     public val result: GridResult<Row> get() = computed.value.result
     public val pinnedRows: GridPinnedRows get() = computed.value.pins
@@ -138,8 +293,15 @@ public class DataGridState<Row> public constructor(
             return
         val next =
             gridCompute(source, old.columns, old.query, Some(old), old.pins.surviving(source))
+        val kept = gridSurvivingSelection(selection.value, source, selectable)
         filterCandidates.clear()
         computed.value = next
+        publishSelection(kept)
+        when (selectionAnchor) {
+            case Some(val key) -> if (source.indexOfKey(key) == None)
+                selectionAnchor = None
+            case None -> {}
+        }
         notify(old.query, next.query)
     }
     public fun replaceColumns(

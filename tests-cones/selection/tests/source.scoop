@@ -1,0 +1,93 @@
+package scoop.grid.tests.selection
+
+import scoop.collections.HashSet
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class SelectionRows(private val probe: SelectionProbe): TableSource<Long> {
+    public override val count: Long get() = 100000000L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(value)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long {
+        probe.reads += 1L
+        return index
+    }
+}
+
+internal fun selectionRows(count: Long = 12L): TableRows<Long> =
+    TableRows(
+        Array<TableRecord<Long>>(count) { index -> TableRecord(ViewKey.Number(index), index) }
+    )
+
+internal fun selectionAddress(row: Long, column: Long = 1L): GridCellAddress =
+    GridCellAddress(ViewKey.Number(row), GridColumnId(f"c${column}"))
+
+internal fun selectionColumns(probe: SelectionProbe): Array<GridColumn<Long>> =
+    Array<GridColumn<Long>>(3L) {
+        index -> gridColumn<Long, Long>(
+            GridColumnId(f"c${index}"),
+            f"Column ${index}",
+            { row -> row },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(180.0)),
+            cell =
+                Some {
+                    row ->
+                    probe.built += 1L
+                    element(
+                        selectionAddress(row, index),
+                        { props, scope -> SelectionObserved(probe.live, props, scope) },
+                        [label(row.toString())]
+                    )
+                },
+            edit =
+                if (index == 1L)
+                    Some(
+                        gridEdit<Long, Long>(
+                            {
+                                value ->
+                                val editor = gridLongEditor(value)
+                                probe.editor = Some(editor)
+                                editor
+                            },
+                            { change, completion -> probe.save(change, completion) }
+                        )
+                    )
+                else
+                    None
+        )
+    }
+
+private class SelectionObserved(
+    private val live: HashSet<GridCellAddress>,
+    private val props: Props<GridCellAddress>,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    private val address = props.value
+    public override fun onMount() {
+        assertTrue(live.add(address))
+    }
+    public override fun onUnmount() {
+        assertTrue(live.remove(address))
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val child = context.measureChild(0L, constraints)
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(child, Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+    }
+}

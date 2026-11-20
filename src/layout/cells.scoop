@@ -31,7 +31,8 @@ internal class GridRowCells<Row>(
     private val session: GridSession<Row>,
     private val policy: GridRowPolicy<Row>,
     private val enabled: Boolean,
-    private val spans: GridRowSpans
+    private val spans: GridRowSpans,
+    private val selection: GridSelectionView<Row>?
 ): ItemSource {
     public override val count: Long get() = spans.count
     public override fun keyAt(index: Long): ViewKey =
@@ -62,7 +63,8 @@ internal class GridRowCells<Row>(
                 session,
                 spans.contributes(columnIndex, policy.contributors),
                 enabled,
-                spans.span(columnIndex).count
+                spans.span(columnIndex).count,
+                selection
             ),
             { props, scope -> GridDataCell(props, scope) }
         )
@@ -75,7 +77,8 @@ internal class GridHeaderCells<Row>(
     private val session: GridSession<Row>,
     private val modifier: GridMultiSortModifier,
     private val enabled: Boolean,
-    private val theme: ThemeSource
+    private val theme: ThemeSource,
+    private val selection: GridSelectionView<Row>? = None
 ): ItemSource {
     public override val count: Long get() = columns.headers.items.size
     public override fun keyAt(index: Long): ViewKey = columns.headers.items[index].target.viewKey()
@@ -140,7 +143,10 @@ internal class GridHeaderCells<Row>(
                         )
                 ),
                 { props, scope -> GridCell(props, scope) },
-                [columns.appearance.label(title)]
+                [
+                    selection?.header(index, columns.appearance.label(title)) ?:
+                        columns.appearance.label(title)
+                ]
             )
         return component(
             GridHeaderResizeProps(model, column, session, content, enabled, theme),
@@ -220,7 +226,8 @@ internal class GridCellProps<Row>(
     val headerCell: SemanticTableCell? = None,
     val headers: Array<SemanticNodeId> = [],
     val enabled: Boolean = true,
-    val columnSpan: Long = 1L
+    val columnSpan: Long = 1L,
+    val selectedRow: Boolean = false
 )
 
 internal class GridCell<Row>(
@@ -427,6 +434,25 @@ internal class GridCell<Row>(
                 case Keyboard(val value) -> value;
                 else -> return
             }
+        val session = props.value.session
+        if (
+            handle.hasFocus &&
+                gridRowSelectionKey(key) &&
+                (session?.rowSelectionEnabled ?: false) &&
+                (session?.editingCell ?: None) ==
+                None
+        ) {
+            // A native text batch can already be queued behind this browsing shortcut.
+            starter?.cancel()
+            if (!key.isRepeat)
+                session?.setRowSelected(
+                    address.row,
+                    !(session?.isRowSelected(address.row) ?: false),
+                    false
+                )
+            context.consume()
+            return
+        }
         if (gridPlainKey(key)) {
             if (
                 handle.hasFocus &&
@@ -570,7 +596,10 @@ internal class GridCell<Row>(
             if (input.address == None)
                 palette.muted.background
             else
-                palette.background.background
+                if (input.selectedRow)
+                    palette.muted.background
+                else
+                    palette.background.background
         val focused = handle.isFocusVisible
         val line = input.appearance.density
         context.clipRect(clip)

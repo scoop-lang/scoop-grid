@@ -60,7 +60,8 @@ private class GridExample(scope: ComponentScope): Component(scope) {
             rows,
             columns(),
             headers = Some(headers()),
-            pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(99999L)])
+            pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(99999L)]),
+            rowSelection = GridRowSelectionMode.Multiple
         )
     private val handle = DataGridHandle()
     private val lastEdit = state("名称与金额可编辑")
@@ -303,6 +304,23 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                     }
                 )
                 add(gridPager(model) { this.handle = Some(handle) })
+                row {
+                    alignment = CrossAlignment.Center
+                    spacing = 8.0
+                    label(f"已选择 ${model.selectedRowKeys.size} 条记录")
+                    add(
+                        gridPinButton(
+                            "清空选择",
+                            onClick =
+                                {
+                                    when (handle.clearRowSelection()) {
+                                        case Applied -> lastEdit.value = "已清空行选择"
+                                        case Rejected(val message) -> lastEdit.value = message
+                                    }
+                                }
+                        ) { enabled = model.selectedRowKeys.size > 0L }
+                    )
+                }
                 label(handle.editError ?: lastEdit.value)
             }
         val content =
