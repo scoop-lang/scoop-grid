@@ -194,6 +194,8 @@ internal class GridEditingProbe {
         }
     }
     fun advance(active: ActiveApplication) {
+        if (!(window?.isFocused ?: false))
+            return
         if (phase >= 66) {
             paste.advance(active)
             return

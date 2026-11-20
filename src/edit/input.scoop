@@ -1,0 +1,30 @@
+package scoop.grid
+
+import scoop.surface.*
+import scoop.ui.*
+import scoop.window.KeyEvent
+
+internal fun gridEditorInput(content: View, key: (RoutedEventContext, KeyEvent) -> Unit): View =
+    component(GridEditorInputProps(content, key), { props, scope -> GridEditorInput(props, scope) })
+
+private class GridEditorInputProps(
+    val content: View,
+    val key: (RoutedEventContext, KeyEvent) -> Unit
+)
+
+private class GridEditorInput(
+    private val props: Props<GridEditorInputProps>,
+    scope: ComponentScope
+): Component(scope) {
+    public override fun onMount() {
+        scope.input.captureHandler =
+            {
+                context,
+                event -> when (event) {
+                    case Keyboard(val key) -> props.value.key(context, key)
+                    else -> {}
+                }
+            }
+    }
+    public override fun render(): View = props.value.content
+}

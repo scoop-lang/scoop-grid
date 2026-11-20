@@ -3,6 +3,7 @@ package scoop.grid.tests.window
 import scoop.graphics.*
 import scoop.grid.*
 import scoop.surface.FrameSubmission
+import scoop.surface.InputEvent
 import scoop.test.*
 import scoop.tests.surface.sendSurfaceKey
 import scoop.ui.*
@@ -29,6 +30,19 @@ internal class GridNavigationProbe(private val editing: GridEditingProbe) {
     var phase = 0
     var clicks = 0
     var finished = false
+    var lastKey = "none"
+    val focusDescription: String get() =
+        when (handle.focusedCell) {
+            case Some(val address) -> {
+                val row =
+                    when (address.row) {
+                        case Number(val value) -> value.toString()
+                        else -> "keyed"
+                    }
+                row + "/" + address.column.value
+            }
+            case None -> "none"
+        }
     private fun columns(): Array<GridColumn<Long>> {
         val probe = this
         val size = TableColumnSize(GridTrack.Fixed(200.0))
@@ -68,6 +82,7 @@ internal class GridNavigationProbe(private val editing: GridEditingProbe) {
             return
         this.window = Some(window)
         visible.value = true
+        window.requestFocus()
     }
     private fun at(row: Long, column: String): Boolean =
         handle.focusedCell == Some(address(row, column))
@@ -95,7 +110,7 @@ internal class GridNavigationProbe(private val editing: GridEditingProbe) {
                 assertTrue(handle.focusCell(address(0L, "a")));
                 phase = 1
             }
-            case 1 -> if (at(0L, "a")) {
+            case 1 -> if (window!!.isFocused && at(0L, "a")) {
                 send(active, 2, 124)
             }
             case 2 -> if (at(0L, "b")) {
@@ -199,6 +214,19 @@ private class NavigationFrame(
 ): Element<Unit>(scope) {
     public override fun onMount() {
         probe.frame = Some(scope)
+        scope.input.captureHandler =
+            {
+                _,
+                event -> when (event) {
+                    case Keyboard(val key) -> probe.lastKey =
+                        f"right=${
+                            key.logicalKey == LogicalKey.Named(NamedKey.ArrowRight)
+                        }, pressed=${key.state == ElementState.Pressed}, synthetic=${
+                            key.synthetic
+                        }, function=${key.modifiers.function}"
+                    else -> {}
+                }
+            }
     }
     public override fun onUnmount() {
         probe.frame = None

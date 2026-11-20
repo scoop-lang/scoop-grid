@@ -1,0 +1,60 @@
+package scoop.grid.tests.controls
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.window.ActiveApplication
+
+internal class ControlScene(
+    private val probe: ControlProbe,
+    private val active: ActiveApplication,
+    scope: ComponentScope
+): Component(scope) {
+    public override fun render(): View {
+        val probe = this.probe
+        val active = this.active
+        return element(
+            { scope -> ControlFrame(probe, active, scope) },
+            [
+                dataGrid(probe.model) {
+                    height = 264.0;
+                    rowHeight = 72.0;
+                    handle = Some(probe.handle)
+                },
+                button("After editor", {}) { focus = FocusOptions(Some(probe.outside)) }
+            ]
+        )
+    }
+}
+
+private class ControlFrame(
+    private val probe: ControlProbe,
+    private val active: ActiveApplication,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    public override fun onMount() {
+        probe.frame = Some(scope)
+    }
+    public override fun onUnmount() {
+        probe.frame = None
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val size = constraints.constrain(Size(640.0, 360.0))
+        context.measureChild(0L, Constraints(maxWidth = Some(size.width), maxHeight = Some(264.0)))
+        context.placeChild(0L, Point(0.0, 0.0))
+        context.measureChild(1L, Constraints.tight(Size(180.0, 40.0)))
+        context.placeChild(1L, Point(0.0, 280.0))
+        return LayoutResult(LayoutMetrics(size), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted)
+                probe.advance(active)
+        }
+    }
+}

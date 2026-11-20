@@ -1,0 +1,192 @@
+package scoop.grid.examples.editors
+
+import scoop.datetime.LocalDate
+import scoop.graphics.Paint
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+
+private class Record(val enabled: Boolean, val date: LocalDate, val priority: Long)
+
+private class EditorsExample(scope: ComponentScope): Component(scope) {
+    private var rows =
+        TableRows(
+            Array<TableRecord<Record>>(12L) {
+                index -> TableRecord(
+                    ViewKey.Number(index),
+                    Record(
+                        index % 2L == 0L,
+                        LocalDate(2026, 11, 20).plusDays(index),
+                        index % 3L + 1L
+                    )
+                )
+            }
+        )
+    private val model = DataGridState(rows, columns())
+    private val handle = DataGridHandle()
+    private val message = state("单格编辑后由应用接收类型化值并发布新的数据快照")
+    private fun save(key: ViewKey, row: Record, completion: GridCommit<Record>) {
+        val next =
+            TableRows(
+                Array<TableRecord<Record>>(rows.count) {
+                    index ->
+                    val current = rows.keyAt(index)
+                    TableRecord(
+                        current,
+                        if (current == key)
+                            row
+                        else
+                            rows.rowAt(index)
+                    )
+                }
+            )
+        if (completion.accept(next))
+            rows = next
+    }
+    private fun columns(): Array<GridColumn<Record>> {
+        val example = this
+        val priorities =
+            [
+                Choice(ViewKey.Text("low"), 1L, "低"),
+                Choice(ViewKey.Text("normal"), 2L, "中"),
+                Choice(ViewKey.Text("high"), 3L, "高")
+            ]
+        val numbers = gridLongValues()
+        val priorityValues =
+            GridValues<Long>(
+                numbers.kind,
+                {
+                    value -> if (value >= 1L && value <= 3L)
+                        priorities[value - 1L].label
+                    else
+                        f"${value}"
+                },
+                numbers.compare,
+                numbers.literal,
+                number = numbers.number
+            )
+        return [
+            gridColumn<Record, Boolean>(
+                GridColumnId("enabled"),
+                "已启用",
+                { row -> row.enabled },
+                gridBooleanValues(),
+                TableColumnSize(GridTrack.Fixed(180.0)),
+                edit =
+                    Some(
+                        gridEdit<Record, Boolean>(
+                            { value -> gridBooleanEditor(value) },
+                            {
+                                change,
+                                completion -> example.save(
+                                    change.address.row,
+                                    Record(change.value, change.row.date, change.row.priority),
+                                    completion
+                                )
+                            }
+                        )
+                    )
+            ),
+            gridColumn<Record, LocalDate>(
+                GridColumnId("date"),
+                "计划日期",
+                { row -> row.date },
+                gridDateValues(),
+                TableColumnSize(GridTrack.Fixed(260.0)),
+                edit =
+                    Some(
+                        gridEdit<Record, LocalDate>(
+                            { value -> gridDateEditor(value) },
+                            {
+                                change,
+                                completion -> example.save(
+                                    change.address.row,
+                                    Record(change.row.enabled, change.value, change.row.priority),
+                                    completion
+                                )
+                            },
+                            validate =
+                                {
+                                    _,
+                                    date -> if (date < LocalDate(2026, 11, 20))
+                                        Some("日期不能早于 2026-11-20")
+                                    else
+                                        None
+                                }
+                        )
+                    )
+            ),
+            gridColumn<Record, Long>(
+                GridColumnId("priority"),
+                "优先级",
+                { row -> row.priority },
+                priorityValues,
+                TableColumnSize(GridTrack.Fixed(220.0)),
+                edit =
+                    Some(
+                        gridEdit<Record, Long>(
+                            { value -> gridChoiceEditor(value, priorities) },
+                            {
+                                change,
+                                completion -> example.save(
+                                    change.address.row,
+                                    Record(change.row.enabled, change.row.date, change.value),
+                                    completion
+                                )
+                            }
+                        )
+                    )
+            )
+        ]
+    }
+    public override fun render(): View {
+        val model = this.model
+        val handle = this.handle
+        val message = this.message
+        val theme = currentThemeSource().read(scope)
+        val content =
+            column {
+                label("布尔、日期与枚举编辑器")
+                label("双击 / F2 编辑；Space 切换布尔值；Enter 确认；Tab 换格；Escape 先关闭弹层")
+                add(
+                    dataGrid(model) {
+                        height = 480.0
+                        rowHeight = 84.0
+                        this.handle = Some(handle)
+                        onEditEnd =
+                            {
+                                event -> message.value =
+                                    when (event.reason) {
+                                        case Accepted -> "已保存"
+                                        case Unchanged -> "值未改变"
+                                        case Cancelled -> "已取消编辑"
+                                        else -> "编辑已结束"
+                                    }
+                            }
+                        onPasteResult =
+                            {
+                                _,
+                                result -> message.value =
+                                    when (result) {
+                                        case Committed -> "已粘贴到一个单元格"
+                                        case Pending -> "正在保存…"
+                                        case Rejected(val reason) -> reason
+                                    }
+                            }
+                    }
+                )
+                label(handle.editError ?: message.value)
+            }
+        return styled(content) {
+            style { background = Some(Paint(theme.tokens.palette.background.background)) }
+        }
+    }
+}
+
+fun main() {
+    context(ThemeSource(shadcnTheme())) {
+        runUiApplication("Scoop Grid — Typed editors", { scope -> EditorsExample(scope) })
+    }
+}

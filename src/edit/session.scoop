@@ -2,6 +2,7 @@ package scoop.grid
 
 import scoop.ui.*
 import scoop.ui.component.TableSource
+import scoop.window.KeyEvent
 
 internal enum GridDraftStatus {
     Ready, Rejected(String), Submitting
@@ -211,13 +212,30 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
                 edit.receivedFocus = true
             return
         }
-        if (!edit.receivedFocus || session.pending || edit.submitting)
+        if (
+            !edit.receivedFocus ||
+                session.pending ||
+                edit.submitting ||
+                (edit.draft.holdsFocus && !session.windowHasFocus())
+        )
             return
         when (submit(Some {})) {
             case Composing -> session.requestCell(edit.address, Some(edit.focus))
             else -> {}
         }
     }
+    fun focusSettled(edit: GridActiveEdit<Row>) {
+        if (owns(edit))
+            focusChanged()
+    }
+    fun submitFrom(edit: GridActiveEdit<Row>): GridEditAttempt =
+        if (owns(edit))
+            submit()
+        else
+            GridEditAttempt.NoEdit
+    fun navigateFrom(edit: GridActiveEdit<Row>, key: KeyEvent): Boolean =
+        owns(edit) && session.focused == Some(edit.address) && session.navigate(edit.address, key)
+    fun cancelFrom(edit: GridActiveEdit<Row>): Boolean = owns(edit) && cancel()
     fun submit(after: (() -> Unit)? = None): GridEditAttempt {
         value.checkMutation()
         val edit = current ?: return GridEditAttempt.NoEdit

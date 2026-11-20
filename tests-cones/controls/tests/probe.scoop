@@ -1,0 +1,83 @@
+package scoop.grid.tests.controls
+
+import scoop.datetime.LocalDate
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.window.*
+
+internal class ControlRow(
+    val id: Long,
+    val name: String,
+    val amount: Long,
+    val flag: Boolean = false,
+    val date: LocalDate = LocalDate(2026, 11, 20),
+    val choice: Long = 1L
+)
+
+internal class ControlProbe {
+    val handle = DataGridHandle()
+    val outside = FocusHandle()
+    var data =
+        TableRows(
+            Array<TableRecord<ControlRow>>(5L) {
+                index -> TableRecord(
+                    ViewKey.Number(index),
+                    ControlRow(index, f"row-${index}", index)
+                )
+            }
+        )
+    val controls = GridControlScenarios(this)
+    val model = DataGridState(data, controls.columns())
+    var window: Window? = None
+    var frame: ComponentScope? = None
+    var phase = 0
+    var finished = false
+    var defer = false
+    var submissions = 0
+    var completion: GridCommit<ControlRow>? = None
+    fun address(row: Long, column: String): GridCellAddress =
+        GridCellAddress(ViewKey.Number(row), GridColumnId(column))
+    fun start(window: Window) {
+        this.window = Some(window)
+    }
+    fun submit(row: ControlRow, completion: GridCommit<ControlRow>) {
+        submissions += 1
+        if (defer) {
+            this.completion = Some(completion)
+            return
+        }
+        val next =
+            TableRows(
+                Array<TableRecord<ControlRow>>(data.count) {
+                    index ->
+                    val old = data.rowAt(index)
+                    TableRecord(
+                        data.keyAt(index),
+                        if (old.id == row.id)
+                            row
+                        else
+                            old
+                    )
+                }
+            )
+        assertTrue(completion.accept(next))
+        data = next
+    }
+    fun next(active: ActiveApplication, target: Int, action: () -> Unit) {
+        phase = -1
+        assertTrue(
+            active.proxy().post {
+                _ ->
+                action()
+                phase = target
+                frame!!.requestFrame()
+            }
+        )
+    }
+    fun advance(active: ActiveApplication) {
+        if (window?.isFocused ?: false)
+            controls.advance(active)
+    }
+}

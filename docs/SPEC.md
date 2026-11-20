@@ -68,6 +68,12 @@ Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一
 
 `GridEditor<T>` 返回 `GridCandidate.Value(T)` 或 `Rejected(message)`，通过 `GridEditorOptions` 接收真实焦点、字体／主题、错误、提交中状态和提交回调。`importText(text): String?` 只导入当前单格草稿，成功返回 None，不能导入时返回原因且保留旧草稿；不执行应用提交。内置 `GridTextEditor<T>` 复用 `TextEditorState` 与 Input／Textarea，保留导入的原始文字供解析与错误修正，组合输入期间拒绝导入；文本、Long 和有限 Double 提供便捷工厂。自定义编辑器沿相同合同使用真实控件，组合输入由编辑器报告和处理。
 
+`gridBooleanEditor` 使用 Checkbox，Space 改变草稿，Enter／Tab／失焦沿网格提交；文本导入接受 true／false、1／0 和“是”／“否”。`gridDateEditor` 使用 DatePicker 与公开的 DatePickerDraft，值为非空 LocalDate，文字格式为 YYYY-MM-DD。日期输入确认或日历选择提交当前格，选择原日期仍按不变值结束。Escape 先关闭日历；弹层已关闭且没有组合输入时，通过会话绑定的 `onCancel` 取消当前格草稿。
+
+`gridChoiceEditor<T>` 使用 Select，接收现有 `Choice<T>`（稳定 key、类型化值、显示名及 enabled）。默认粘贴只匹配唯一可用显示名；重名、未知或禁用项返回错误，可提供类型化 parse 回调，但结果仍须是可用选项。选择及显式关闭选项弹层提交当前格，Escape 先关闭弹层。选项名称不作为身份。布尔、日期与选项编辑器通过既有 Field 呈现业务错误与提交中说明，保存期间限制修改。
+
+带原生弹层的编辑器在打开至 `onClosed` 期间用 `holdsFocus`（默认 false）保留没有实际焦点的交接间隙；真正移到外部目标仍按失焦提交。弹层释放输入域、完成焦点恢复后调用 `onFocusSettled`。所有编辑器回调只作用于创建它的会话。选择弹层中的 Tab／Shift+Tab 先关闭弹层，再通过 `onNavigate` 交还原始按键，焦点仍属于该格时沿 Grid 行列顺序继续；不合成按键或让 Select 自行跳出整个网格。
+
 每个挂载只有一个会话。Enter／F2 或 `DataGridHandle.beginEdit(address)` 进入可编辑格；焦点通过既有 LazyFocus 请求落在真实编辑器。不可编辑的交互格仍进入自己的内容焦点域。`editingCell`、`editError`、`isSubmitting` 可在 render 中观察当前会话，包括首次绑定前的读取。`commitEdit()` 返回 NoEdit／Committed／Rejected／Composing／Pending；`cancelEdit()` 显式结束草稿。
 
 提交先解析、校验，并重新核对行 key、列定义、可编辑条件和原字段。新值相等时不调用应用。`GridChange<Row, T>` 提供当前 Row、原值和候选值，应用通过 `GridCommit<Row>.accept(source)` 安装真实不可变数据快照，或 `reject(message)` 保留草稿及错误。应用可异步保留 completion；Pending 期间禁止重复提交和新编辑。回调只能在 owner 线程使用，并且只完成原会话一次；过期回调返回 false，不改写模型。应用自己的远程副作用仍由应用管理。
@@ -78,4 +84,4 @@ Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一
 
 数据替换保留字段未变的草稿，包括同一 Row 的其他字段更新。删除记录、隐藏目标列、替换该列定义、字段变更、禁用和卸载结束旧会话；`onEditEnd` 报告地址及原因。模型通知在实际动作时处理，因此窗口隐藏也不会让已删除记录的会话继续存活。提交成功后重新查询；原 key 不再显示时移到同列最近有效行，空结果回到网格入口。普通滚动保留实际活动编辑器且沿原视口裁剪。
 
-这一批接入显式进入编辑、双击／失焦协调、类型化提交及单格粘贴，并以系统拼音输入法验证真实候选、Escape 取消、选词和 Enter 提交，结束后恢复原输入源。浏览状态直接输入启动编辑、布尔／日期／枚举便捷编辑器仍需后续闭合。
+这一批接入显式进入编辑、双击／失焦协调、类型化提交、内置值编辑器及单格粘贴，并以系统拼音输入法验证真实候选、Escape 取消、选词和 Enter 提交，结束后恢复原输入源。浏览状态直接输入启动编辑仍需后续闭合。

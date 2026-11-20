@@ -100,6 +100,13 @@ internal class GridSession<Row>: GridMount {
         owner = Some(scope)
         viewport = Some(value)
     }
+    fun windowHasFocus(): Boolean {
+        var input = owner?.input ?: return false
+        while (true) {
+            val parent = input.parent ?: return input.activity.hasFocus
+            input = parent
+        }
+    }
     fun capture(context: RoutedEventContext, event: InputEvent) {
         val edit = editing.current ?: return
         val press =

@@ -97,7 +97,11 @@ internal class GridWindowProbe {
                 Some(
                     f"grid timeout at phase ${phase}, navigation=${navigation.phase}, editing=${
                         editing.phase
-                    }, cells=${cells.live.size}, pending=${handle.isPending}"
+                    }, cells=${cells.live.size}, pending=${handle.isPending}, nativeFocus=${
+                        window?.isFocused ?: false
+                    }, navigationFocus=${navigation.focusDescription}, navigationPending=${
+                        navigation.handle.isPending
+                    }, lastKey=${navigation.lastKey}"
                 )
             )
             else -> {}

@@ -32,8 +32,11 @@ internal class GridDataCell<Row>(
                         input.session.theme!!,
                         active.error,
                         active.submitting,
-                        { input.session.commitEdit() },
-                        { input.session.editing.clearError(active) }
+                        { input.session.editing.submitFrom(active) },
+                        { input.session.editing.cancelFrom(active) },
+                        { input.session.editing.clearError(active) },
+                        { key -> input.session.editing.navigateFrom(active, key) },
+                        { input.session.editing.focusSettled(active) }
                     )
                 )
                 case None -> input.column.cell(

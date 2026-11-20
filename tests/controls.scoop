@@ -1,0 +1,104 @@
+package scoop.grid
+
+import scoop.datetime.LocalDate
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.Choice
+import scoop.window.*
+
+private enum GridTestChoice: Equals<GridTestChoice> {
+    First, Second, Disabled
+
+    public override operator fun equals(other: GridTestChoice): Boolean =
+        when ((this, other)) {
+            case(First, First) -> true
+            case(Second, Second) -> true
+            case(Disabled, Disabled) -> true
+            else -> false
+        }
+}
+
+@Test
+private class GridControlEditorTest {
+    @Test
+    fun `boolean import rejects unknown text without changing its typed value`() {
+        val editor = gridBooleanEditor(false)
+        assertEquals(None, editor.importText(" TRUE "))
+        assertTrue(editor.value.value)
+        assertTrue(editor.importText("yes please") != None)
+        assertTrue(editor.value.value)
+        assertEquals(None, editor.importText("否"))
+        assertFalse(editor.value.value)
+    }
+
+    @Test
+    fun `date drafts retain invalid text and do not replace active composition`() {
+        val editor = gridDateEditor(LocalDate(2024, 2, 29))
+        assertEquals(None, editor.importText("2025-02-29"))
+        when (editor.candidate()) {
+            case Rejected(_) -> {}
+            else -> fail(Some("invalid leap date was accepted"))
+        }
+        assertEquals("2025-02-29", editor.draft.editor.text)
+        assertEquals(None, editor.importText(""))
+        when (editor.candidate()) {
+            case Rejected(_) -> {}
+            else -> fail(Some("empty nonnullable date was accepted"))
+        }
+        assertEquals(None, editor.importText("2024-02-29"))
+        editor.draft.editor.applyInput(
+            TextInputBatch(
+                None,
+                [
+                    TextInputOperation.Preedit(
+                        "中",
+                        Some(Utf8Selection(3L, 3L)),
+                        TextReplacement.CurrentSelection
+                    )
+                ]
+            )
+        )
+        assertTrue(editor.composing)
+        assertTrue(editor.importText("2026-11-20") != None)
+        editor.cancelComposition()
+        when (editor.candidate()) {
+            case Value(val date) -> assertEquals(LocalDate(2024, 2, 29), date)
+            else -> fail(Some("composition cancellation changed the committed date"))
+        }
+    }
+
+    @Test
+    fun `choice identity remains typed when labels collide and disabled choices are rejected`() {
+        val choices =
+            [
+                Choice(ViewKey.Text("first"), GridTestChoice.First, "同名"),
+                Choice(ViewKey.Text("second"), GridTestChoice.Second, "同名"),
+                Choice(ViewKey.Text("disabled"), GridTestChoice.Disabled, "禁用", false)
+            ]
+        val editor = gridChoiceEditor(GridTestChoice.First, choices)
+        assertEquals(Some("多个选项名称相同，请使用列表选择"), editor.importText("同名"))
+        assertEquals(GridTestChoice.First, editor.value.value)
+        assertTrue(editor.importText("禁用") != None)
+        assertEquals(GridTestChoice.First, editor.value.value)
+        val parsed =
+            gridChoiceEditor(
+                GridTestChoice.First,
+                choices,
+                Some {
+                    text -> GridCandidate.Value(
+                        if (text == "second")
+                            GridTestChoice.Second
+                        else
+                            GridTestChoice.Disabled
+                    )
+                }
+            )
+        assertEquals(None, parsed.importText("second"))
+        assertEquals(GridTestChoice.Second, parsed.value.value)
+        assertTrue(parsed.importText("disabled") != None)
+        assertEquals(GridTestChoice.Second, parsed.value.value)
+        assertFailsWith<IllegalArgumentException> {
+            gridChoiceEditor(GridTestChoice.First, [choices[0L], choices[0L]])
+        }
+    }
+}

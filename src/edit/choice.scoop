@@ -1,0 +1,157 @@
+package scoop.grid
+
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.window.*
+
+public class GridChoiceEditor<T: Equals<T>> public constructor(
+    initial: T,
+    public val choices: Array<Choice<T>>,
+    private val parse: ((String) -> GridCandidate<T>)? = None
+): GridEditor<T> {
+    public val value: State<T> = state(initial)
+    public val popup: OverlayHandle = OverlayHandle()
+    private val reference = FieldTarget()
+    private var ownsPopup = false
+    private var pendingTab: KeyEvent? = None
+    private val content =
+        SelectContent(
+            Array<SelectEntry<T>>(choices.size) {
+                index -> SelectEntry.Item(SelectItem(choices[index]))
+            }
+        )
+    public override val composing: Boolean get() = false
+    public override val holdsFocus: Boolean get() = ownsPopup
+    private fun available(candidate: T): Boolean {
+        for (choice in choices)
+            if (choice.enabled && choice.value == candidate)
+                return true
+        return false
+    }
+    public override fun candidate(): GridCandidate<T> =
+        if (available(value.value))
+            GridCandidate.Value(value.value)
+        else
+            GridCandidate.Rejected("请选择一个可用选项")
+    private fun parseLabel(text: String): GridCandidate<T> {
+        var match: Choice<T>? = None
+        for (choice in choices) {
+            if (!choice.enabled || choice.label != text)
+                continue
+            when (match) {
+                case Some(_) -> return GridCandidate.Rejected("多个选项名称相同，请使用列表选择")
+                case None -> match = Some(choice)
+            }
+        }
+        return when (match) {
+            case Some(val choice) -> GridCandidate.Value(choice.value)
+            case None -> GridCandidate.Rejected("请选择一个可用选项")
+        }
+    }
+    public override fun importText(text: String): String? {
+        val parsed =
+            when (parse) {
+                case Some(val convert) -> convert(text)
+                case None -> parseLabel(text)
+            }
+        return when (parsed) {
+            case Rejected(val message) -> Some(message)
+            case Value(val next) -> if (available(next)) {
+                value.value = next
+                None
+            } else
+                Some("请选择一个可用选项")
+        }
+    }
+    public override fun cancelComposition(): Unit = Unit
+    public override fun view(options: GridEditorOptions): View {
+        val editor = this
+        val draft = value
+        val popup = this.popup
+        val selection =
+            binding(
+                { Some(draft.value) },
+                {
+                    next -> if (!options.submitting)
+                        when (next) {
+                            case Some(val value) -> draft.value = value
+                            case None -> {}
+                        }
+                }
+            )
+        val control =
+            component(
+                SelectProps(
+                    selection,
+                    content,
+                    enabled = !options.submitting,
+                    invalid = options.error != None,
+                    focus = FocusOptions(Some(options.focus)),
+                    labelTarget = Some(reference),
+                    fonts = Some(options.fonts),
+                    theme = Some(options.theme),
+                    handle = Some(popup),
+                    onOpenChange =
+                        {
+                            open -> if (open) {
+                                editor.ownsPopup = true
+                                editor.pendingTab = None
+                            }
+                        },
+                    onValueChange =
+                        {
+                            _ ->
+                            options.onEdited()
+                            if (!popup.isOpen)
+                                options.onSubmit()
+                        },
+                    onClosed =
+                        {
+                            reason ->
+                            editor.ownsPopup = false
+                            val key = editor.pendingTab
+                            editor.pendingTab = None
+                            if (reason == OverlayCloseReason.Explicit) {
+                                when (key) {
+                                    case Some(val event) -> options.onNavigate(event)
+                                    case None -> options.onSubmit()
+                                }
+                            }
+                            options.onFocusSettled()
+                        }
+                ),
+                { props, scope -> Select(props, scope) }
+            )
+        val guarded =
+            gridEditorInput(control) {
+                context, key ->
+                val modifiers = key.modifiers
+                if (
+                    popup.isOpen &&
+                        key.state ==
+                        ElementState.Pressed &&
+                        !key.synthetic &&
+                        !modifiers.control &&
+                        !modifiers.alt &&
+                        !modifiers.superKey &&
+                        !modifiers.function &&
+                        key.logicalKey ==
+                        LogicalKey.Named(NamedKey.Tab)
+                ) {
+                    editor.pendingTab = Some(key)
+                    popup.requestClose()
+                    if (!popup.isOpen)
+                        context.consume()
+                    else
+                        editor.pendingTab = None
+                }
+            }
+        return gridEditorField(guarded, options, reference)
+    }
+}
+
+public fun <T: Equals<T>> gridChoiceEditor(
+    value: T,
+    choices: Array<Choice<T>>,
+    parse: ((String) -> GridCandidate<T>)? = None
+): GridChoiceEditor<T> = GridChoiceEditor(value, choices, parse)
