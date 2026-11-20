@@ -15,7 +15,8 @@ public class GridPagerProps<Row> public constructor(
     public val handle: DataGridHandle? = None,
     public val enabled: Boolean = true,
     public val fonts: FontCollection? = None,
-    public val theme: ThemeSource? = None
+    public val theme: ThemeSource? = None,
+    public val labels: GridPagerLabels = GridPagerLabels()
 ) {
     init {
         val sizes = HashSet<Long>()
@@ -68,6 +69,7 @@ public class GridPager<Row> public constructor(
 
     public override fun render(): View {
         val input = props.value
+        val labels = input.labels
         val source = input.theme ?: (ambient ?: currentThemeSource())
         val appearance =
             GridAppearance(
@@ -80,26 +82,26 @@ public class GridPager<Row> public constructor(
         val result = model.result
         val available = input.enabled && !(input.handle?.isSubmitting ?: false)
         val choices = ArrayList<Choice<GridPagination>>()
-        choices.add(Choice(ViewKey.Text("all"), GridPagination.Disabled, "全部"))
+        choices.add(Choice(ViewKey.Text("all"), GridPagination.Disabled, labels.all))
         var listed = false
         for (size in input.pageSizes) {
             val choice = GridPagination.Page(0L, size)
-            choices.add(Choice(ViewKey.Number(size), choice, f"${size} / 页"))
+            choices.add(Choice(ViewKey.Number(size), choice, labels.size(size)))
             if (gridFirstPage(query.pagination) == choice)
                 listed = true
         }
         if (!listed)
             when (query.pagination) {
                 case Page(_, val size) -> choices.add(
-                    Choice(ViewKey.Number(size), GridPagination.Page(0L, size), f"${size} / 页")
+                    Choice(ViewKey.Number(size), GridPagination.Page(0L, size), labels.size(size))
                 )
                 case Disabled -> {}
             }
         val status =
             if (query.pagination == GridPagination.Disabled || result.pageCount == 0L)
-                f"共 ${result.totalRows} 条"
+                labels.rows(result.totalRows)
             else
-                f"共 ${result.totalRows} 条 · ${page()} / ${result.pageCount} 页"
+                labels.status(result.totalRows, page(), result.pageCount)
         return column {
             add(
                 queryRow {
@@ -122,7 +124,11 @@ public class GridPager<Row> public constructor(
                             fonts = input.fonts
                             theme = input.theme
                             width = Some(128.0 * appearance.density)
-                            semantics = ComponentSemantics(name = Some("每页条数"))
+                            semantics =
+                                ComponentSemantics(
+                                    name = Some(labels.sizeName),
+                                    automationId = Some("grid-page-size")
+                                )
                         }
                     )
                     spacing = 8.0 * appearance.density
@@ -147,12 +153,16 @@ public class GridPager<Row> public constructor(
                                 else
                                     [PaginationItem.Page(this @GridPager.page())]
                             )
-                        previousText = "上一页"
-                        nextText = "下一页"
-                        pageLabel = { number -> f"第 ${number} 页" }
+                        previousText = labels.previous
+                        nextText = labels.next
+                        pageLabel = labels.page
                         fonts = input.fonts
                         theme = input.theme
-                        semantics = ComponentSemantics(name = Some("结果分页"))
+                        semantics =
+                            ComponentSemantics(
+                                name = Some(labels.name),
+                                automationId = Some("grid-pagination")
+                            )
                     }
                 )
             spacing = 4.0 * appearance.density
@@ -167,9 +177,10 @@ public class GridPagerBuilder internal constructor() {
     public var enabled: Boolean = true
     public var fonts: FontCollection? = None
     public var theme: ThemeSource? = None
+    public var labels: GridPagerLabels = GridPagerLabels()
     public var key: ViewKey = ViewKey.Position
     internal fun <Row> snapshot(state: DataGridState<Row>): GridPagerProps<Row> =
-        GridPagerProps(state, pageSizes, handle, enabled, fonts, theme)
+        GridPagerProps(state, pageSizes, handle, enabled, fonts, theme, labels)
 }
 
 public fun <Row> gridPager(

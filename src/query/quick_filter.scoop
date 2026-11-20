@@ -14,7 +14,8 @@ public class GridQuickFilterProps<Row> public constructor(
     public val enabled: Boolean = true,
     public val fonts: FontCollection? = None,
     public val theme: ThemeSource? = None,
-    public val focus: FocusOptions = FocusOptions()
+    public val focus: FocusOptions = FocusOptions(),
+    public val labels: GridQuickFilterLabels = GridQuickFilterLabels()
 )
 
 public class GridQuickFilter<Row> public constructor(
@@ -52,6 +53,7 @@ public class GridQuickFilter<Row> public constructor(
 
     public override fun render(): View {
         val input = props.value
+        val labels = input.labels
         val source = input.theme ?: (ambient ?: currentThemeSource())
         val density = source.read(scope).tokens.typography.body.fontSize / 14.0
         val current = input.state.query.quickFilter
@@ -70,26 +72,38 @@ public class GridQuickFilter<Row> public constructor(
                     fonts = input.fonts
                     theme = input.theme
                     focus = input.focus
-                    placeholder = "快速筛选"
-                    semantics = ComponentSemantics(name = Some("快速筛选"))
+                    placeholder = labels.placeholder
+                    semantics =
+                        ComponentSemantics(
+                            name = Some(labels.inputName),
+                            automationId = Some("grid-quick-filter-input")
+                        )
                     onSubmit = { _ -> this @GridQuickFilter.apply() }
                 }
             ) { grow = 1.0 }
             add(
-                queryButton("应用", { this @GridQuickFilter.apply() }) {
+                queryButton(labels.apply, { this @GridQuickFilter.apply() }) {
                     enabled = available
                     fonts = input.fonts
                     theme = input.theme
-                    semantics = ComponentSemantics(name = Some("应用快速筛选"))
+                    semantics =
+                        ComponentSemantics(
+                            name = Some(labels.applyName),
+                            automationId = Some("grid-quick-filter-apply")
+                        )
                 }
             )
             add(
-                queryButton("清除", { this @GridQuickFilter.apply(true) }) {
+                queryButton(labels.clear, { this @GridQuickFilter.apply(true) }) {
                     enabled = available && (editor.committedText != "" || current != "")
                     variant = ButtonVariant.Outline
                     fonts = input.fonts
                     theme = input.theme
-                    semantics = ComponentSemantics(name = Some("清除快速筛选"))
+                    semantics =
+                        ComponentSemantics(
+                            name = Some(labels.clearName),
+                            automationId = Some("grid-quick-filter-clear")
+                        )
                 }
             )
             spacing = 8.0 * density
@@ -104,9 +118,10 @@ public class GridQuickFilterBuilder internal constructor() {
     public var fonts: FontCollection? = None
     public var theme: ThemeSource? = None
     public var focus: FocusOptions = FocusOptions()
+    public var labels: GridQuickFilterLabels = GridQuickFilterLabels()
     public var key: ViewKey = ViewKey.Position
     internal fun <Row> snapshot(state: DataGridState<Row>): GridQuickFilterProps<Row> =
-        GridQuickFilterProps(state, handle, enabled, fonts, theme, focus)
+        GridQuickFilterProps(state, handle, enabled, fonts, theme, focus, labels)
 }
 
 public fun <Row> gridQuickFilter(

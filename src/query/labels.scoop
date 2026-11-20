@@ -1,0 +1,24 @@
+package scoop.grid
+
+/** Display text and accessible names do not participate in query identity. */
+public class GridQuickFilterLabels public constructor(
+    public val placeholder: String = "快速筛选",
+    public val inputName: String = "快速筛选",
+    public val apply: String = "应用",
+    public val applyName: String = "应用快速筛选",
+    public val clear: String = "清除",
+    public val clearName: String = "清除快速筛选"
+)
+
+public class GridPagerLabels public constructor(
+    public val all: String = "全部",
+    public val size: (Long) -> String = { count -> f"${count} / 页" },
+    public val sizeName: String = "每页条数",
+    public val rows: (Long) -> String = { count -> f"共 ${count} 条" },
+    public val status: (Long, Long, Long) -> String =
+        { count, page, pages -> f"共 ${count} 条 · ${page} / ${pages} 页" },
+    public val previous: String = "上一页",
+    public val next: String = "下一页",
+    public val page: (Long) -> String = { number -> f"第 ${number} 页" },
+    public val name: String = "结果分页"
+)

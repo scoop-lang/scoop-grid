@@ -17,6 +17,16 @@ internal class QueryToolScene(private val probe: QueryToolProbe, scope: Componen
                 gridQuickFilter(probe.model) {
                     handle = Some(probe.handle)
                     enabled = probe.enabled.value
+                    if (probe.localized.value)
+                        labels =
+                            GridQuickFilterLabels(
+                                placeholder = "Search rows",
+                                inputName = "Quick search",
+                                apply = "Apply",
+                                applyName = "Apply search",
+                                clear = "Clear",
+                                clearName = "Clear search"
+                            )
                 },
                 dataGrid(probe.model) {
                     height = 240.0
@@ -29,6 +39,24 @@ internal class QueryToolScene(private val probe: QueryToolProbe, scope: Componen
                     handle = Some(probe.handle)
                     enabled = probe.enabled.value
                     pageSizes = [2L, 3L]
+                    if (probe.localized.value)
+                        labels =
+                            GridPagerLabels(
+                                all = "All records",
+                                size = { count -> f"size:${count}" },
+                                sizeName = "Rows per page",
+                                rows = { count -> f"total:${count}" },
+                                status =
+                                    {
+                                        count,
+                                        page,
+                                        pages -> f"total:${count}; page:${page}/${pages}"
+                                    },
+                                previous = "Back",
+                                next = "Forward",
+                                page = { number -> f"Page #${number}" },
+                                name = "Result pages"
+                            )
                 },
                 button("Outside", {})
             ]

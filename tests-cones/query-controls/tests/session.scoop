@@ -46,6 +46,7 @@ internal class QueryToolProbe: Closeable {
     val model: DataGridState<QueryToolRow> get() = selected.value
     val handle = DataGridHandle()
     val enabled = state(true)
+    val localized = state(false)
     var frame: ComponentScope? = None
     var editor: GridTextEditor<Long>? = None
     var submissions = 0
@@ -185,6 +186,16 @@ internal class QueryToolProbe: Closeable {
             case 55 -> calls!!.post(clear!!, phase)
             case 56 -> calls!!.post(field!!, phase, 1, "unsent")
             case 60 -> calls!!.post(header!!, phase, 2)
+            case 62 -> calls!!.post(field!!, phase, 2)
+            case 64 -> calls!!.post(field!!, phase, 1, "A")
+            case 68 -> calls!!.post(apply!!, phase)
+            case 70 -> calls!!.post(size!!, phase)
+            case 72 -> calls!!.post(option!!, phase)
+            case 74 -> calls!!.post(clear!!, phase)
+            case 76 -> calls!!.post(next!!, phase)
+            case 78 -> calls!!.post(size!!, phase)
+            case 80 -> calls!!.post(option!!, phase)
+            case 84 -> calls!!.post(header!!, phase, 2)
             else -> calls!!.post(root!!, phase, 20)
         }
     }
@@ -355,6 +366,57 @@ internal class QueryToolProbe: Closeable {
                 header = Some(named("Group"))
             }
             case 61 -> retry = !header!!.flag(4)
+            case 63 -> retry = !field!!.flag(4)
+            case 65 -> value("A")
+            case 66 -> {
+                if (!field!!.text(0, Some("Quick search"))) {
+                    retry = true
+                    return
+                }
+                assertTrue(field!!.flag(4))
+                assertTrue(apply!!.text(0, Some("Apply search")))
+                assertTrue(clear!!.text(0, Some("Clear search")))
+                assertTrue(size!!.text(0, Some("Rows per page")))
+                assertTrue(size!!.text(1, Some("All records")))
+                assertTrue(model.result.ordered === ordered!!)
+                value("A")
+                caption("total:2")
+            }
+            case 69 -> {
+                value("A")
+                caption("total:3")
+                assertEquals(3L, model.result.rows.count)
+            }
+            case 71 -> option = Some(named("size:2"))
+            case 73 -> {
+                previous = Some(named("Back"))
+                next = Some(named("Forward"))
+                named("Page #1")
+                named("Result pages")
+                caption("total:3; page:1/2")
+                assertTrue(size!!.text(1, Some("size:2")))
+                assertFalse(previous!!.flag(1))
+                assertTrue(next!!.flag(1))
+            }
+            case 75 -> caption("total:5; page:1/3")
+            case 77 -> caption("total:5; page:2/3")
+            case 79 -> option = Some(named("All records"))
+            case 81 -> {
+                caption("total:5")
+                assertFalse(next!!.flag(0))
+                assertFalse(previous!!.flag(0))
+            }
+            case 83 -> {
+                assertTrue(field!!.text(0, Some("快速筛选")))
+                assertTrue(apply!!.text(0, Some("应用快速筛选")))
+                assertTrue(clear!!.text(0, Some("清除快速筛选")))
+                assertTrue(size!!.text(0, Some("每页条数")))
+                assertTrue(size!!.text(1, Some("全部")))
+                assertTrue(model.result.ordered === ordered!!)
+                value("")
+                caption("共 5 条")
+            }
+            case 85 -> retry = !header!!.flag(4)
             else -> {}
         }
     }
@@ -452,7 +514,20 @@ internal class QueryToolProbe: Closeable {
                 selected.value =
                     DataGridState(rows, toolColumns(this), expected, Some { _ -> queryEvents += 1 })
             }
-            case 62 -> {
+            case 66 -> {
+                ordered = Some(model.result.ordered)
+                localized.value = true
+            }
+            case 68 -> expectQuick("A")
+            case 72 -> expectPage(0L, 2L)
+            case 74 -> expectQuick("")
+            case 76 -> expectPage(1L, 2L)
+            case 80 -> expect(expected.withPagination(GridPagination.Disabled))
+            case 82 -> {
+                ordered = Some(model.result.ordered)
+                localized.value = false
+            }
+            case 86 -> {
                 finished = true
                 ui!!.close()
                 active!!.requestExit()

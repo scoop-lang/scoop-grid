@@ -60,6 +60,8 @@ scoop test --release .
 
 可在网格上方组合 `gridQuickFilter(model) { handle = Some(handle) }`，按 Enter 或“应用”提交快速筛选，输入草稿期间不执行查询；`gridPager(model) { handle = Some(handle) }` 提供结果条数、页大小和翻页。“全部”取消分页，仍使用同一个虚拟网格。两个控件通过同一 handle 检查单元格编辑，非法草稿或等待保存时不改变查询。`pageSizes` 可配置允许选择的正整数，外部当前值也会正确显示。
 
+两个控件的 `labels` 分别使用 `GridQuickFilterLabels` 和 `GridPagerLabels`。可以替换按钮、占位文字、无障碍名称，以及结果数、页大小和页码的格式化回调；默认显示中文。运行中切换文案保留输入草稿、焦点和查询，选项身份与分页值不依赖显示文字。
+
 `gridFind(handle) { ... }` 提供真实查找输入框、上一项／下一项和结果提示，Enter 查找下一项。它在当前呈现结果与可见逻辑列的数据文字中定位，不改变筛选／排序／分页。默认忽略 ASCII 大小写，Unicode 原文保留；可配置 `matchCase`、`wrap`、`labels`、字体／主题／焦点与 `onResult`。连续操作从上次匹配继续，修改文字重新开始；组合输入期间不提交查找。未命中或编辑校验拒绝时保留原范围，成功时清除矩形并显露匹配格。
 
 只读取模型时调用 `model.findCell(text, after, backwards, matchCase, wrap)`，返回包含地址与是否循环的 `GridFindMatch` 或 None；它不创建 View。`handle.findCell(...)` 返回 `Found`／`NotFound`／`Rejected`，通过当前编辑门控后使用既有按 key 定位；Found 表示请求接受，实际焦点等布局呈现后到达。扫描期间应用更新结果时拒绝旧定位。
