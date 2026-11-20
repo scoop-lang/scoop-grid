@@ -31,15 +31,18 @@ internal fun ColumnsProbe.resizeBegin(id: String) {
     dragDelta = 0.0
     assertTrue(moveSurfacePointer(window!!, dragX, dragY))
     assertTrue(view!!.button(dragX, dragY, true))
+    inputQueued()
 }
 
 internal fun ColumnsProbe.resizeMove(delta: Double) {
     dragDelta = delta
     assertTrue(moveSurfacePointer(window!!, dragX + delta, dragY))
+    inputQueued()
 }
 
 internal fun ColumnsProbe.resizeRelease() {
     assertTrue(view!!.button(dragX + dragDelta, dragY, false))
+    inputQueued()
 }
 
 internal fun ColumnsProbe.resizeFrame(node: NativeNode, bounds: Rect): Boolean {

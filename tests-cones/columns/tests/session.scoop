@@ -79,6 +79,7 @@ internal class ColumnsProbe: Closeable {
     var pendingRows: TableRows<Long>? = None
     var phase = 0
     var waiting = false
+    var waitingInput = false
     var retry = false
     val diagnostic: String get() =
         f"columns phase=${phase}, waiting=${waiting}, retry=${retry}, queryEvents=${
@@ -271,6 +272,19 @@ internal class ColumnsProbe: Closeable {
     }
     fun key(code: Int, text: String) {
         assertEquals(0, columnKey(window!!, code, text))
+        inputQueued()
+    }
+    fun inputQueued() {
+        waitingInput = true
+        // Input dispatch precedes the next owner mailbox batch.
+        assertTrue(
+            active!!.proxy().post {
+                _ ->
+                waitingInput = false
+                if (!finished)
+                    frame?.requestFrame()
+            }
+        )
     }
     public override fun close() {
         idleDeadline?.close()

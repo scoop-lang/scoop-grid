@@ -46,6 +46,8 @@ internal class GridSession<Row>: GridMount {
     private var reference: DataGridHandle? = None
     var enabled = true
     var touchCellSelection = false
+    private val menuOptions = state<GridMenuOptions?>(None)
+    val contextMenus: GridMenuOptions? get() = menuOptions.value
     private var intent: GridCellAddress? = None
     private var recent: GridColumnId? = None
     private val cells = HashMap<GridCellAddress, GridCellFocus>()
@@ -457,6 +459,15 @@ internal class GridSession<Row>: GridMount {
         theme = Some(input.theme)
         enabled = input.input.enabled
         touchCellSelection = input.input.touchCellSelection
+        val menus = input.input.contextMenus
+        val sameMenus =
+            when ((menuOptions.value, menus)) {
+                case(Some(val old), Some(val next)) -> old === next
+                case(None, None) -> true
+                else -> false
+            }
+        if (!sameMenus)
+            menuOptions.value = menus
         onPasteResult = input.input.onPasteResult
         onCopyResult = input.input.onCopyResult
         editing.update(input.input)

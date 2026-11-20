@@ -1,0 +1,91 @@
+package scoop.grid
+
+public enum GridMenuTarget: Equals<GridMenuTarget> {
+    Cell(GridCellAddress), Column(GridColumnId), ColumnGroup(GridColumnGroupId)
+    public override operator fun equals(other: GridMenuTarget): Boolean =
+        when ((this, other)) {
+            case(Cell(val a), Cell(val b)) -> a == b
+            case(Column(val a), Column(val b)) -> a == b
+            case(ColumnGroup(val a), ColumnGroup(val b)) -> a == b
+            else -> false
+        }
+}
+
+public enum GridMenuCommand: Equals<GridMenuCommand> {
+    SortAscending, SortDescending, ClearSort, MoveBefore, MoveAfter, PinStart, PinEnd,
+    UnpinColumn, HideColumn, ResetWidth, FitContent, FitColumns,
+    Copy, CopyWithHeaders, ClearRange, Edit, SelectRow, DeselectRow, PinTop, PinBottom, UnpinRow
+    public override operator fun equals(other: GridMenuCommand): Boolean = id == other.id
+    public val id: String get() =
+        when (this) {
+            case SortAscending -> "sort-ascending"
+            case SortDescending -> "sort-descending"
+            case ClearSort -> "clear-sort"
+            case MoveBefore -> "move-before"
+            case MoveAfter -> "move-after"
+            case PinStart -> "pin-start"
+            case PinEnd -> "pin-end"
+            case UnpinColumn -> "unpin-column"
+            case HideColumn -> "hide-column"
+            case ResetWidth -> "reset-width"
+            case FitContent -> "fit-content"
+            case FitColumns -> "fit-columns"
+            case Copy -> "copy"
+            case CopyWithHeaders -> "copy-headers"
+            case ClearRange -> "clear-range"
+            case Edit -> "edit"
+            case SelectRow -> "select-row"
+            case DeselectRow -> "deselect-row"
+            case PinTop -> "pin-top"
+            case PinBottom -> "pin-bottom"
+            case UnpinRow -> "unpin-row"
+        }
+}
+
+public enum GridMenuResult {
+    Applied, Sizing(GridColumnFit), Rejected(String)
+}
+
+public class GridMenuLabels public constructor(
+    text: ((GridMenuCommand) -> String)? = None,
+    public val unavailable: String = "当前目标或操作已不可用",
+    public val finishEditing: String = "请先完成当前单元格的编辑或保存"
+) {
+    public val text: (GridMenuCommand) -> String = text ?: ::gridMenuText
+}
+
+private fun gridMenuText(command: GridMenuCommand): String =
+    when (command) {
+        case SortAscending -> "升序"
+        case SortDescending -> "降序"
+        case ClearSort -> "清除该列排序"
+        case MoveBefore -> "前移"
+        case MoveAfter -> "后移"
+        case PinStart -> "冻结到起始侧"
+        case PinEnd -> "冻结到结束侧"
+        case UnpinColumn -> "解除列冻结"
+        case HideColumn -> "隐藏列"
+        case ResetWidth -> "恢复声明宽度"
+        case FitContent -> "适应可见内容"
+        case FitColumns -> "适应视口"
+        case Copy -> "复制"
+        case CopyWithHeaders -> "复制（含表头）"
+        case ClearRange -> "清除选区"
+        case Edit -> "编辑单元格"
+        case SelectRow -> "选择此行"
+        case DeselectRow -> "取消选择此行"
+        case PinTop -> "固定到顶部"
+        case PinBottom -> "固定到底部"
+        case UnpinRow -> "解除行固定"
+    }
+
+public class GridMenuOptions public constructor(
+    public val labels: GridMenuLabels = GridMenuLabels(),
+    public val width: Double = 220.0,
+    public val onResult: (GridMenuTarget, GridMenuCommand, GridMenuResult) -> Unit =
+        { _, _, _ -> Unit }
+) {
+    init {
+        gridRequire(width.isFinite() && width > 0.0, "invalid grid menu width")
+    }
+}

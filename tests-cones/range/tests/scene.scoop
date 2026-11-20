@@ -23,6 +23,23 @@ internal class RangeScene(private val probe: RangeProbe, scope: ComponentScope):
                         enabled = probe.enabled.value
                         selectionCheckboxes = false
                         touchCellSelection = probe.touchSelection.value
+                        contextMenus =
+                            if (probe.menus.value)
+                                Some(
+                                    GridMenuOptions(
+                                        labels =
+                                            GridMenuLabels(text = Some { command -> command.id }),
+                                        onResult =
+                                            {
+                                                target, command, result ->
+                                                probe.menuTarget = Some(target)
+                                                probe.menuCommand = Some(command)
+                                                probe.menuResult = Some(result)
+                                            }
+                                    )
+                                )
+                            else
+                                None
                         onCopyResult = { result -> probe.copied(result) }
                         columnSpans =
                             if (probe.spans.value)

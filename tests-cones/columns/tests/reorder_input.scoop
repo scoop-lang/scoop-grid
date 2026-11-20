@@ -76,15 +76,18 @@ internal fun ColumnsProbe.movePress(x: Double, y: Double = 16.0) {
     movePointer = Point(448.0 + x, 12.0 + y)
     assertTrue(moveSurfacePointer(window!!, movePointer.x, movePointer.y))
     assertTrue(view!!.button(movePointer.x, movePointer.y, true))
+    inputQueued()
 }
 
 internal fun ColumnsProbe.moveTo(x: Double, y: Double = 16.0) {
     movePointer = Point(448.0 + x, 12.0 + y)
     assertTrue(moveSurfacePointer(window!!, movePointer.x, movePointer.y))
+    inputQueued()
 }
 
 internal fun ColumnsProbe.moveRelease() {
     assertTrue(view!!.button(movePointer.x, movePointer.y, false))
+    inputQueued()
 }
 
 internal fun ColumnsProbe.moveUnchanged() {

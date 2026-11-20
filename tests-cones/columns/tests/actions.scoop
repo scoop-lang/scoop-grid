@@ -4,7 +4,7 @@ import scoop.grid.*
 import scoop.test.*
 
 internal fun ColumnsProbe.accepted() {
-    if (finished || waiting || !(window?.isFocused ?: false))
+    if (finished || waiting || waitingInput || !(window?.isFocused ?: false))
         return
     waiting = true
     retry = false
@@ -77,7 +77,10 @@ internal fun ColumnsProbe.completed(tag: Int, result: Int) {
         return
     }
     when (phase) {
-        case 29 -> assertTrue(view!!.preedit())
+        case 29 -> {
+            assertTrue(view!!.preedit())
+            inputQueued()
+        }
         case 31 -> key(53, "\u001b")
         case 42 -> width.value = 120.0
         case 47 -> width.value = 500.0

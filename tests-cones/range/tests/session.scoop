@@ -65,6 +65,7 @@ internal class RangeProbe: Closeable {
     var reads = 0L
     var built = 0L
     var clicks = 0
+    var innerMenuClicks = 0
     var failCopy = false
     var onTextRead: (() -> Unit)? = None
     var lastFind: GridFindResult? = None
@@ -79,6 +80,12 @@ internal class RangeProbe: Closeable {
     var statisticsButton: NativeNode? = None
     var statisticsValues: NativeNode? = None
     var onNumberRead: (() -> Unit)? = None
+    val menus = state(true)
+    var menuItem: NativeNode? = None
+    var menuTarget: GridMenuTarget? = None
+    var menuCommand: GridMenuCommand? = None
+    var menuResult: GridMenuResult? = None
+    var previousMenuModel: DataGridState<RangeRecord>? = None
     val live = HashSet<GridCellAddress>()
     val selected =
         state(
@@ -112,6 +119,7 @@ internal class RangeProbe: Closeable {
     var copies = 0
     var beforeCopies = 0
     var lastCopy: GridCopyResult? = None
+    var clipboardAtCopy: String? = None
     var before = 0L
     var frame: ComponentScope? = None
     var phase = 0
@@ -164,6 +172,8 @@ internal class RangeProbe: Closeable {
     fun copied(result: GridCopyResult) {
         copies += 1
         lastCopy = Some(result)
+        // Observe publication before another application can replace the shared pasteboard.
+        clipboardAtCopy = window!!.clipboard.readText()
     }
     fun save(change: GridChange<RangeRecord, Long>, completion: GridCommit<RangeRecord>) {
         submissions += 1
@@ -293,6 +303,7 @@ internal class RangeProbe: Closeable {
                 case 8 -> "c"
                 case 36 -> "\r"
                 case 53 -> "\u001b"
+                case 109 -> "\uf70d"
                 case 115 -> "\uf729"
                 case 119 -> "\uf72b"
                 case 123 -> "\uf702"
@@ -344,8 +355,12 @@ internal class RangeProbe: Closeable {
             }
         )
     }
-    fun copiedText(value: String) {
-        val actual = window!!.clipboard.readText()
+    fun copiedText(value: String, published: Boolean = true) {
+        val actual =
+            if (published)
+                clipboardAtCopy
+            else
+                window!!.clipboard.readText()
         assertEquals(
             Some(value),
             actual,

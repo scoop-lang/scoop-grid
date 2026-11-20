@@ -24,6 +24,7 @@ internal class GridDataCell<Row>(
     scope: ComponentScope
 ): Component(scope) {
     private val content = GridContentHandle()
+    private val focus = FocusHandle()
     public override fun render(): View {
         val input = props.value
         val appearance = input.appearance
@@ -57,49 +58,61 @@ internal class GridDataCell<Row>(
                     )
                 )
             }
-        return element(
-            GridCellProps(
-                Some(address),
-                input.rowIndex,
-                input.columnIndex,
-                input.column.id,
-                input.column.text(input.row),
-                appearance,
-                Some(input.session),
-                content = Some(content),
-                editable =
-                    input.columnSpan == 1L && (input.column.editing?.editable(input.row) ?: false),
-                error = edit?.error ?: None,
-                submitting = edit?.submitting ?: false,
-                headers =
-                    input.session.headerSemantics.headers(
-                        input.headers,
-                        input.columnIndex,
-                        true,
-                        input.columnSpan
-                    ),
-                enabled = input.enabled,
-                columnSpan = input.columnSpan,
-                selectedRow = input.selection?.selected?.contains(input.key) ?: false,
-                range = input.range
-            ),
-            { props, scope -> GridCell(props, scope) },
-            [
-                element(
-                    content,
-                    { props, scope -> GridContent(props, scope) },
-                    [
-                        input.selection?.cell(
-                            input.key,
-                            input.row,
-                            input.rowIndex,
+        val editable =
+            input.columnSpan == 1L && (input.column.editing?.editable(input.row) ?: false)
+        val cell =
+            element(
+                GridCellProps(
+                    Some(address),
+                    input.rowIndex,
+                    input.columnIndex,
+                    input.column.id,
+                    input.column.text(input.row),
+                    appearance,
+                    Some(input.session),
+                    content = Some(content),
+                    editable = editable,
+                    error = edit?.error ?: None,
+                    submitting = edit?.submitting ?: false,
+                    headers =
+                        input.session.headerSemantics.headers(
+                            input.headers,
                             input.columnIndex,
-                            child
-                        ) ?:
-                            child
-                    ]
-                )
-            ]
+                            true,
+                            input.columnSpan
+                        ),
+                    enabled = input.enabled,
+                    columnSpan = input.columnSpan,
+                    selectedRow = input.selection?.selected?.contains(input.key) ?: false,
+                    range = input.range,
+                    focusHandle = Some(focus)
+                ),
+                { props, scope -> GridCell(props, scope) },
+                [
+                    element(
+                        content,
+                        { props, scope -> GridContent(props, scope) },
+                        [
+                            input.selection?.cell(
+                                input.key,
+                                input.row,
+                                input.rowIndex,
+                                input.columnIndex,
+                                child
+                            ) ?:
+                                child
+                        ]
+                    )
+                ]
+            )
+        return gridMenuView(
+            input.session,
+            GridMenuTarget.Cell(address),
+            cell,
+            input.enabled && input.session.editingCell != Some(address),
+            editable,
+            appearance,
+            focus
         )
     }
 }

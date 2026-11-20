@@ -1,0 +1,255 @@
+package scoop.grid
+
+import scoop.collections.contains
+
+internal fun <Row> gridMenuCommands(input: GridMenuProps<Row>): Array<GridMenuCommand> {
+    val session = input.session
+    val model = session.currentModel ?: return []
+    if (!input.enabled || !session.active || !session.enabled || !session.inputEnabled)
+        return []
+    val result = ArrayList<GridMenuCommand>()
+    when (input.target) {
+        case Column(val id) -> {
+            val at = gridColumnStateIndex(model.columnState, id) ?: return []
+            val state = model.columnState[at]
+            if (!state.visible)
+                return []
+            val column = model.column(id)
+            if (column.sortable) {
+                result.add(GridMenuCommand.SortAscending)
+                result.add(GridMenuCommand.SortDescending)
+                for (sort in model.query.sorting)
+                    if (sort.column == id)
+                        result.add(GridMenuCommand.ClearSort)
+            }
+            gridMenuMoves(model, GridHeaderKey.Column(id), Some(state.pin), result)
+            if (state.pin != GridPin.Start)
+                result.add(GridMenuCommand.PinStart)
+            if (state.pin != GridPin.End)
+                result.add(GridMenuCommand.PinEnd)
+            if (state.pin != GridPin.None)
+                result.add(GridMenuCommand.UnpinColumn)
+            result.add(GridMenuCommand.HideColumn)
+            if (state.width != None)
+                result.add(GridMenuCommand.ResetWidth)
+            result.add(GridMenuCommand.FitContent)
+            result.add(GridMenuCommand.FitColumns)
+        }
+        case ColumnGroup(val id) -> {
+            val key = GridHeaderKey.Group(id)
+            when (model.headerTree.find(key)) {
+                case None -> return []
+                case Some(_) -> gridMenuMoves(model, key, None, result)
+            }
+        }
+        case Cell(val address) -> {
+            if (
+                model.result.rows.indexOfKey(address.row) ==
+                    None ||
+                    !model.visibleColumn(address.column)
+            )
+                return []
+            if (model.cellRange != None || model.column(address.column).exportable) {
+                result.add(GridMenuCommand.Copy)
+                result.add(GridMenuCommand.CopyWithHeaders)
+            }
+            if (model.cellRange != None)
+                result.add(GridMenuCommand.ClearRange)
+            if (input.editable)
+                result.add(GridMenuCommand.Edit)
+            if (model.isRowSelected(address.row))
+                result.add(GridMenuCommand.DeselectRow)
+            else
+                if (model.isRowSelectable(address.row))
+                    result.add(GridMenuCommand.SelectRow)
+            val pins = model.pinnedRows
+            if (!pins.top.contains(address.row))
+                result.add(GridMenuCommand.PinTop)
+            if (!pins.bottom.contains(address.row))
+                result.add(GridMenuCommand.PinBottom)
+            if (pins.top.contains(address.row) || pins.bottom.contains(address.row))
+                result.add(GridMenuCommand.UnpinRow)
+        }
+    }
+    return result.toArray()
+}
+
+private fun <Row> gridMenuMoves(
+    model: DataGridState<Row>,
+    key: GridHeaderKey,
+    pin: GridPin?,
+    result: ArrayList<GridMenuCommand>
+) {
+    if (model.headerTree.adjacentIndex(model.columnState, key, false, pin) != None)
+        result.add(GridMenuCommand.MoveBefore)
+    if (model.headerTree.adjacentIndex(model.columnState, key, true, pin) != None)
+        result.add(GridMenuCommand.MoveAfter)
+}
+
+internal fun <Row> gridExecuteMenu(
+    input: GridMenuProps<Row>,
+    command: GridMenuCommand
+): GridMenuResult {
+    val session = input.session
+    val options = session.contextMenus ?: return GridMenuResult.Rejected("网格菜单已关闭")
+    val model = session.currentModel ?: return GridMenuResult.Rejected(options.labels.unavailable)
+    when (session.commitEdit()) {
+        case NoEdit -> {}
+        case Committed -> {}
+        else -> return GridMenuResult.Rejected(options.labels.finishEditing)
+    }
+    if (!session.usesModel(model) || !gridMenuCommands(input).contains(command))
+        return GridMenuResult.Rejected(options.labels.unavailable)
+    return when (input.target) {
+        case Column(val id) -> gridMenuColumn(model, session, id, command)
+        case ColumnGroup(val id) -> {
+            val at =
+                model.headerTree.adjacentIndex(
+                    model.columnState,
+                    GridHeaderKey.Group(id),
+                    command == GridMenuCommand.MoveAfter
+                ) ?:
+                    return GridMenuResult.Rejected(options.labels.unavailable)
+            gridMenuColumnResult(session.moveColumnGroup(id, at))
+        }
+        case Cell(val address) -> gridMenuCell(session, address, command)
+    }
+}
+
+private fun <Row> gridMenuColumn(
+    model: DataGridState<Row>,
+    session: GridSession<Row>,
+    id: GridColumnId,
+    command: GridMenuCommand
+): GridMenuResult {
+    val current = model.columnState[gridColumnStateIndex(model.columnState, id)!!]
+    return when (command) {
+        case SortAscending -> {
+            gridMenuSort(model, id, Some(GridSortDirection.Ascending));
+            GridMenuResult.Applied
+        }
+        case SortDescending -> {
+            gridMenuSort(model, id, Some(GridSortDirection.Descending));
+            GridMenuResult.Applied
+        }
+        case ClearSort -> {
+            gridMenuSort(model, id, None);
+            GridMenuResult.Applied
+        }
+        case FitColumns -> gridMenuColumnResult(session.fitColumns())
+        case FitContent -> {
+            val fit = session.fitColumnToContent(id)
+            when (fit.result) {
+                case Rejected(val message) -> GridMenuResult.Rejected(message)
+                case Cancelled -> GridMenuResult.Rejected("内容测量已取消")
+                case Applied(_) -> GridMenuResult.Applied
+                case Pending -> GridMenuResult.Sizing(fit)
+            }
+        }
+        case MoveBefore -> gridMenuMove(model, session, current, false)
+        case MoveAfter -> gridMenuMove(model, session, current, true)
+        else -> gridMenuColumnResult(
+            session.setColumnState(
+                GridColumnState(
+                    id,
+                    command != GridMenuCommand.HideColumn,
+                    if (command == GridMenuCommand.ResetWidth)
+                        None
+                    else
+                        current.width,
+                    when (command) {
+                        case PinStart -> GridPin.Start
+                        case PinEnd -> GridPin.End
+                        case UnpinColumn -> GridPin.None
+                        else -> current.pin
+                    }
+                )
+            )
+        )
+    }
+}
+
+private fun <Row> gridMenuMove(
+    model: DataGridState<Row>,
+    session: GridSession<Row>,
+    column: GridColumnState,
+    forward: Boolean
+): GridMenuResult {
+    val at =
+        model.headerTree.adjacentIndex(
+            model.columnState,
+            GridHeaderKey.Column(column.id),
+            forward,
+            Some(column.pin)
+        ) ?:
+            return GridMenuResult.Rejected("没有可移动到的同级位置")
+    return gridMenuColumnResult(session.moveColumn(column.id, at))
+}
+
+private fun <Row> gridMenuSort(
+    model: DataGridState<Row>,
+    id: GridColumnId,
+    direction: GridSortDirection?
+) {
+    val query = model.query
+    val sorting = ArrayList<GridSort>()
+    var found = false
+    for (sort in query.sorting) {
+        if (sort.column == id) {
+            found = true
+            when (direction) {
+                case Some(val value) -> sorting.add(GridSort(id, value))
+                case None -> {}
+            }
+        } else
+            sorting.add(sort)
+    }
+    if (!found)
+        when (direction) {
+            case Some(val value) -> sorting.add(GridSort(id, value))
+            case None -> {}
+        }
+    model.setQuery(GridQuery(sorting.toArray(), query.filter, query.quickFilter, query.pagination))
+}
+
+private fun <Row> gridMenuCell(
+    session: GridSession<Row>,
+    address: GridCellAddress,
+    command: GridMenuCommand
+): GridMenuResult =
+    when (command) {
+        case Copy -> gridMenuCopy(session.copyCells(Some(address), false))
+        case CopyWithHeaders -> gridMenuCopy(session.copyCells(Some(address), true))
+        case ClearRange -> if (session.setCellRange(None))
+            GridMenuResult.Applied
+        else
+            GridMenuResult.Rejected("无法清除选区")
+        case Edit -> if (session.beginEdit(address))
+            GridMenuResult.Applied
+        else
+            GridMenuResult.Rejected("当前单元格不可编辑")
+        case SelectRow -> gridMenuRowResult(session.setRowSelected(address.row, true, false))
+        case DeselectRow -> gridMenuRowResult(session.setRowSelected(address.row, false, false))
+        case PinTop -> gridMenuRowResult(session.pinRow(address.row, GridRowPin.Top))
+        case PinBottom -> gridMenuRowResult(session.pinRow(address.row, GridRowPin.Bottom))
+        case UnpinRow -> gridMenuRowResult(session.pinRow(address.row, GridRowPin.None))
+        else -> GridMenuResult.Rejected("当前单元格不支持此操作")
+    }
+
+private fun gridMenuCopy(result: GridCopyResult): GridMenuResult =
+    when (result) {
+        case Copied -> GridMenuResult.Applied
+        case Rejected(val message) -> GridMenuResult.Rejected(message)
+    }
+
+private fun gridMenuColumnResult(result: GridColumnActionResult): GridMenuResult =
+    when (result) {
+        case Applied -> GridMenuResult.Applied
+        case Rejected(val message) -> GridMenuResult.Rejected(message)
+    }
+
+private fun gridMenuRowResult(result: GridRowActionResult): GridMenuResult =
+    when (result) {
+        case Applied -> GridMenuResult.Applied
+        case Rejected(val message) -> GridMenuResult.Rejected(message)
+    }

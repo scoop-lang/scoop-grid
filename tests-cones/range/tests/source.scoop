@@ -50,7 +50,21 @@ internal fun rangeColumns(probe: RangeProbe): Array<GridColumn<RangeRecord>> =
                         probe,
                         row.key,
                         index,
-                        button("Action", onClick = { probe.clicks += 1 })
+                        contextMenu(
+                            button("Action", onClick = { probe.clicks += 1 }),
+                            menu {
+                                item(
+                                    ViewKey.Text("inner-action"),
+                                    "Cell action",
+                                    { probe.innerMenuClicks += 1 }
+                                ) {
+                                    semantics =
+                                        ComponentSemantics(
+                                            automationId = Some("range-cell-menu-action")
+                                        )
+                                }
+                            }
+                        )
                     )
                 },
                 size

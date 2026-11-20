@@ -24,8 +24,14 @@ internal fun RangeProbe.accepted() {
         assertTrue(handle.focusCell(rangeAddress(0L)))
     if (phase == 20 && !handle.isPending && handle.focusedCell != Some(rangeAddress(2L, 1L)))
         assertTrue(handle.focusCell(rangeAddress(2L, 1L)))
+    if (phase == 258 && !handle.isPending && handle.focusedCell != Some(rangeAddress(3L, 1L)))
+        assertTrue(handle.focusCell(rangeAddress(3L, 1L)))
     waiting = true
     retry = false
+    if (phase >= 201) {
+        postMenus()
+        return
+    }
     if (phase >= 186) {
         postStatistics()
         return
@@ -43,6 +49,10 @@ internal fun RangeProbe.accepted() {
 
 internal fun RangeProbe.inspect(tag: Int) {
     assertEquals(phase, tag)
+    if (phase >= 201) {
+        inspectMenus()
+        return
+    }
     if (phase >= 186) {
         inspectStatistics()
         return
@@ -68,7 +78,10 @@ internal fun RangeProbe.inspect(tag: Int) {
         }
         case 1 -> {
             selectedRange(rangeAddress(50000000L, 37L), rangeAddress(50000001L, 39L))
-            assertEquals(1L, far!!.trait(0))
+            if (far!!.trait(0) != 1L) {
+                retry = true
+                return
+            }
             copiedText(
                 "R50000000C37\tR50000000C38\tR50000000C39\nR50000001C37\tR50000001C38\tR50000001C39"
             )
@@ -109,7 +122,7 @@ internal fun RangeProbe.inspect(tag: Int) {
         case 7 -> {
             assertEquals(3, copies)
             copiedOk(lastCopy!!)
-            assertEquals(model.copyText(), window!!.clipboard.readText())
+            copiedText(model.copyText()!!)
         }
         case 8 -> {
             assertEquals(None, model.cellRange)
@@ -146,7 +159,7 @@ internal fun RangeProbe.inspect(tag: Int) {
             selectedRange(rangeAddress(4L, 1L), rangeAddress(4L, 1L))
         }
         case 16 -> {
-            copiedText("4");
+            copiedText("4", published = false);
             assertEquals(beforeCopies, copies)
         }
         case 17 -> {
@@ -155,7 +168,7 @@ internal fun RangeProbe.inspect(tag: Int) {
         }
         case 18 -> assertEquals(None, handle.editingCell)
         case 19 -> {
-            copiedText("4")
+            assertEquals(beforeCopies, copies)
             assertFalse(cell(4L, 1L).flag(1))
             selectedRange(rangeAddress(4L, 1L), rangeAddress(4L, 1L))
         }
@@ -248,6 +261,10 @@ internal fun RangeProbe.completed(tag: Int, result: Int) {
         return
     }
     phase += 1
+    if (phase >= 201) {
+        advanceMenus()
+        return
+    }
     if (phase >= 186) {
         advanceStatistics()
         return

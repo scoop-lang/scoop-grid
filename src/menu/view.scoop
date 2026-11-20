@@ -1,0 +1,163 @@
+package scoop.grid
+
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class GridMenuProps<Row>(
+    val session: GridSession<Row>,
+    val target: GridMenuTarget,
+    val content: View,
+    val enabled: Boolean,
+    val editable: Boolean,
+    val appearance: GridAppearance,
+    val restoreFocus: FocusHandle
+)
+
+private class GridMenu<Row>(
+    private val props: Props<GridMenuProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private val revision = state(0L)
+    private val error = state<String?>(None)
+    private var model: DataGridState<Row>? = None
+    private var target: GridMenuTarget? = None
+    private val showing = binding(get = { isOpen() }, set = { value -> changeOpen(value) })
+    private val fallback = GridMenuOptions()
+    private fun isOpen(): Boolean {
+        revision.value
+        val input = props.value
+        return input.enabled &&
+            input.session.enabled &&
+            input.session.inputEnabled &&
+            target ==
+            Some(input.target) &&
+            when (model) {
+                case Some(val value) -> input.session.usesModel(value) &&
+                    gridMenuTargetExists(value, input.target)
+                case None -> false
+            } &&
+            when (input.session.contextMenus) {
+                case Some(_) -> true;
+                case None -> false
+            }
+    }
+    private fun changeOpen(value: Boolean) {
+        if (!value) {
+            model = None
+            target = None
+            revision.value += 1L
+            return
+        }
+        val input = props.value
+        if (
+            !scope.isMounted ||
+                !input.enabled ||
+                !input.session.active ||
+                !input.session.enabled ||
+                !input.session.inputEnabled
+        )
+            return
+        when (input.session.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return
+        }
+        if (gridMenuCommands(input).size == 0L)
+            return
+        model = input.session.currentModel
+        target = Some(input.target)
+        error.value = None
+        revision.value += 1L
+    }
+    private fun select(command: GridMenuCommand) {
+        if (!scope.isMounted || !isOpen())
+            return
+        val input = props.value
+        val options = input.session.contextMenus ?: return
+        val result =
+            try {
+                gridExecuteMenu(input, command)
+            } catch (failure: Exception) {
+                GridMenuResult.Rejected(failure.message ?: options.labels.unavailable)
+            }
+        if (scope.isMounted)
+            when (result) {
+                case Rejected(val reason) -> error.value = Some(reason)
+                else -> changeOpen(false)
+            }
+        options.onResult(input.target, command, result)
+    }
+    public override fun render(): View {
+        val input = props.value
+        val options = input.session.contextMenus ?: fallback
+        val current = this
+        val menuOpen = isOpen()
+        if (!menuOpen) {
+            // An invalidated menu stays closed when its previous target returns.
+            model = None
+            target = None
+        }
+        val commands =
+            if (menuOpen)
+                gridMenuCommands(input)
+            else
+                []
+        val items =
+            menu {
+                for (command in commands)
+                    item(
+                        ViewKey.Text(command.id),
+                        options.labels.text(command),
+                        { current.select(command) }
+                    ) {
+                        closeOnSelect = Some(false)
+                        semantics =
+                            ComponentSemantics(automationId = Some(f"grid-menu-${command.id}"))
+                    }
+                when (val message = current.error.value) {
+                    case Some(val text) -> label(ViewKey.Text("error"), text)
+                    case None -> {}
+                }
+            }
+        val configured =
+            when (input.session.contextMenus) {
+                case Some(_) -> true;
+                case None -> false
+            }
+        return contextMenu(input.content, items) {
+            open = Some(current.showing)
+            enabled = input.enabled && configured
+            width = options.width
+            fonts = Some(input.appearance.fonts)
+            theme = input.session.theme
+            focus = OverlayFocusOptions(restoreTarget = Some(input.restoreFocus))
+            semantics = ComponentSemantics(automationId = Some("grid-context-menu"))
+        }
+    }
+}
+
+internal fun <Row> gridMenuView(
+    session: GridSession<Row>,
+    target: GridMenuTarget,
+    content: View,
+    enabled: Boolean,
+    editable: Boolean,
+    appearance: GridAppearance,
+    restoreFocus: FocusHandle
+): View =
+    component(
+        GridMenuProps(session, target, content, enabled, editable, appearance, restoreFocus),
+        { props, scope -> GridMenu(props, scope) }
+    )
+
+private fun <Row> gridMenuTargetExists(model: DataGridState<Row>, target: GridMenuTarget): Boolean =
+    when (target) {
+        case Cell(val address) -> model.result.rows.indexOfKey(address.row) !=
+            None &&
+            model.visibleColumn(address.column)
+        case Column(val id) -> model.visibleColumn(id)
+        case ColumnGroup(val id) -> when (model.headerTree.find(GridHeaderKey.Group(id))) {
+            case Some(_) -> true
+            case None -> false
+        }
+    }

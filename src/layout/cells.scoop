@@ -90,9 +90,9 @@ internal class GridHeaderCells<Row>(
             GridHeaderRenderProps(this, index),
             { props, scope -> GridHeaderRender(props, scope) }
         )
-    fun view(index: Long): View {
+    fun view(index: Long, focus: FocusHandle): View {
         if (index >= columns.columns.size)
-            return group(index)
+            return group(index, focus)
         val column = columns.columns[index]
         var title = column.title
         val sorting = model.query.sorting
@@ -127,6 +127,7 @@ internal class GridHeaderCells<Row>(
                     else
                         None,
                     multiSortModifier = modifier,
+                    focusHandle = Some(focus),
                     headerReference =
                         Some(
                             session.headerSemantics.reference(columns.headers.items[index].target)
@@ -150,39 +151,61 @@ internal class GridHeaderCells<Row>(
                         columns.appearance.label(title)
                 ]
             )
-        return component(
-            GridHeaderResizeProps(model, column, session, content, enabled, theme),
-            { props, scope -> GridHeaderResize(props, scope) }
+        return gridMenuView(
+            session,
+            GridMenuTarget.Column(column.id),
+            component(
+                GridHeaderResizeProps(model, column, session, content, enabled, theme),
+                { props, scope -> GridHeaderResize(props, scope) }
+            ),
+            enabled,
+            false,
+            columns.appearance,
+            focus
         )
     }
-    private fun group(index: Long): View {
+    private fun group(index: Long, focus: FocusHandle): View {
         val item = columns.headers.items[index]
-        return element(
-            GridCellProps<Row>(
-                None,
-                item.level,
-                item.first,
-                columns.columns[item.first].id,
-                Some(item.title),
-                columns.appearance,
-                None,
-                headerReference = Some(session.headerSemantics.reference(item.target)),
-                headerCell = Some(position(index)),
-                headers = session.headerSemantics.headers(columns.headers, index, false),
-                drag =
-                    Some(
-                        GridHeaderDragInput(
-                            model,
-                            item.target,
-                            session,
-                            columns.appearance,
-                            enabled
+        val content =
+            element(
+                GridCellProps<Row>(
+                    None,
+                    item.level,
+                    item.first,
+                    columns.columns[item.first].id,
+                    Some(item.title),
+                    columns.appearance,
+                    None,
+                    headerReference = Some(session.headerSemantics.reference(item.target)),
+                    focusHandle = Some(focus),
+                    headerCell = Some(position(index)),
+                    headers = session.headerSemantics.headers(columns.headers, index, false),
+                    drag =
+                        Some(
+                            GridHeaderDragInput(
+                                model,
+                                item.target,
+                                session,
+                                columns.appearance,
+                                enabled
+                            )
                         )
-                    )
-            ),
-            { props, scope -> GridCell(props, scope) },
-            [columns.appearance.label(item.title)]
-        )
+                ),
+                { props, scope -> GridCell(props, scope) },
+                [columns.appearance.label(item.title)]
+            )
+        return when (item.target.key) {
+            case Group(val id) -> gridMenuView(
+                session,
+                GridMenuTarget.ColumnGroup(id),
+                content,
+                enabled,
+                false,
+                columns.appearance,
+                focus
+            )
+            case Column(_) -> content
+        }
     }
     private fun position(index: Long): SemanticTableCell {
         val item = columns.headers.items[index]
@@ -205,7 +228,8 @@ private class GridHeaderRender<Row>(
     private val props: Props<GridHeaderRenderProps<Row>>,
     scope: ComponentScope
 ): Component(scope) {
-    public override fun render(): View = props.value.source.view(props.value.index)
+    private val focus = FocusHandle()
+    public override fun render(): View = props.value.source.view(props.value.index, focus)
 }
 
 internal class GridCellProps<Row>(
@@ -230,14 +254,15 @@ internal class GridCellProps<Row>(
     val enabled: Boolean = true,
     val columnSpan: Long = 1L,
     val selectedRow: Boolean = false,
-    val range: GridCellRangeBounds? = None
+    val range: GridCellRangeBounds? = None,
+    val focusHandle: FocusHandle? = None
 )
 
 internal class GridCell<Row>(
     private val props: Props<GridCellProps<Row>>,
     scope: ComponentScope
 ): Element<GridCellClip>(scope) {
-    private val handle = FocusHandle()
+    private val handle = props.value.focusHandle ?: FocusHandle()
     private val area = scope.createArea(focusable = true)
     private val focus = scope.focusTarget(area, FocusOptions(Some(handle), props.value.tabStop))
     private val semantics =
