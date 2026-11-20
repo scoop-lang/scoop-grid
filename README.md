@@ -66,6 +66,10 @@ scoop test --release .
 
 `model.exportCsv(GridCsvOptions(...))` 默认导出当前呈现页、可见逻辑列与表头，固定记录按 key 去重。`scope` 可选 `CurrentPage`、`AllFiltered` 或 `SelectedRows`；已选记录按选择 key 的保存顺序读取完整本地来源，包含其他页和暂被筛选隐藏的选择。`includePinnedRows = false` 排除固定记录，`includeHiddenColumns = true` 包含隐藏列，`columns = Some(ids)` 指定列序；纯操作列与不可导出列始终省略。整个动作读取同一快照，只返回 CSV 文字，由应用决定文件或剪贴板去向。[十万行示例](examples/basic/src/main.scoop) 提供当前页／已选 CSV 的复制按钮。
 
+`model.saveViewState()` 保存列、完整查询、固定行、业务选择与矩形；`model.restoreViewState(snapshot)` 在一次动作中准备并发布最终结果，返回 `GridRestoreReport`。删除的引用、无效条件和被调整的宽度／页码通过 `issues` 逐项报告；计算失败保留原模型，保存页码不因恢复筛选而自动回到首页。快照只包含普通数据，持久化由应用负责。
+
+`handle.saveViewState()` 还可包含最近 Accepted 的阅读行 key、行内／水平逻辑偏移与最近成功的单元格地址；用 `includePosition`、`includeFocus` 可分别关闭。`handle.restoreViewState(snapshot)` 经当前编辑门控恢复阅读位置，默认保持现有外部焦点；`restoreFocus = true` 在布局完成后显式定位保存的单元格。新滚动、查询或模型替换取消旧定位，卸载后的调用返回 Rejected。[十万行示例](examples/basic/src/main.scoop) 提供会话内的“保存视图／恢复视图”按钮。
+
 `gridFilterPanel(model) { handle = Some(handle) }` 编辑文本、整数、数值、日期、布尔和集合条件，可嵌套 AND／OR 组。修改草稿后点击“应用筛选”才更新查询；“还原草稿”恢复当前模型条件，“清除筛选”移除条件并保留排序与快速筛选。整数保留完整 Long 精度，日期复用现有 DatePicker；非法输入和反向区间保留原文供修正。通过同一 handle 处理当前单元格的校验和异步提交，等待保存后不会自动重放先前被拒绝的筛选动作。
 
 集合条件的“加载候选”按完整本地数据读取该列，候选列表按视口构造。可搜索、选中当前列表或清空选择；搜索不会丢弃列表外已选值。重名标签仍保留不同的真实值，缺值和空字符串分别显示。数据或列定义替换后提示重新加载；查询、分页和调宽复用已加载的候选。自定义 `GridValues<T>` 须同时提供字面量解码 `literal` 和编码 `encode`，不使用格式化文字作为候选身份。

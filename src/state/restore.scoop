@@ -1,0 +1,151 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+internal class GridRestoredView<Row>(
+    val computed: GridComputed<Row>,
+    val selection: GridSelectedRows,
+    val report: GridRestoreReport
+)
+
+internal fun <Row> gridRestoreView(
+    saved: GridViewState,
+    previous: GridComputed<Row>,
+    presentation: Array<GridColumnState>,
+    headers: GridHeaders,
+    selectionMode: GridRowSelectionMode,
+    selectable: ((Row) -> Boolean)?
+): GridRestoredView<Row> {
+    val issues = ArrayList<GridRestoreIssue>()
+    val states = gridRestoreColumns(saved.columns, presentation, previous.columns, headers, issues)
+    val pins =
+        GridPinnedRows(
+            gridRestorePins(saved.pinnedRows.top, previous.source, issues),
+            gridRestorePins(saved.pinnedRows.bottom, previous.source, issues)
+        )
+    val query = gridRestoreQuery(saved.query, previous.columns, issues)
+    val next = gridCompute(previous.source, previous.columns, query, Some(previous), pins)
+    if (next.query.pagination != query.pagination)
+        issues.add(GridRestoreIssue(GridStatePart.Pagination, "页码已按恢复后的结果调整"))
+    val selected =
+        gridRestoreSelection(saved.selectedRows, previous.source, selectionMode, selectable, issues)
+    val range =
+        when (saved.cellRange) {
+            case Some(val value) -> {
+                if (
+                    !gridSameCellColumns(saved.columns, states) ||
+                        gridCellRangeBounds(value, next.result.rows, GridSpanColumns(states)) ==
+                        None
+                ) {
+                    issues.add(GridRestoreIssue(GridStatePart.CellRange, "矩形列结构或端点已失效"))
+                    None
+                } else
+                    Some(value)
+            }
+            case None -> None
+        }
+    val position = gridRestoreReading(saved.readingPosition, next.result, issues)
+    val focus =
+        when (saved.focusedCell) {
+            case Some(val address) -> {
+                if (
+                    next.result.rows.indexOfKey(address.row) ==
+                        None ||
+                        GridSpanColumns(states).indexOf(address.column) ==
+                        None
+                ) {
+                    issues.add(GridRestoreIssue(GridStatePart.FocusedCell, "最近单元格已不在当前呈现结果中"))
+                    None
+                } else
+                    Some(address)
+            }
+            case None -> None
+        }
+    return GridRestoredView(
+        next,
+        selected,
+        GridRestoreReport(
+            GridViewState(states, next.query, pins, selected.keys, range, position, focus),
+            issues.toArray()
+        )
+    )
+}
+
+private fun <Row> gridRestorePins(
+    keys: Array<ViewKey>,
+    source: TableSource<Row>,
+    issues: ArrayList<GridRestoreIssue>
+): Array<ViewKey> {
+    val kept = ArrayList<ViewKey>()
+    for (key in keys) {
+        if (source.indexOfKey(key) == None)
+            issues.add(GridRestoreIssue(GridStatePart.PinnedRow(key), "固定记录已移除"))
+        else
+            kept.add(key)
+    }
+    return kept.toArray()
+}
+
+private fun <Row> gridRestoreSelection(
+    keys: Array<ViewKey>,
+    source: TableSource<Row>,
+    mode: GridRowSelectionMode,
+    selectable: ((Row) -> Boolean)?,
+    issues: ArrayList<GridRestoreIssue>
+): GridSelectedRows {
+    val kept = ArrayList<ViewKey>()
+    val seen = HashSet<ViewKey>()
+    for (key in keys) {
+        val index = source.indexOfKey(key)
+        val invalid =
+            key ==
+                ViewKey.Position ||
+                !seen.add(key) ||
+                index ==
+                None ||
+                mode ==
+                GridRowSelectionMode.Disabled ||
+                (mode == GridRowSelectionMode.Single && kept.size > 0L)
+        if (invalid) {
+            issues.add(GridRestoreIssue(GridStatePart.SelectedRow(key), "选择重复、记录已移除或不符合当前选择模式"))
+        } else
+            if (selectable?.invoke(source.rowAt(index!!)) ?: true) {
+                kept.add(key)
+            } else {
+                issues.add(GridRestoreIssue(GridStatePart.SelectedRow(key), "记录当前不可选择"))
+            }
+    }
+    return GridSelectedRows(kept.toArray())
+}
+
+private fun <Row> gridRestoreReading(
+    saved: GridReadingPosition?,
+    result: GridResult<Row>,
+    issues: ArrayList<GridRestoreIssue>
+): GridReadingPosition? {
+    val value = saved ?: return None
+    val index = result.rows.indexOfKey(value.row)
+    if (
+        value.row ==
+            ViewKey.Position ||
+            !value.rowOffset.isFinite() ||
+            value.rowOffset <
+            0.0 ||
+            !value.horizontalOffset.isFinite() ||
+            value.horizontalOffset <
+            0.0 ||
+            index ==
+            None ||
+            index!! <
+            result.topCount ||
+            index!! >=
+            result.topCount +
+            result.bodyCount
+    ) {
+        issues.add(GridRestoreIssue(GridStatePart.ReadingPosition, "阅读锚点不在正文中或偏移无效"))
+        return None
+    }
+    return saved
+}

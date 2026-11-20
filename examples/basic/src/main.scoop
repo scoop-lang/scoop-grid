@@ -67,6 +67,22 @@ private class GridExample(scope: ComponentScope): Component(scope) {
     private val lastEdit = state("名称与金额可编辑")
     private val tool = state<String?>(Some("filters"))
     private val mergeDescriptions = state(true)
+    private val savedView = state<GridViewState?>(None)
+    private fun saveView() {
+        savedView.value = handle.saveViewState()
+        lastEdit.value = "已保存当前列、查询、选择和阅读位置"
+    }
+    private fun restoreView() {
+        val saved = savedView.value ?: return
+        when (handle.restoreViewState(saved)) {
+            case Restored(val report) -> lastEdit.value =
+                if (report.issues.size == 0L)
+                    "已恢复视图"
+                else
+                    f"已恢复视图，${report.issues.size} 项状态已调整"
+            case Rejected(val message) -> lastEdit.value = message
+        }
+    }
     private fun copyCsv(selected: Boolean) {
         when (handle.commitEdit()) {
             case NoEdit -> {}
@@ -257,6 +273,11 @@ private class GridExample(scope: ComponentScope): Component(scope) {
         val firstFixed = model.pinnedRows.top.contains(ViewKey.Number(0L))
         val lastFixed = model.pinnedRows.bottom.contains(ViewKey.Number(99999L))
         val mergeDescriptions = this.mergeDescriptions.value
+        val canRestore =
+            when (savedView.value) {
+                case Some(_) -> true
+                case None -> false
+            }
         val theme = currentThemeSource().read(scope)
         val table =
             column {
@@ -294,6 +315,8 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                         )
                     )
                     spacing = 8.0
+                    add(gridPinButton("保存视图", { example.saveView() }))
+                    add(gridPinButton("恢复视图", { example.restoreView() }) { enabled = canRestore })
                 }
                 label(
                     if (mergeDescriptions)

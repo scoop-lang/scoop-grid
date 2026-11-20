@@ -1,0 +1,213 @@
+package scoop.grid
+
+import scoop.ui.ScrollState
+
+internal struct GridViewPlacement(val row: Long, val inside: Double, val horizontal: Double)
+
+private class GridSavedReading<Row>(
+    val model: DataGridState<Row>,
+    val result: GridResult<Row>,
+    val columns: Array<GridColumnState>,
+    val scroll: ScrollState,
+    val revision: ULong,
+    val position: GridReadingPosition?
+) {
+    fun current(value: DataGridState<Row>): Boolean =
+        model ===
+            value &&
+            result ===
+            value.result &&
+            columns ===
+            value.columnState &&
+            revision ==
+            scroll.requestRevision
+}
+
+private class GridPendingView<Row>(
+    val model: DataGridState<Row>,
+    val result: GridResult<Row>,
+    val columns: Array<GridColumnState>,
+    val scroll: ScrollState,
+    val revision: ULong,
+    val position: GridReadingPosition?,
+    val focus: GridCellAddress?
+) {
+    fun matches(input: GridRootProps<Row>): Boolean =
+        model ===
+            input.input.state &&
+            result ===
+            model.result &&
+            result.rows ===
+            input.rows.source &&
+            columns ===
+            model.columnState &&
+            scroll ===
+            input.scroll &&
+            revision ==
+            input.scroll.requestRevision
+}
+
+/** Restores a saved reading position through the ordinary accepted layout. */
+internal class GridViewStateController<Row>(private val session: GridSession<Row>) {
+    private var reading: GridSavedReading<Row>? = None
+    private var pending: GridPendingView<Row>? = None
+    private var recent: GridCellAddress? = None
+
+    fun remember(address: GridCellAddress) {
+        recent = Some(address)
+    }
+    fun save(includePosition: Boolean, includeFocus: Boolean): GridViewState? {
+        val model = session.currentModel ?: return None
+        if (!session.active)
+            return None
+        val position =
+            when (reading) {
+                case Some(val saved) -> if (includePosition && saved.current(model))
+                    saved.position
+                else
+                    None
+                case None -> None
+            }
+        val focus =
+            if (includeFocus)
+                recent
+            else
+                None
+        val validFocus =
+            when (focus) {
+                case Some(val address) -> if (
+                    model.result.rows.indexOfKey(address.row) !=
+                        None &&
+                        model.visibleColumn(address.column)
+                )
+                    focus
+                else
+                    None
+                case None -> None
+            }
+        return Some(model.saveViewState(position, validFocus))
+    }
+    fun restore(value: GridViewState, restoreFocus: Boolean): GridRestoreResult {
+        val model = session.currentModel ?: return GridRestoreResult.Rejected("网格未挂载")
+        val scroll = session.viewport?.state ?: return GridRestoreResult.Rejected("网格未挂载")
+        if (!session.active || !session.enabled || !session.inputEnabled)
+            return GridRestoreResult.Rejected("网格未挂载或已禁用")
+        when (session.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return GridRestoreResult.Rejected("请先完成当前单元格的编辑或保存")
+        }
+        if (
+            !session.active ||
+                !session.enabled ||
+                !session.inputEnabled ||
+                !session.usesModel(model)
+        )
+            return GridRestoreResult.Rejected("网格已更新，请重新恢复")
+        return try {
+            val report = model.restoreViewState(value)
+            session.cancel()
+            recent = report.state.focusedCell
+            if (
+                session.active &&
+                    session.enabled &&
+                    session.usesModel(model) &&
+                    model.query ==
+                    report.state.query &&
+                    gridArrayEqual(model.columnState, report.state.columns) &&
+                    model.pinnedRows.same(report.state.pinnedRows)
+            ) {
+                pending =
+                    Some(
+                        GridPendingView(
+                            model,
+                            model.result,
+                            model.columnState,
+                            scroll,
+                            scroll.requestRevision,
+                            report.state.readingPosition,
+                            if (restoreFocus)
+                                report.state.focusedCell
+                            else
+                                None
+                        )
+                    )
+                session.requestLayout()
+            }
+            GridRestoreResult.Restored(report)
+        } catch (error: Exception) {
+            GridRestoreResult.Rejected(error.message ?: "无法恢复网格状态")
+        }
+    }
+    fun placement(input: GridRootProps<Row>): GridViewPlacement? {
+        val request = pending ?: return None
+        if (
+            !session.active || !session.enabled || !session.inputEnabled || !request.matches(input)
+        ) {
+            pending = None
+            return None
+        }
+        val position = request.position ?: return None
+        val row = input.rows.indexOfKey(position.row) ?: return None
+        val density = input.columns.appearance.density
+        return Some(
+            GridViewPlacement(
+                row,
+                position.rowOffset * density,
+                position.horizontalOffset * density
+            )
+        )
+    }
+    fun accept(
+        input: GridRootProps<Row>,
+        plan: GridMeasurePlan,
+        value: GridRowReading<Row>
+    ): GridCellAddress? {
+        if (
+            input.input.state.result.rows !==
+                value.source ||
+                value.revision !=
+                input.scroll.requestRevision
+        )
+            return None
+        val density = input.columns.appearance.density
+        val position =
+            when (value.anchor) {
+                case Some(val anchor) -> Some(
+                    GridReadingPosition(
+                        anchor.key,
+                        anchor.inside / density,
+                        plan.scroll.snapshot.offset.x / density
+                    )
+                )
+                case None -> None
+            }
+        reading =
+            Some(
+                GridSavedReading(
+                    input.input.state,
+                    input.input.state.result,
+                    input.input.state.columnState,
+                    input.scroll,
+                    value.revision,
+                    position
+                )
+            )
+        val request = pending ?: return None
+        pending = None
+        return if (
+            session.active && session.enabled && session.inputEnabled && request.matches(input)
+        )
+            request.focus
+        else
+            None
+    }
+    fun cancelRequest() {
+        pending = None
+    }
+    fun close() {
+        reading = None
+        pending = None
+        recent = None
+    }
+}

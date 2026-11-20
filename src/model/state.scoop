@@ -275,6 +275,53 @@ public class DataGridState<Row> public constructor(
     }
     public fun exportCsv(options: GridCsvOptions = GridCsvOptions()): String =
         gridExportCsv(computed.value, columnState, selectedRows, options)
+    public fun saveViewState(
+        readingPosition: GridReadingPosition? = None,
+        focusedCell: GridCellAddress? = None
+    ): GridViewState =
+        GridViewState(
+            columnState,
+            query,
+            pinnedRows,
+            selectedRowKeys,
+            cellRange,
+            readingPosition,
+            focusedCell
+        )
+    public fun restoreViewState(value: GridViewState): GridRestoreReport {
+        computed.checkMutation()
+        val before = computed.value
+        val priorColumns = presentation.value
+        val priorHeaders = headerState.value
+        val priorSelection = selection.value
+        val priorRange = rangeSelection.value
+        val restored =
+            gridRestoreView(value, before, priorColumns, priorHeaders, rowSelection, selectable)
+        if (
+            computed.value !==
+                before ||
+                presentation.value !==
+                priorColumns ||
+                headerState.value !==
+                priorHeaders ||
+                selection.value !==
+                priorSelection ||
+                rangeSelection.value !=
+                priorRange
+        )
+            throw IllegalStateException(Some("准备恢复期间模型已更新，请重试"))
+        val next = restored.report.state
+        computed.value = restored.computed
+        if (!gridArrayEqual(priorColumns, next.columns))
+            presentation.value = next.columns
+        selection.value = restored.selection
+        rangeSelection.value = next.cellRange
+        selectionAnchor = None
+        notify(before.query, restored.computed.query)
+        if (!gridArrayEqual(priorSelection.keys, next.selectedRows))
+            onSelectionChange?.invoke(next.selectedRows)
+        return restored.report
+    }
     public val result: GridResult<Row> get() = computed.value.result
     public val pinnedRows: GridPinnedRows get() = computed.value.pins
     public val columns: Array<GridColumn<Row>> get() = computed.value.columns.values

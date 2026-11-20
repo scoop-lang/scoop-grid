@@ -1,0 +1,85 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+
+internal fun <Row> gridRestoreQuery(
+    saved: GridQuery,
+    columns: GridColumns<Row>,
+    issues: ArrayList<GridRestoreIssue>
+): GridQuery {
+    val sorting = ArrayList<GridSort>()
+    val seen = HashSet<GridColumnId>()
+    for (entry in saved.sorting) {
+        val column = columns.find(entry.column)
+        if (!seen.add(entry.column) || !(column?.sortable ?: false))
+            issues.add(GridRestoreIssue(GridStatePart.Sorting(entry.column), "排序列重复、已移除或不可排序"))
+        else
+            sorting.add(entry)
+    }
+    val filter = gridRestoreFilter(saved.filter, columns, [], issues) ?: GridFilter.All
+    return GridQuery(sorting.toArray(), filter, saved.quickFilter, saved.pagination)
+}
+
+private fun <Row> gridRestoreFilter(
+    value: GridFilter,
+    columns: GridColumns<Row>,
+    path: Array<Long>,
+    issues: ArrayList<GridRestoreIssue>
+): GridFilter? =
+    when (value) {
+        case All -> Some(value)
+        case Column(val id, val condition) -> {
+            val definition = columns.find(id)
+            if (!(definition?.filterable ?: false)) {
+                issues.add(GridRestoreIssue(GridStatePart.Filter(path), "筛选列已移除或不可筛选"))
+                None
+            } else {
+                try {
+                    definition!!.predicate(condition)
+                    Some(value)
+                } catch (error: IllegalArgumentException) {
+                    issues.add(
+                        GridRestoreIssue(GridStatePart.Filter(path), error.message ?: "筛选条件与当前列不相容")
+                    )
+                    None
+                }
+            }
+        }
+        case And(val children) -> gridRestoreFilterChildren(children, columns, path, issues, true)
+        case Or(val children) -> gridRestoreFilterChildren(children, columns, path, issues, false)
+    }
+
+private fun <Row> gridRestoreFilterChildren(
+    children: Array<GridFilter>,
+    columns: GridColumns<Row>,
+    path: Array<Long>,
+    issues: ArrayList<GridRestoreIssue>,
+    conjunction: Boolean
+): GridFilter? {
+    if (children.size == 0L) {
+        issues.add(GridRestoreIssue(GridStatePart.Filter(path), "空筛选组已移除"))
+        return None
+    }
+    val kept = ArrayList<GridFilter>()
+    for (index in 0L ..< children.size) {
+        val childPath =
+            Array<Long>(path.size + 1L) {
+                at -> if (at == path.size)
+                    index
+                else
+                    path[at]
+            }
+        when (gridRestoreFilter(children[index], columns, childPath, issues)) {
+            case Some(val child) -> kept.add(child)
+            case None -> {}
+        }
+    }
+    if (kept.size == 0L)
+        return None
+    return Some(
+        if (conjunction)
+            GridFilter.And(kept.toArray())
+        else
+            GridFilter.Or(kept.toArray())
+    )
+}

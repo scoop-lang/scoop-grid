@@ -48,6 +48,18 @@
 
 替换列先验证新集合，保留存活列的宽度、顺序、显隐和冻结，新增列追加。查询中删除的列引用被删除；AND／OR 中删除后为空的组合被移除，不伪造恒真子句。存活列的类型合同变化后重新检查其查询，错误时整个替换不发布。层级行为尚未由本文件发布。
 
+## 视图状态保存与恢复
+
+`model.saveViewState()` 返回 `GridViewState`，保存当前列顺序／显隐／逻辑宽度／冻结、完整查询、固定行、业务行选择和唯一矩形。它只含普通数据，没有来源、Row、View、回调、编辑草稿或在途请求；应用负责持久化。可显式附带 `readingPosition` 和 `focusedCell`。挂载后的 `handle.saveViewState(includePosition = true, includeFocus = true)` 可取得最近 Accepted 的阅读锚点及最近成功单元格，未挂载返回 None。
+
+`model.restoreViewState(value)` 在当前来源与列定义下准备完整结果，一次发布后才通知模型观察者、查询和选择回调。保存页码按恢复后的结果夹取，不因恢复了筛选而强制回到首页；相同查询复用已有顺序。计算或数据读取失败抛出异常，保留原模型。准备期间应用主动更新了模型时不覆盖应用的新状态。
+
+返回的 `GridRestoreReport.issues` 使用 `GridStatePart` 指明未采用或被调整的状态项。未知、重复列及排序项跳过；新增列保留当前设置并追加；无效宽度保留当前宽度，有效宽度受当前最小／最大限制。不允许拆散当前列组的顺序整体退回当前顺序，其余列属性仍恢复。已删除列、不可筛选列和与当前类型不相容的条件从筛选树移除，空组移除，根无条件时为 All。固定行和业务选择按当前完整来源清理，选择仍遵守禁用／单选及记录资格；单选采用首个有效 key，其余逐项报告。
+
+矩形只有在保存的可见逻辑列序与恢复后完全一致、两个端点均在恢复后的呈现结果中时才恢复。`GridReadingPosition(row, rowOffset, horizontalOffset)` 保存正文行 key 与非负有限的逻辑偏移；已删除、被筛选、位于其他页或变成固定行的阅读锚点不恢复。最近单元格要求当前呈现行和可见列均有效；两者的失效分别报告。
+
+`handle.restoreViewState(value, restoreFocus = false)` 先通过当前编辑门控，返回 `GridRestoreResult.Restored(report)` 或 `Rejected(message)`。组合输入、非法草稿、等待保存、禁用和卸载拒绝，保存完成后不重放。有效阅读位置在同一 Accepted 布局路径按真实行高夹取，新的滚动、查询或模型替换取消旧位置。默认只保存最近地址，不抢焦点；显式 `restoreFocus = true` 在恢复布局后通过既有按 key 定位请求焦点，必要时进一步显露目标。位置完成或失效后结束，不持续请求帧。
+
 ## 业务行选择
 
 `DataGridState(..., rowSelection = GridRowSelectionMode.Single／Multiple)` 启用业务行选择，缺省 Disabled。可选 `selectable: (Row) -> Boolean` 只依赖当前不可变记录；没有该回调表示所有业务记录可选。选择保存稳定 key，与真实焦点及单元格范围独立。`selectedRowKeys`、`isRowSelected(key)` 可观察当前选择，`onSelectionChange` 只在集合确实改变时通知。

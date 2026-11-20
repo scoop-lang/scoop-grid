@@ -17,6 +17,7 @@ internal fun <Row> gridMeasureRows(
 ): GridRootLayout<Row> {
     val rows = input.session.rowHeights.prepare(input, columns)
     val anchor = input.session.rowHeights.anchor(input)
+    val restored = input.session.viewState.placement(input)
     val available = max(0.0, size.height - headerHeight)
     val revision = input.scroll.requestRevision
     val density = input.columns.appearance.density
@@ -77,6 +78,17 @@ internal fun <Row> gridMeasureRows(
                     )
                 case None -> {}
             }
+        }
+        if (restored != None && input.session.requested == None) {
+            val value = restored!!
+            adjusted =
+                Some(
+                    Point(
+                        value.horizontal,
+                        bands.bodyPosition(value.row) +
+                            min(value.inside, rows.index.extent(value.row))
+                    )
+                )
         }
         when (adjusted) {
             case Some(val offset) -> scroll =

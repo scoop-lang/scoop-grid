@@ -1,0 +1,36 @@
+package scoop.grid
+
+import scoop.ui.ViewKey
+
+public struct GridReadingPosition(
+    val row: ViewKey,
+    val rowOffset: Double = 0.0,
+    val horizontalOffset: Double = 0.0
+)
+
+/** Persistent view data, independent of row values and mounted UI resources. */
+public class GridViewState public constructor(
+    public val columns: Array<GridColumnState>,
+    public val query: GridQuery = GridQuery(),
+    public val pinnedRows: GridPinnedRows = GridPinnedRows(),
+    public val selectedRows: Array<ViewKey> = [],
+    public val cellRange: GridCellRange? = None,
+    public val readingPosition: GridReadingPosition? = None,
+    public val focusedCell: GridCellAddress? = None
+)
+
+public enum GridStatePart {
+    Column(GridColumnId), ColumnOrder, Sorting(GridColumnId), Filter(Array<Long>),
+    PinnedRow(ViewKey), SelectedRow(ViewKey), CellRange, ReadingPosition, FocusedCell, Pagination
+}
+
+public struct GridRestoreIssue(val part: GridStatePart, val message: String)
+
+public class GridRestoreReport public constructor(
+    public val state: GridViewState,
+    public val issues: Array<GridRestoreIssue>
+)
+
+public enum GridRestoreResult {
+    Restored(GridRestoreReport), Rejected(String)
+}

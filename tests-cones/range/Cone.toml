@@ -16,6 +16,7 @@ when = { os = "darwin" }
 [test-dependencies]
 "scoop:scoop.grid" = { version = "0.1.0", path = "../.." }
 "scoop:scoop.std" = "0.1.0"
+"scoop:scoop.math" = "0.1.0"
 "scoop:scoop.test" = "0.1.0"
 "scoop:scoop.ui" = "0.1.0"
 "scoop:scoop.ui.component" = "0.1.0"

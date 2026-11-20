@@ -35,8 +35,10 @@ internal class GridSession<Row>: GridMount {
     val columnSizing = GridColumnSizing<Row>(this)
     val headerSemantics = GridHeaderSemantics()
     val rowHeights = GridRowMeasurements<Row>()
+    val viewState = GridViewStateController<Row>(this)
     private var owner: ComponentScope? = None
     private var model: DataGridState<Row>? = None
+    val currentModel: DataGridState<Row>? get() = model
     private val rows: TableSource<Row>? get() = model?.result?.rows
     private var columns: GridColumnsPlan<Row>? = None
     private var spanColumns: GridSpanColumns? = None
@@ -51,6 +53,14 @@ internal class GridSession<Row>: GridMount {
     private var onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit }
     private var onCopyResult: (GridCopyResult) -> Unit = { _ -> Unit }
     public override val cellRange: GridCellRange? get() = model?.cellRange ?: None
+    public override fun saveViewState(
+        includePosition: Boolean,
+        includeFocus: Boolean
+    ): GridViewState? = viewState.save(includePosition, includeFocus)
+    public override fun restoreViewState(
+        value: GridViewState,
+        restoreFocus: Boolean
+    ): GridRestoreResult = viewState.restore(value, restoreFocus)
     public override fun setCellRange(value: GridCellRange?): Boolean {
         if (!active || !enabled || !inputEnabled || editingCell != None)
             return false
@@ -229,6 +239,10 @@ internal class GridSession<Row>: GridMount {
             columnReorder.accept(plan, input, time)
             rangeDrag.accept(plan, input, time)
             columnSizing.accept(plan, input, measured)
+            when (viewState.accept(input, plan, reading)) {
+                case Some(val address) -> requestCell(address)
+                case None -> {}
+            }
         }
     }
     fun requestFrame() {
@@ -435,6 +449,8 @@ internal class GridSession<Row>: GridMount {
         headerSemantics.update(input.columns.headers)
         columnActions.update(input)
         model = Some(input.input.state)
+        if (!sameModel)
+            viewState.close()
         columns = Some(input.columns)
         spanColumns = Some(input.columns.spans)
         columnSpans = input.input.columnSpans
@@ -478,6 +494,7 @@ internal class GridSession<Row>: GridMount {
         }
     }
     fun unmount() {
+        viewState.close()
         rowHeights.close()
         columnSizing.close()
         columnReorder.close()
@@ -555,6 +572,7 @@ internal class GridSession<Row>: GridMount {
     fun requestCell(address: GridCellAddress, editor: FocusHandle? = None): Boolean {
         if (!active || !valid(address))
             return false
+        viewState.cancelRequest()
         val target = anchor(address) ?: return false
         val focus = bodyFocus ?: return false
         intent = Some(target)
@@ -619,6 +637,7 @@ internal class GridSession<Row>: GridMount {
         onPasteResult(address, result)
     }
     public override fun cancel() {
+        viewState.cancelRequest()
         bodyFocus?.cancelRequest()
         for ((_, cell) in cells)
             if (cell.handle.isPending)
@@ -634,6 +653,7 @@ internal class GridSession<Row>: GridMount {
         cells.remove(address)
     }
     fun remember(address: GridCellAddress) {
+        viewState.remember(address)
         if (recent == Some(address.column))
             return
         recent = Some(address.column)

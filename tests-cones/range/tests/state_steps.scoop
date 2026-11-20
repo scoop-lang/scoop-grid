@@ -1,0 +1,250 @@
+package scoop.grid.tests.range
+
+import scoop.graphics.Point
+import scoop.grid.*
+import scoop.math.abs
+import scoop.test.*
+import scoop.tests.window.nativeEditorText
+import scoop.ui.*
+
+internal fun RangeProbe.advanceViewState() {
+    when (phase) {
+        case 158 -> {
+            selected.value =
+                DataGridState(
+                    RangeRows(this),
+                    rangeColumns(this),
+                    pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(99999999L)]),
+                    rowSelection = GridRowSelectionMode.Multiple
+                )
+            model.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))
+            model.setColumnState(GridColumnState(GridColumnId("c79"), pin = GridPin.End))
+            scroll.scrollTo(Point(0.0, 0.0))
+            assertTrue(outside.requestFocus())
+        }
+        case 159 -> assertTrue(handle.focusCell(rangeAddress(50000000L, 37L)))
+        case 160 -> {
+            assertTrue(outside.requestFocus())
+            assertTrue(
+                model.setCellRange(
+                    Some(GridCellRange(rangeAddress(50000000L, 37L), rangeAddress(50000002L, 39L)))
+                )
+            )
+            model.setRowSelected(ViewKey.Number(50000000L), true)
+            scroll.scrollTo(Point(4301.0, 1600000007.0))
+        }
+        case 161 -> {
+            savedView = handle.saveViewState()
+            savedOffset = scroll.offset
+        }
+        case 162 -> {
+            model.setPagination(GridPagination.Page(0L, 20L))
+            model.setColumnState(GridColumnState(GridColumnId("c37"), visible = false))
+            model.clearRowSelection()
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 163 -> restoredView = Some(handle.restoreViewState(savedView!!))
+        case 164 -> scroll.scrollTo(Point(0.0, 0.0))
+        case 165 -> restoredView = Some(handle.restoreViewState(savedView!!, restoreFocus = true))
+        case 166 -> {
+            assertTrue(outside.requestFocus())
+            restoredView = Some(handle.restoreViewState(savedView!!, restoreFocus = true))
+            scroll.scrollTo(Point(321.0, 64.0))
+        }
+        case 167 -> {
+            restoredView = Some(handle.restoreViewState(savedView!!, restoreFocus = true))
+            model.setPagination(GridPagination.Page(3L, 20L))
+        }
+        case 168 -> {
+            records = rangeRows()
+            resetDrag()
+            assertTrue(outside.requestFocus())
+        }
+        case 169 -> assertTrue(handle.focusCell(rangeAddress(3L, 1L)))
+        case 170 -> {
+            savedView = handle.saveViewState()
+            assertTrue(handle.beginEdit(rangeAddress(3L, 1L)))
+            editor!!.state.replaceAll("bad")
+            restoredView = Some(handle.restoreViewState(savedView!!))
+        }
+        case 171 -> {
+            assertTrue(handle.cancelEdit())
+            assertTrue(handle.beginEdit(rangeAddress(3L, 1L)))
+            editor!!.state.replaceAll("33")
+            restoredView = Some(handle.restoreViewState(savedView!!))
+        }
+        case 172 -> {
+            records = pendingRows!!
+            assertTrue(pending!!.accept(records))
+        }
+        case 173 -> restoredView = Some(handle.restoreViewState(savedView!!))
+        case 174 -> assertTrue(handle.beginEdit(rangeAddress(3L, 1L)))
+        case 175 -> stateText(1, "pin")
+        case 176 -> restoredView = Some(handle.restoreViewState(savedView!!))
+        case 177 -> stateText(2, "")
+        case 178 -> assertTrue(handle.cancelEdit())
+        case 179 -> enabled.value = false
+        case 180 -> {
+            restoredView = Some(handle.restoreViewState(savedView!!))
+            enabled.value = true
+        }
+        case 181 -> {
+            restoredView = Some(handle.restoreViewState(savedView!!, restoreFocus = true))
+            selected.value = small()
+            assertTrue(outside.requestFocus())
+        }
+        case 182 -> savedView = handle.saveViewState(includePosition = false, includeFocus = false)
+        case 183 -> {
+            scroll.scrollTo(Point(0.0, 0.0))
+            restoredView = Some(handle.restoreViewState(pendingView(), restoreFocus = true))
+            enabled.value = false
+        }
+        case 184 -> enabled.value = true
+        case 185 -> {
+            restoredView = Some(handle.restoreViewState(pendingView(), restoreFocus = true))
+            handle.cancelFocus()
+        }
+        case 186 -> {
+            restoredView = Some(handle.restoreViewState(savedView!!))
+            ui!!.close()
+            assertFalse(handle.clearCellRange())
+            rejected(handle.copyCells())
+            restoredView = Some(handle.restoreViewState(savedView!!))
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+            return
+        }
+        case 187 -> {
+            finished = true
+            application!!.requestExit()
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}
+
+private fun RangeProbe.restored() {
+    when (restoredView!!) {
+        case Restored(val report) -> assertEquals(0L, report.issues.size)
+        case Rejected(val reason) -> fail(Some(reason))
+    }
+}
+
+private fun RangeProbe.restoreRejected() {
+    when (restoredView!!) {
+        case Rejected(_) -> {}
+        else -> fail(Some("view restoration should reject"))
+    }
+}
+
+internal fun RangeProbe.inspectViewState() {
+    when (phase) {
+        case 159 -> retry = handle.focusedCell != Some(rangeAddress(50000000L, 37L))
+        case 161 -> {
+            assertEquals(Some(rangeAddress(50000000L, 37L)), savedView!!.focusedCell)
+            assertTrue(savedView!!.readingPosition != None)
+            assertEquals(7.0, savedView!!.readingPosition!!.rowOffset)
+            assertEquals(1L, savedView!!.selectedRows.size)
+            assertTrue(outside.hasFocus)
+        }
+        case 163 -> {
+            restored()
+            assertTrue(outside.hasFocus)
+            assertTrue(abs(scroll.offset.x - savedOffset.x) < 0.1)
+            assertTrue(abs(scroll.offset.y - savedOffset.y) < 0.1)
+            selectedRange(rangeAddress(50000000L, 37L), rangeAddress(50000002L, 39L))
+            assertEquals(ViewKey.Number(50000000L), model.selectedRowKeys[0L])
+            assertTrue(live.size < 250L)
+        }
+        case 165 -> {
+            restored()
+            retry = handle.focusedCell != Some(rangeAddress(50000000L, 37L))
+        }
+        case 166 -> {
+            restored()
+            assertTrue(outside.hasFocus)
+            assertEquals(Point(321.0, 64.0), scroll.offset)
+        }
+        case 167 -> {
+            restored()
+            assertTrue(outside.hasFocus)
+            assertEquals(GridPagination.Page(3L, 20L), model.query.pagination)
+        }
+        case 169 -> retry = handle.focusedCell != Some(rangeAddress(3L, 1L))
+        case 170 -> {
+            restoreRejected()
+            assertEquals("bad", editor!!.state.text)
+            assertEquals(Some(rangeAddress(3L, 1L)), handle.editingCell)
+        }
+        case 171 -> {
+            restoreRejected()
+            assertTrue(handle.isSubmitting)
+        }
+        case 172 -> assertEquals(None, handle.editingCell)
+        case 173 -> {
+            restored()
+            assertEquals(33L, model.result.rows.rowAt(3L).value)
+        }
+        case 176 -> {
+            restoreRejected()
+            assertEquals(Some(rangeAddress(3L, 1L)), handle.editingCell)
+        }
+        case 180 -> restoreRejected()
+        case 181 -> {
+            restored()
+            assertTrue(outside.hasFocus)
+            assertEquals(None, handle.focusedCell)
+        }
+        case 182 -> {
+            assertEquals(None, savedView!!.readingPosition)
+            assertEquals(None, savedView!!.focusedCell)
+            node = Some(cell(2L, 0L))
+        }
+        case 183 -> {
+            restored()
+            assertEquals(Point(0.0, 0.0), scroll.offset)
+            assertTrue(outside.hasFocus)
+        }
+        case 184 -> {
+            assertEquals(Point(0.0, 0.0), scroll.offset)
+            assertTrue(outside.hasFocus)
+        }
+        case 185 -> {
+            restored()
+            assertEquals(Point(0.0, 0.0), scroll.offset)
+            assertTrue(outside.hasFocus)
+        }
+        case 186 -> {
+            restoreRejected()
+            assertFalse(handle.isAttached)
+            assertFalse(node!!.flag(0))
+            assertFalse(findField!!.flag(0))
+            assertEquals(None, handle.saveViewState()?.focusedCell ?: None)
+        }
+        else -> {}
+    }
+}
+
+private fun RangeProbe.pendingView(): GridViewState =
+    GridViewState(
+        model.columnState,
+        model.query,
+        model.pinnedRows,
+        readingPosition = Some(GridReadingPosition(ViewKey.Number(8L))),
+        focusedCell = Some(rangeAddress(3L, 70L))
+    )
+
+private fun RangeProbe.stateText(kind: Int, text: String) {
+    @Unsafe
+    {
+        text.withUtf8Bytes {
+            bytes,
+            length -> @Unsafe
+            {
+                assertEquals(0, nativeEditorText(view!!, kind, bytes, length, 0L, length, -1L, 0L))
+            }
+        }
+    }
+    inputQueued()
+}

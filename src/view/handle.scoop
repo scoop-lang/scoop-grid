@@ -73,6 +73,20 @@ public class DataGridHandle public constructor() {
         return target?.setCellRange(value) ?: false
     }
     public fun clearCellRange(): Boolean = setCellRange(None)
+    public fun saveViewState(
+        includePosition: Boolean = true,
+        includeFocus: Boolean = true
+    ): GridViewState? {
+        checkThread()
+        return target?.saveViewState(includePosition, includeFocus) ?: None
+    }
+    public fun restoreViewState(
+        value: GridViewState,
+        restoreFocus: Boolean = false
+    ): GridRestoreResult {
+        guard.checkMutation()
+        return target?.restoreViewState(value, restoreFocus) ?: GridRestoreResult.Rejected("网格未挂载")
+    }
     public fun copyCells(
         fallback: GridCellAddress? = None,
         includeHeaders: Boolean = false
@@ -204,6 +218,8 @@ internal interface GridMount {
     fun cancelEdit(): Boolean
     fun pasteCell(address: GridCellAddress, text: String): GridPasteResult
     fun setCellRange(value: GridCellRange?): Boolean
+    fun saveViewState(includePosition: Boolean, includeFocus: Boolean): GridViewState?
+    fun restoreViewState(value: GridViewState, restoreFocus: Boolean): GridRestoreResult
     fun copyCells(fallback: GridCellAddress?, includeHeaders: Boolean): GridCopyResult
     fun findCell(
         text: String,
