@@ -14,6 +14,7 @@ internal class GridColumnsPlan<Row>(
     tree: GridHeaders? = None
 ) {
     private val assembled = gridColumnSetup(definitions, states, appearance)
+    val spans = GridSpanColumns(states)
     val columns: Array<GridColumn<Row>> get() = assembled.columns
     val startCount: Long get() = assembled.startCount
     val endStart: Long get() = assembled.endStart
@@ -194,9 +195,10 @@ internal class GridColumnLayout(
             index += 1L
         }
     }
-    fun box(index: Long, offset: Double, height: Double): GridColumnBox {
+    fun box(index: Long, offset: Double, height: Double, span: Long = 1L): GridColumnBox {
         val rtl = direction == LayoutDirection.Rtl
-        val width = widths[index]
+        val end = index + span
+        val width = prefix[end] - prefix[index]
         var left =
             offset +
                 if (rtl)
@@ -220,7 +222,7 @@ internal class GridColumnLayout(
                             0.0
                 right = left + startVisible
                 if (rtl)
-                    offset + viewport - prefix[index + 1L]
+                    offset + viewport - prefix[end]
                 else
                     offset + prefix[index]
             } else
@@ -233,19 +235,19 @@ internal class GridColumnLayout(
                                 viewport - endVisible
                     right = left + endVisible
                     if (rtl)
-                        offset + endWidth - (prefix[index + 1L] - prefix[endStart])
+                        offset + endWidth - (prefix[end] - prefix[endStart])
                     else
                         offset + viewport - endWidth + prefix[index] - prefix[endStart]
                 } else
                     if (rtl)
-                        total - prefix[index + 1L]
+                        total - prefix[end]
                     else
                         prefix[index]
         val clipLeft = max(0.0, left - x)
         val clipRight = min(width, right - x)
         return GridColumnBox(x, width, Rect(clipLeft, 0.0, max(0.0, clipRight - clipLeft), height))
     }
-    fun reveal(index: Long, offset: Double): Double {
+    fun reveal(index: Long, offset: Double, span: Long = 1L): Double {
         if (index < startCount || index >= endStart)
             return offset
         val leftInset =
@@ -260,17 +262,18 @@ internal class GridColumnLayout(
                 endVisible
         val x =
             if (direction == LayoutDirection.Rtl)
-                total - prefix[index + 1L]
+                total - prefix[index + span]
             else
                 prefix[index]
         val available = viewport - leftInset - rightInset
         if (available <= 0.0)
             return offset
-        return if (x < offset + leftInset || widths[index] > available)
+        val width = prefix[index + span] - prefix[index]
+        return if (x < offset + leftInset || width > available)
             max(0.0, x - leftInset)
         else
-            if (x + widths[index] > offset + viewport - rightInset)
-                max(0.0, x + widths[index] - viewport + rightInset)
+            if (x + width > offset + viewport - rightInset)
+                max(0.0, x + width - viewport + rightInset)
             else
                 offset
     }

@@ -1,0 +1,119 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.graphics.Rect
+import scoop.test.*
+import scoop.ui.LayoutDirection
+
+private fun spanId(value: Long): GridColumnId = GridColumnId(f"c${value}")
+
+private fun spanMembers(values: Array<Long>): GridColumnSpan =
+    GridColumnSpan(Array<GridColumnId>(values.size) { at -> spanId(values[at]) })
+
+private fun spanState(
+    value: Long,
+    visible: Boolean = true,
+    pin: GridPin = GridPin.None
+): GridColumnState = GridColumnState(spanId(value), visible = visible, pin = pin)
+
+@Test
+private class GridColumnSpanTest {
+    @Test
+    fun `span declarations reject ambiguous members and overlapping active cells`() {
+        assertFailsWith<IllegalArgumentException> { GridColumnSpan([]) }
+        assertFailsWith<IllegalArgumentException> { spanMembers([1L]) }
+        assertFailsWith<IllegalArgumentException> { spanMembers([1L, 1L]) }
+        val columns = GridSpanColumns(Array<GridColumnState>(5L) { at -> spanState(at) })
+        assertFailsWith<IllegalArgumentException> {
+            columns.resolve([spanMembers([0L, 1L, 2L]), spanMembers([2L, 3L])])
+        }
+        val adjacent = columns.resolve([spanMembers([2L, 3L]), spanMembers([0L, 1L])])
+        assertEquals(3L, adjacent.count)
+        assertEquals(0L, adjacent.columnIndex(0L))
+        assertEquals(2L, adjacent.columnIndex(1L))
+        assertEquals(4L, adjacent.columnIndex(2L))
+    }
+
+    @Test
+    fun `hidden barriers reordering missing members and frozen boundaries deactivate a span`() {
+        val span = spanMembers([0L, 2L])
+        val normal = GridSpanColumns([spanState(0L), spanState(2L), spanState(3L)])
+        assertEquals(2L, normal.resolve([span]).span(1L).count)
+        for (
+            states in [
+                [spanState(0L), spanState(1L, visible = false), spanState(2L)],
+                [spanState(0L), spanState(2L, visible = false), spanState(3L)],
+                [spanState(2L), spanState(0L), spanState(3L)],
+                [spanState(0L), spanState(3L)],
+                [spanState(0L, pin = GridPin.Start), spanState(2L), spanState(3L)]
+            ]
+        ) {
+            val columns = GridSpanColumns(states)
+            val cells = columns.resolve([span])
+            assertEquals(columns.count, cells.count)
+            for (at in 0L ..< cells.columns)
+                assertEquals(1L, cells.span(at).count)
+        }
+        val separated =
+            GridSpanColumns(
+                [spanState(0L, pin = GridPin.End), spanState(1L), spanState(2L, pin = GridPin.End)]
+            )
+        val restored = separated.resolve([span])
+        assertEquals(1L, restored.span(2L).column)
+        assertEquals(2L, restored.span(2L).count)
+        assertEquals(spanId(0L), separated.idAt(1L))
+        assertEquals(2L, normal.resolve([span]).count)
+    }
+
+    @Test
+    fun `dense row sources preserve only anchors across several disjoint spans`() {
+        val columns = GridSpanColumns(Array<GridColumnState>(12L) { at -> spanState(at) })
+        val cells =
+            columns.resolve(
+                [spanMembers([8L, 9L, 10L, 11L]), spanMembers([1L, 2L, 3L]), spanMembers([5L, 6L])]
+            )
+        val actual = [0L, 1L, 4L, 5L, 7L, 8L]
+        val anchors = [0L, 1L, 1L, 1L, 4L, 5L, 5L, 7L, 8L, 8L, 8L, 8L]
+        assertEquals(actual.size, cells.count)
+        for (item in 0L ..< actual.size) {
+            assertEquals(actual[item], cells.columnIndex(item))
+            assertEquals(Some(item), cells.itemIndex(actual[item]))
+        }
+        for (column in 0L ..< anchors.size) {
+            assertEquals(anchors[column], cells.span(column).column)
+            assertEquals(anchors[column], cells.columnIndex(cells.anchorItem(column)))
+            if (column != anchors[column])
+                assertEquals(None, cells.itemIndex(column))
+        }
+        val contributors = HashSet<Long>()
+        contributors.add(3L)
+        contributors.add(10L)
+        assertTrue(cells.contributes(1L, contributors))
+        assertTrue(cells.contributes(8L, contributors))
+        assertFalse(cells.contributes(5L, contributors))
+    }
+
+    @Test
+    fun `merged geometry uses full widths in all regions and includes offscreen zero width anchors`() {
+        val widths = [40.0, 60.0, 80.0, 100.0, 120.0, 30.0, 50.0]
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            val layout = GridColumnLayout(widths, 2L, 5L, 400.0, direction)
+            val center = layout.box(2L, 80.0, 32.0, 3L)
+            assertEquals(300.0, center.width)
+            assertEquals(Rect(80.0, 0.0, 220.0, 32.0), center.clip)
+            assertEquals(100.0, layout.box(0L, 80.0, 32.0, 2L).width)
+            assertEquals(80.0, layout.box(5L, 80.0, 32.0, 2L).width)
+            assertEquals(0.0, layout.reveal(2L, 80.0, 3L))
+            assertEquals(80.0, layout.reveal(0L, 80.0, 2L))
+            assertEquals(80.0, layout.reveal(5L, 80.0, 2L))
+            val narrow = GridColumnLayout(widths, 2L, 5L, 100.0, direction)
+            assertEquals(0.0, narrow.box(2L, 0.0, 32.0, 3L).clip.width)
+        }
+        val zero = GridColumnLayout([0.0, 80.0, 0.0], 0L, 3L, 40.0, LayoutDirection.Ltr)
+        val columns = GridSpanColumns(Array<GridColumnState>(3L) { at -> spanState(at) })
+        val cells = columns.resolve([spanMembers([0L, 1L])])
+        assertEquals(1L, zero.visible(20.0).size)
+        assertEquals(0L, cells.columnIndex(cells.anchorItem(zero.visible(20.0)[0L])))
+        assertEquals(Rect(20.0, 0.0, 40.0, 32.0), zero.box(0L, 20.0, 32.0, 2L).clip)
+    }
+}

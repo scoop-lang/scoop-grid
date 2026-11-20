@@ -14,6 +14,12 @@ import scoop.ui.component.tabs as gridToolsTabs
 
 private class SampleRow(val id: Long, val name: String, val amount: Long)
 
+private fun sampleColumnSpans(row: SampleRow): Array<GridColumnSpan> =
+    if (row.id % 7L == 1L)
+        [GridColumnSpan([GridColumnId("name"), GridColumnId("amount")])]
+    else
+        []
+
 /** Only edited rows are stored; each source snapshot owns its private map. */
 private class SampleRows(private val changes: HashMap<Long, SampleRow> = HashMap()): TableSource<
     SampleRow
@@ -59,6 +65,14 @@ private class GridExample(scope: ComponentScope): Component(scope) {
     private val handle = DataGridHandle()
     private val lastEdit = state("名称与金额可编辑")
     private val tool = state<String?>(Some("filters"))
+    private val mergeDescriptions = state(true)
+    private fun toggleSpans() {
+        when (handle.commitEdit()) {
+            case NoEdit -> mergeDescriptions.value = !mergeDescriptions.value
+            case Committed -> mergeDescriptions.value = !mergeDescriptions.value
+            else -> lastEdit.value = "请先完成当前单元格的编辑或保存"
+        }
+    }
     private fun toggleFixed(key: ViewKey, placement: GridRowPin) {
         val pinned =
             when (placement) {
@@ -212,6 +226,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
         val selectedTool = tool
         val firstFixed = model.pinnedRows.top.contains(ViewKey.Number(0L))
         val lastFixed = model.pinnedRows.bottom.contains(ViewKey.Number(99999L))
+        val mergeDescriptions = this.mergeDescriptions.value
         val theme = currentThemeSource().read(scope)
         val table =
             column {
@@ -237,13 +252,33 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                                 { example.toggleFixed(ViewKey.Number(99999L), GridRowPin.Bottom) }
                         )
                     )
+                    add(
+                        gridPinButton(
+                            if (mergeDescriptions)
+                                "关闭跨列说明"
+                            else
+                                "启用跨列说明",
+                            onClick = { example.toggleSpans() }
+                        )
+                    )
                     spacing = 8.0
                 }
+                label(
+                    if (mergeDescriptions)
+                        "长说明合并名称与金额显示，该格只读；其余记录仍可编辑"
+                    else
+                        "已关闭跨列说明，名称与金额分别显示并可编辑"
+                )
                 add(
                     dataGrid(model) {
                         height = 480.0
                         rowHeight = 48.0
                         rowSizing = GridRowSizing.Content([GridColumnId("name")])
+                        columnSpans =
+                            if (mergeDescriptions)
+                                Some(::sampleColumnSpans)
+                            else
+                                None
                         this.handle = Some(handle)
                         onEditEnd =
                             {

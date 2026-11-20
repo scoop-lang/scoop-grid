@@ -17,7 +17,8 @@ internal class GridRows<Row>(
     val policy: GridRowPolicy<Row>,
     val enabled: Boolean = true,
     val topCount: Long = 0L,
-    val bottomCount: Long = 0L
+    val bottomCount: Long = 0L,
+    val columnSpans: ((Row) -> Array<GridColumnSpan>)? = None
 ): ItemSource {
     public override val count: Long get() = source.count
     public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
@@ -25,13 +26,19 @@ internal class GridRows<Row>(
     public override fun build(index: Long): View {
         val row = source.rowAt(index)
         val key = keyAt(index)
-        val cells = GridRowCells(row, key, index, columns, session, policy, enabled)
+        val spans = spansFor(row)
+        val cells = GridRowCells(row, key, index, columns, session, policy, enabled, spans)
         return lazyElement(
             cells,
-            GridRowProps(row, index, key, columns, session, policy),
+            GridRowProps(row, index, key, columns, session, policy, spans),
             { props, scope -> GridRow(props, scope) }
         )
     }
+    fun spansFor(row: Row): GridRowSpans =
+        when (columnSpans) {
+            case Some(val resolve) -> columns.spans.resolve(resolve(row))
+            case None -> GridRowSpans(columns.columns.size)
+        }
     fun semantics(): ItemSemantics =
         ItemSemantics(
             this,
@@ -49,12 +56,7 @@ internal class GridRows<Row>(
                         },
                         {
                             key, column ->
-                            val viewKey =
-                                when (key) {
-                                    case Number(val value) -> ViewKey.Number(value);
-                                    case Text(val value) -> ViewKey.Text(value)
-                                }
-                            val index = source.indexOfKey(viewKey)
+                            val index = source.indexOfKey(gridRowKey(key))
                             when (index) {
                                 case Some(val at) -> Some(
                                     SemanticItemProperties(
@@ -65,11 +67,32 @@ internal class GridRows<Row>(
                                 )
                                 case None -> None
                             }
-                        }
+                        },
+                        span =
+                            when (columnSpans) {
+                                case Some(_) -> Some {
+                                    key, column ->
+                                    val index = source.indexOfKey(gridRowKey(key))
+                                    when (index) {
+                                        case Some(val at) -> {
+                                            val range = spansFor(source.rowAt(at)).span(column)
+                                            SemanticGridSpan(range.column, range.count)
+                                        }
+                                        case None -> SemanticGridSpan(column)
+                                    }
+                                }
+                                case None -> None
+                            }
                     )
                 )
         )
 }
+
+private fun gridRowKey(key: SemanticItemKey): ViewKey =
+    when (key) {
+        case Number(val value) -> ViewKey.Number(value)
+        case Text(val value) -> ViewKey.Text(value)
+    }
 
 internal class GridBodyProps<Row>(val rows: GridRows<Row>, val session: GridSession<Row>)
 
@@ -172,7 +195,8 @@ internal class GridRowProps<Row>(
     val key: ViewKey,
     val columns: GridColumnsPlan<Row>,
     val session: GridSession<Row>,
-    val policy: GridRowPolicy<Row>
+    val policy: GridRowPolicy<Row>,
+    val spans: GridRowSpans
 )
 
 internal class GridRow<Row>(
@@ -192,27 +216,36 @@ internal class GridRow<Row>(
         constraints: Constraints
     ): LayoutResult<Unit> {
         val plan = context.input<GridMeasurePlan>()
+        val spans = props.value.spans
         when (plan.probe) {
-            case Some(val probe) -> return gridMeasureContentCell(
-                context,
-                constraints,
-                plan,
-                probe,
-                false
-            )
+            case Some(val probe) -> {
+                if (spans.span(probe.column).count > 1L)
+                    return LayoutResult(LayoutMetrics(constraints.constrain(Size(0.0, 0.0))), Unit)
+                return gridMeasureContentCell(
+                    context,
+                    constraints,
+                    plan,
+                    probe,
+                    false,
+                    Some(spans.anchorItem(probe.column))
+                )
+            }
             case None -> {}
         }
         val selected = HashSet<Long>()
         for (index in plan.visibleColumns)
-            selected.add(index)
+            selected.add(spans.anchorItem(index))
+        val contributors = HashSet<Long>()
         for (index in props.value.policy.contributors)
+            contributors.add(spans.anchorItem(index))
+        for (index in contributors)
             selected.add(index)
         for (index in context.pinnedItems)
             selected.add(index)
         when (props.value.session.requested) {
             case Some(val address) -> if (address.row == props.value.key) {
                 when (props.value.columns.indexOf(address.column)) {
-                    case Some(val index) -> selected.add(index);
+                    case Some(val index) -> selected.add(spans.anchorItem(index));
                     case None -> {}
                 }
             }
@@ -221,15 +254,18 @@ internal class GridRow<Row>(
         when (props.value.session.editing.current) {
             case Some(val edit) -> if (edit.address.row == props.value.key) {
                 when (props.value.columns.indexOf(edit.address.column)) {
-                    case Some(val index) -> selected.add(index)
+                    case Some(val index) -> selected.add(spans.anchorItem(index))
                     case None -> {}
                 }
             }
             case None -> {}
         }
         var height = props.value.policy.height(props.value.row, plan.rows.estimate)
-        for (index in props.value.policy.contributors) {
-            val box = plan.columns.box(index, plan.scroll.presentationOffset.x, height)
+        for (index in contributors) {
+            val column = spans.columnIndex(index)
+            val range = spans.span(column)
+            val box =
+                plan.columns.box(column, plan.scroll.presentationOffset.x, height, range.count)
             if (box.width <= 0.0)
                 continue
             val metrics =
@@ -239,7 +275,7 @@ internal class GridRow<Row>(
                     LayoutInput(
                         GridCellClip(
                             box.clip,
-                            plan.columns.region(index, plan.headerHeight, plan.bodyHeight),
+                            plan.columns.region(column, plan.headerHeight, plan.bodyHeight),
                             ScrollAxes.Both,
                             plan.viewport,
                             GridCellMeasure.Height
@@ -249,7 +285,10 @@ internal class GridRow<Row>(
             height = max(height, metrics.size.height)
         }
         for (index in selected) {
-            val box = plan.columns.box(index, plan.scroll.presentationOffset.x, height)
+            val column = spans.columnIndex(index)
+            val range = spans.span(column)
+            val box =
+                plan.columns.box(column, plan.scroll.presentationOffset.x, height, range.count)
             val row = plan.bands.box(props.value.index, plan.scroll.presentationOffset.y, height)
             context.measureItem(
                 index,
@@ -258,11 +297,11 @@ internal class GridRow<Row>(
                     GridCellClip(
                         Rect(box.clip.x, row.clipTop, box.clip.width, row.clipHeight),
                         plan.columns.region(
-                            index,
+                            column,
                             plan.headerHeight + row.regionTop,
                             row.regionHeight
                         ),
-                        if (plan.columns.frozen(index))
+                        if (plan.columns.frozen(column))
                             ScrollAxes.Vertical
                         else
                             ScrollAxes.Both,

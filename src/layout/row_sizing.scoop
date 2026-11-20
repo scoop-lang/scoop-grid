@@ -113,6 +113,7 @@ internal class GridRowConfiguration<Row>(
             next.input.columns &&
             columns.widths ===
             next.columns.widths &&
+            gridSameColumnSpans(input.rows.columnSpans, next.input.rows.columnSpans) &&
             fontRevision ==
             next.fontRevision
     }

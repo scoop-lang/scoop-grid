@@ -13,7 +13,8 @@ internal class GridRootProps<Row>(
     val rows: GridRows<Row>,
     val scroll: ScrollState,
     val session: GridSession<Row>,
-    val theme: ThemeSource
+    val theme: ThemeSource,
+    val previousCell: GridCellAddress?
 )
 
 internal class GridMeasurePlan(

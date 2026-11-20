@@ -78,6 +78,10 @@ scoop test --release .
 
 固定行仅跟随横向滚动，Start／End 冻结格两轴都保持位置。可用高度不足时先分配 Top，再分配 Bottom，正文允许零高；固定区从起点裁剪，不另建滚动区。[示例](examples/basic/src/main.scoop) 提供独立于 Grid 的首／末记录固定按钮，裁剪后仍可解除固定。
 
+`columnSpans = Some { row -> [GridColumnSpan([nameId, amountId])] }` 为一行声明有序的跨列范围。首列是唯一锚点，显示其真实内容；所有成员须可见、顺序连续且处于同一冻结区。隐藏、移动、冻结或移除成员使这一条规则暂时失效，恢复条件后重新生效；当前有效范围不能重叠。跨度内的导航和原生动作统一定位锚点，横向部分可见时仍保持一个单元格实例。
+
+跨列格只读，拆分后才恢复各列的编辑能力；外部规则变化会结束受影响的旧编辑。自动行高按合并后的宽度测量，多个高度贡献列落在同一跨度时只测一次；单列内容测宽跳过合并格，CSV 仍按各列原值输出。[十万行示例](examples/basic/src/main.scoop) 可切换名称／金额的跨列说明。
+
 浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。双击或 Enter／F2 进入可编辑列的编辑器；Enter／F2 也可进入自定义单元格的真实控件。编辑中的 Enter／Tab、点击其他格和失焦会先尝试提交，校验失败保留草稿。Escape 先交给输入法，再取消草稿；内部控件先处理自己的键盘与文本输入。
 
 列通过 `edit = Some(gridEdit<Row, T>(...))` 明确声明编辑器、校验和有类型的应用回调。内置 `gridTextEditor`、`gridLongEditor`、`gridDoubleEditor` 复用原生文本编辑器；`gridBooleanEditor`、`gridDateEditor` 和 `gridChoiceEditor<T>` 分别复用 Checkbox、DatePicker 和 Select。`GridEditor<T>` 可接入自定义控件。应用用 `GridCommit<Row>.accept(nextSource)` 发布真实数据快照，或 `reject(message)` 保留草稿；异步 completion 只完成原会话一次，取消／卸载后的结果返回 false。`handle.editingCell`、`editError` 和 `isSubmitting` 可用于响应式状态栏。
@@ -113,9 +117,13 @@ scoop check --tests --release tests-cones/heights
 scoop test --release tests-cones/heights
 scoop check --tests --release tests-cones/pinned
 scoop test --release tests-cones/pinned
+scoop check --tests --release tests-cones/spans
+scoop test --release tests-cones/spans
 ```
 
 原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合，`pinned` 覆盖顶部／底部固定、分页去重、筛选／删除、可变高度、原生身份与编辑保留，以及零正文和三段内容测宽。
+
+`spans` 覆盖跨列锚点与导航、远端原生定位、规则变化、只读编辑限制，以及固定行列、自动行高、内容测宽、多级表头和零宽成员的组合。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

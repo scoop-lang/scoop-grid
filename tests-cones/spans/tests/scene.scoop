@@ -1,0 +1,63 @@
+package scoop.grid.tests.spans
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+import scoop.ui.component.button
+
+internal class SpanScene(private val probe: SpanProbe, scope: ComponentScope): Component(scope) {
+    public override fun render(): View {
+        val probe = this.probe
+        return direction(
+            element(
+                { mount -> SpanLayout(probe, mount) },
+                [
+                    dataGrid(probe.model) {
+                        width = Some(probe.width.value)
+                        height = 224.0
+                        rowHeight = 32.0
+                        rowSizing = probe.mode.value
+                        columnSpans = probe.rules.value
+                        headerHeight = 32.0
+                        overscan = 32.0
+                        scroll = Some(probe.scroll)
+                        handle = Some(probe.handle)
+                        enabled = probe.enabled.value
+                        onEditEnd = { result -> probe.ends.add(result.reason) }
+                    },
+                    button("Outside grid", onClick = {}) {
+                        focus = FocusOptions(Some(probe.outside))
+                    }
+                ]
+            ),
+            probe.direction.value
+        )
+    }
+}
+
+private class SpanLayout(private val probe: SpanProbe, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    init {
+        probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints(maxWidth = Some(500.0), maxHeight = Some(224.0)))
+        context.placeChild(0L, Point(12.0, 12.0))
+        context.measureChild(1L, Constraints(maxWidth = Some(240.0)))
+        context.placeChild(1L, Point(540.0, 24.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(800.0, 440.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+        context.onFrameComplete {
+            frame -> when (frame.submission) {
+                case Accepted -> probe.accepted()
+                case Discarded -> probe.frame!!.requestFrame()
+            }
+        }
+    }
+}

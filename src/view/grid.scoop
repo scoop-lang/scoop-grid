@@ -79,7 +79,8 @@ public class DataGrid<Row> public constructor(
                 policy,
                 input.enabled,
                 result.topCount,
-                result.bottomCount
+                result.bottomCount,
+                input.columnSpans
             )
         val header =
             GridHeaderCells(
@@ -90,8 +91,21 @@ public class DataGrid<Row> public constructor(
                 input.enabled,
                 source
             )
+        val previousCell: GridCellAddress? =
+            when (session.requested) {
+                case Some(val address) -> Some(address)
+                case None -> session.focused
+            }
         return element(
-            GridRootProps(input, layout, rows, input.scroll ?: ownScroll, session, source),
+            GridRootProps(
+                input,
+                layout,
+                rows,
+                input.scroll ?: ownScroll,
+                session,
+                source,
+                previousCell
+            ),
             { props, scope -> GridRoot(props, scope) },
             [
                 lazyElement(header, { scope -> GridHeader(scope) }),

@@ -1,0 +1,281 @@
+package scoop.grid.tests.spans
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal fun SpanProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            table = Some(findTable(root!!) ?: fail(Some("missing span table")))
+            beforeCreated = created
+            offscreen = Some(cell(50000000L, 21L))
+            assertTrue(offscreen!!.same(cell(50000000L, 20L)))
+            assertTrue(offscreen!!.same(cell(50000000L, 22L)))
+            assertTrue(offscreen!!.text(1, Some("50000000:20")))
+            spanning(50000000L, 20L, 3L)
+            assertEquals(28L, offscreen!!.rowCellCount)
+            assertEquals(beforeCreated, created)
+            assertFalse(live.contains(spanAddress(50000000L, 20L)))
+            assertFalse(offscreen!!.flag(2))
+            retained = Some(cell(0L, 20L))
+        }
+        case 1 -> {
+            assertTrue(live.contains(spanAddress(0L, 20L)))
+            assertFalse(live.contains(spanAddress(0L, 21L)))
+            assertFalse(live.contains(spanAddress(0L, 22L)))
+            assertTrue(retained!!.same(cell(0L, 22L)))
+            bounds(retained!!, Rect(-80.0, 32.0, 240.0, 32.0))
+        }
+        case 2 -> if (focused(0L, 20L)) {
+            assertEquals(1520.0, scroll.offset.x)
+            bounds(retained!!, Rect(60.0, 32.0, 240.0, 32.0))
+        }
+        case 3 -> {
+            focused(0L, 23L);
+            Unit
+        }
+        case 4 -> {
+            focused(0L, 20L);
+            Unit
+        }
+        case 5 -> if (focused(1L, 20L))
+            spanning(1L, 20L, 1L)
+        case 6 -> {
+            focused(1L, 21L);
+            Unit
+        }
+        case 7 -> {
+            focused(0L, 20L);
+            Unit
+        }
+        case 8 -> {
+            focused(0L, 23L);
+            Unit
+        }
+        case 9 -> {
+            focused(0L, 20L);
+            Unit
+        }
+        case 10 -> {
+            focused(0L, 0L);
+            Unit
+        }
+        case 11 -> {
+            focused(0L, 29L);
+            Unit
+        }
+        case 12 -> {
+            assertEquals(beforeCreated + 1L, created)
+            assertTrue(live.contains(spanAddress(50000000L, 20L)))
+            assertFalse(live.contains(spanAddress(50000000L, 21L)))
+        }
+        case 13 -> {
+            retry = live.contains(spanAddress(50000000L, 20L))
+            if (!retry) {
+                assertFalse(offscreen!!.flag(2))
+                spanning(50000000L, 20L, 3L)
+            }
+        }
+        case 14 -> assertTrue(outside.hasFocus)
+        case 15 -> {
+            revealed = matchesBounds(offscreen!!, Rect(60.0, 192.0, 240.0, 32.0))
+            assertTrue(outside.hasFocus)
+        }
+        case 16 -> {
+            focused(50000000L, 20L);
+            Unit
+        }
+        case 17 -> {
+            covered = Some(cell(0L, 21L))
+            assertFalse(covered!!.same(retained!!))
+            assertTrue(retained!!.same(cell(0L, 20L)))
+            spanning(0L, 20L, 1L)
+        }
+        case 18 -> {
+            focused(0L, 21L);
+            Unit
+        }
+        case 19 -> if (focused(0L, 20L)) {
+            assertFalse(covered!!.flag(0))
+            assertTrue(retained!!.same(cell(0L, 22L)))
+            assertFalse(live.contains(spanAddress(0L, 21L)))
+        }
+        case 20 -> {
+            assertEquals(None, handle.editingCell)
+            assertEquals(0, submissions)
+            val source = TableRows([TableRecord(ViewKey.Number(0L), SpanRow(0L, true))])
+            assertEquals(
+                "0:20,0:21,0:22\r\n",
+                gridCsv(source, [model.columns[20L], model.columns[21L], model.columns[22L]], false)
+            )
+        }
+        case 21 -> if (focused(0L, 22L)) {
+            spanning(0L, 20L, 1L)
+            spanning(0L, 22L, 1L)
+            covered = Some(cell(0L, 22L))
+        }
+        case 22 -> if (focused(0L, 20L)) {
+            spanning(0L, 20L, 3L)
+            assertFalse(covered!!.flag(0))
+        }
+        case 23 -> {
+            spanning(0L, 20L, 1L);
+            assertFalse(cell(0L, 20L).same(cell(0L, 21L)))
+        }
+        case 24 -> {
+            spanning(0L, 20L, 3L);
+            assertTrue(cell(0L, 20L).same(cell(0L, 21L)))
+        }
+        case 25 -> spanning(0L, 20L, 1L)
+        case 26 -> {
+            spanning(0L, 0L, 2L);
+            spanning(0L, 20L, 3L);
+            spanning(0L, 28L, 2L)
+            assertEquals(26L, cell(0L, 20L).rowCellCount)
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 100.0, 32.0))
+            bounds(cell(0L, 29L), Rect(400.0, 32.0, 100.0, 32.0))
+        }
+        case 27 -> if (focused(8L, 28L)) {
+            assertEquals(previousY, scroll.offset.y)
+            bounds(cell(8L, 29L), Rect(400.0, 192.0, 100.0, 32.0))
+        }
+        case 28 -> if (focused(8L, 20L)) {
+            assertEquals(previousY, scroll.offset.y)
+            bounds(cell(8L, 21L), Rect(100.0, 192.0, 240.0, 32.0))
+        }
+        case 29 -> if (focused(0L, 0L)) {
+            bounds(cell(0L, 1L), Rect(350.0, 48.0, 150.0, 48.0))
+            spanning(0L, 0L, 2L)
+        }
+        case 30 -> {
+            bounds(cell(0L, 1L), Rect(120.0, 48.0, 150.0, 48.0))
+            assertFalse(cell(0L, 20L).flag(2))
+        }
+        case 31 -> {
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 100.0, 80.0))
+            bounds(cell(8L, 28L), Rect(400.0, 144.0, 100.0, 80.0))
+            assertEquals(Some(104.0), heightSamples[spanAddress(0L, 20L)])
+            assertFalse(live.contains(spanAddress(0L, 21L)))
+        }
+        case 32 -> {
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 100.0, 40.0))
+            bounds(cell(8L, 28L), Rect(400.0, 184.0, 100.0, 40.0))
+            assertEquals(Some(304.0), heightSamples[spanAddress(0L, 20L)])
+        }
+        case 33 -> when (fit!!.result) {
+            case Pending -> retry = true
+            case Applied(val width) -> {
+                assertEquals(136.0, width)
+                assertTrue(widthSamples.contains(spanAddress(1L, 21L)))
+                assertFalse(widthSamples.contains(spanAddress(0L, 20L)))
+                assertFalse(widthSamples.contains(spanAddress(8L, 20L)))
+            }
+            else -> fail(Some("covered column sizing failed"))
+        }
+        case 34 -> when (fit!!.result) {
+            case Pending -> retry = true
+            case Applied(val width) -> {
+                assertEquals(616.0, width)
+                assertTrue(widthSamples.contains(spanAddress(1L, 20L)))
+                assertFalse(widthSamples.contains(spanAddress(0L, 20L)))
+                assertFalse(widthSamples.contains(spanAddress(8L, 20L)))
+            }
+            else -> fail(Some("anchor column sizing failed"))
+        }
+        case 35 -> {
+            focused(0L, 21L);
+            Unit
+        }
+        case 36 -> if (focused(0L, 21L))
+            assertEquals(Some(spanAddress(0L, 21L)), handle.editingCell)
+        case 37 -> if (focused(0L, 20L)) {
+            assertEquals(None, handle.editingCell)
+            assertEquals(GridEditEndReason.ColumnChanged, ends[ends.size - 1L])
+            assertEquals(0, submissions)
+        }
+        case 38 -> if (focused(0L, 20L))
+            assertEquals(Some(spanAddress(0L, 20L)), handle.editingCell)
+        case 39 -> {
+            assertTrue(handle.isSubmitting);
+            assertEquals(1, submissions)
+        }
+        case 40 -> {
+            assertEquals(None, handle.editingCell)
+            assertFalse(handle.isSubmitting)
+            assertEquals(GridEditEndReason.ColumnChanged, ends[ends.size - 1L])
+            assertTrue(cell(0L, 20L).text(1, Some("0:20")))
+        }
+        case 41 -> {
+            spanning(0L, 20L, 1L);
+            assertFalse(covered!!.flag(0))
+        }
+        case 42 -> if (focused(0L, 20L))
+            spanning(0L, 20L, 3L)
+        case 43 -> {
+            assertFalse(retained!!.flag(1))
+            assertFalse(retained!!.flag(4))
+            assertTrue(outside.hasFocus)
+            assertFalse(handle.isPending)
+        }
+        case 44 -> assertTrue(retained!!.flag(1))
+        case 45 -> if (focused(10L, 28L))
+            spanning(10L, 28L, 2L)
+        case 46 -> {
+            retry = !outside.hasFocus;
+            if (!retry)
+                assertEquals(None, handle.focusedCell)
+        }
+        case 47 -> if (focused(0L, 20L)) {
+            val node = cell(0L, 20L)
+            val names = ["Metrics", "Column 20", "Column 21", "Column 22"]
+            for (index in 0L ..< names.size) {
+                val header =
+                    node.columnHeader(index) ?: fail(Some(f"missing spanning header ${index}"))
+                header.use {
+                    value ->
+                    var actual = "unknown"
+                    for (name in names)
+                        if (value.text(0, Some(name)))
+                            actual = name
+                    assertTrue(
+                        value.text(0, Some(names[index])),
+                        Some(
+                            f"spanning header ${index}: expected ${names[index]}, actual ${actual}"
+                        )
+                    )
+                }
+            }
+            when (node.columnHeader(4L)) {
+                case Some(val extra) -> {
+                    extra.close();
+                    fail(Some("duplicate spanning header"))
+                }
+                case None -> {}
+            }
+        }
+        case 48 -> spanning(0L, 20L, 1L)
+        case 49 -> if (focused(0L, 20L)) {
+            spanning(0L, 20L, 3L)
+            assertTrue(live.contains(spanAddress(0L, 20L)))
+            assertFalse(live.contains(spanAddress(0L, 21L)))
+            bounds(cell(0L, 20L), Rect(100.0, 64.0, 160.0, 32.0))
+        }
+        case 50 -> assertFalse(retained!!.flag(0))
+        case 51 -> {
+            assertFalse(retained!!.same(cell(0L, 20L)))
+            spanning(0L, 20L, 3L)
+            retained = Some(cell(0L, 20L))
+        }
+        case 52 -> {
+            assertFalse(handle.isAttached)
+            assertFalse(handle.isPending)
+            assertEquals(0L, live.size)
+            assertFalse(retained!!.flag(0))
+        }
+        else -> fail(Some("unknown span inspection phase"))
+    }
+}

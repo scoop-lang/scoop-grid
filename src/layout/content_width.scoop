@@ -60,7 +60,8 @@ internal fun gridMeasureContentCell(
     constraints: Constraints,
     plan: GridMeasurePlan,
     probe: GridColumnProbe,
-    header: Boolean
+    header: Boolean,
+    item: Long? = None
 ): LayoutResult<Unit> {
     val headerBox =
         if (header)
@@ -83,7 +84,7 @@ internal fun gridMeasureContentCell(
     val box = plan.columns.box(probe.column, plan.scroll.presentationOffset.x, height)
     val child =
         context.measureItem(
-            probe.column,
+            item ?: probe.column,
             Constraints(minHeight = height, maxHeight = Some(height)),
             LayoutInput(
                 GridCellClip(

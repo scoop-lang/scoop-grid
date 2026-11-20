@@ -85,6 +85,8 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
         val row = source.rowAt(index)
         if (!(column.editing?.editable(row) ?: false))
             return Some(GridEditEndReason.ColumnChanged)
+        if (input.visibleColumn(column.id) && !session.independent(row, column.id))
+            return Some(GridEditEndReason.ColumnChanged)
         if (!edit.draft.baselineMatches(row))
             return Some(GridEditEndReason.ValueChanged)
         if (
@@ -115,7 +117,7 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
         val column = input.findColumn(address.column) ?: return false
         val editing = column.editing ?: return false
         val row = input.result.rows.rowAt(index)
-        if (!editing.editable(row))
+        if (!editing.editable(row) || !session.independent(row, column.id))
             return false
         when (current) {
             case Some(val old) -> {

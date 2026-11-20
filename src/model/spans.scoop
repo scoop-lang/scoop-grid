@@ -1,0 +1,169 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+import scoop.collections.sortWith
+import scoop.comparisons.comparatorOf
+
+/** Ordered members of one read-only cell, with the first column as its anchor. */
+public class GridColumnSpan public constructor(public val columns: Array<GridColumnId>) {
+    init {
+        gridRequire(columns.size >= 2L, "a grid column span requires at least two columns")
+        val seen = HashSet<GridColumnId>()
+        for (id in columns)
+            gridRequire(seen.add(id), "duplicate grid column span member")
+    }
+}
+
+internal struct GridCellSpan(val column: Long, val count: Long = 1L) {
+    val end: Long get() = column + count
+}
+
+private class GridSpanColumn(val index: Long?, val position: Long, val pin: GridPin)
+
+/** Includes hidden columns as barriers within each frozen region. */
+internal class GridSpanColumns(val states: Array<GridColumnState>) {
+    private val lookup = HashMap<GridColumnId, GridSpanColumn>()
+    private val ordered = ArrayList<GridColumnId>()
+    private var visibleCount = 0L
+    val count: Long get() = visibleCount
+    init {
+        for (pin in [GridPin.Start, GridPin.None, GridPin.End]) {
+            var position = 0L
+            for (state in states) {
+                if (state.pin != pin)
+                    continue
+                lookup.put(
+                    state.id,
+                    GridSpanColumn(
+                        if (state.visible)
+                            Some(visibleCount)
+                        else
+                            None,
+                        position,
+                        pin
+                    )
+                )
+                position += 1L
+                if (state.visible) {
+                    ordered.add(state.id)
+                    visibleCount += 1L
+                }
+            }
+        }
+    }
+    fun indexOf(id: GridColumnId): Long? = lookup[id]?.index ?: None
+    fun idAt(index: Long): GridColumnId = ordered[index]
+    fun resolve(definitions: Array<GridColumnSpan>): GridRowSpans {
+        val ranges = ArrayList<GridCellSpan>()
+        for (definition in definitions) {
+            when (resolveOne(definition)) {
+                case Some(val range) -> ranges.add(range)
+                case None -> {}
+            }
+        }
+        ranges.sortWith(comparatorOf<GridCellSpan> { left, right -> left.column - right.column })
+        var end = 0L
+        for (range in ranges) {
+            gridRequire(range.column >= end, "overlapping grid column spans")
+            end = range.end
+        }
+        return GridRowSpans(count, ranges.toArray())
+    }
+    private fun resolveOne(definition: GridColumnSpan): GridCellSpan? {
+        val first = lookup[definition.columns[0L]] ?: return None
+        val index = first.index ?: return None
+        for (offset in 1L ..< definition.columns.size) {
+            val member = lookup[definition.columns[offset]] ?: return None
+            if (
+                member.pin !=
+                    first.pin ||
+                    member.index !=
+                    Some(index + offset) ||
+                    member.position !=
+                    first.position +
+                    offset
+            )
+                return None
+        }
+        return Some(GridCellSpan(index, definition.columns.size))
+    }
+}
+
+/** Sparse ranges map logical columns to a dense source containing actual anchors only. */
+internal class GridRowSpans(val columns: Long, private val ranges: Array<GridCellSpan> = []) {
+    private val removed = ArrayList<Long>()
+    val count: Long get() = columns - removed[ranges.size]
+    init {
+        var sum = 0L
+        removed.add(sum)
+        for (range in ranges) {
+            sum += range.count - 1L
+            removed.add(sum)
+        }
+    }
+    private fun preceding(column: Long): Long {
+        var low = 0L
+        var high = ranges.size
+        while (low < high) {
+            val middle = low + (high - low) / 2L
+            if (ranges[middle].column <= column)
+                low = middle + 1L
+            else
+                high = middle
+        }
+        return low - 1L
+    }
+    fun span(column: Long): GridCellSpan {
+        val at = preceding(column)
+        if (at >= 0L && column < ranges[at].end)
+            return ranges[at]
+        return GridCellSpan(column)
+    }
+    fun itemIndex(column: Long): Long? {
+        val at = preceding(column)
+        if (at < 0L)
+            return Some(column)
+        val range = ranges[at]
+        if (column == range.column)
+            return Some(column - removed[at])
+        if (column < range.end)
+            return None
+        return Some(column - removed[at + 1L])
+    }
+    fun anchorItem(column: Long): Long = itemIndex(span(column).column)!!
+    fun columnIndex(item: Long): Long {
+        var low = 0L
+        var high = ranges.size
+        while (low < high) {
+            val middle = low + (high - low) / 2L
+            if (ranges[middle].column - removed[middle] <= item)
+                low = middle + 1L
+            else
+                high = middle
+        }
+        if (low == 0L)
+            return item
+        val at = low - 1L
+        if (ranges[at].column - removed[at] == item)
+            return ranges[at].column
+        return item + removed[at + 1L]
+    }
+    fun contributes(column: Long, selected: HashSet<Long>): Boolean {
+        val range = span(column)
+        for (at in range.column ..< range.end)
+            if (selected.contains(at))
+                return true
+        return false
+    }
+}
+
+internal fun <Row> gridSameColumnSpans(
+    left: ((Row) -> Array<GridColumnSpan>)?,
+    right: ((Row) -> Array<GridColumnSpan>)?
+): Boolean =
+    when ((left, right)) {
+        case(Some(val first), Some(val second)) -> first === second
+        case(None, None) -> true
+        else -> false
+    }

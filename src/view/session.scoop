@@ -36,6 +36,8 @@ internal class GridSession<Row>: GridMount {
     private var model: DataGridState<Row>? = None
     private val rows: TableSource<Row>? get() = model?.result?.rows
     private var columns: GridColumnsPlan<Row>? = None
+    private var spanColumns: GridSpanColumns? = None
+    private var columnSpans: ((Row) -> Array<GridColumnSpan>)? = None
     private var reference: DataGridHandle? = None
     var enabled = true
     private var intent: GridCellAddress? = None
@@ -132,9 +134,22 @@ internal class GridSession<Row>: GridMount {
         val command = gridNavigation(key, plan.appearance.direction) ?: return false
         val row = source.indexOfKey(address.row) ?: return false
         val column = plan.indexOf(address.column) ?: return false
+        val range = span(address) ?: return false
+        val start =
+            when (command) {
+                case Column(val step) -> if (step > 0L)
+                    range.end - 1L
+                else
+                    range.column
+                case Tab(val reverse) -> if (reverse)
+                    range.column
+                else
+                    range.end - 1L
+                else -> range.column
+            }
         val next =
             gridNextCell(
-                GridCellIndex(row, column),
+                GridCellIndex(row, start),
                 source.count,
                 plan.columns.size,
                 pageRows,
@@ -169,6 +184,15 @@ internal class GridSession<Row>: GridMount {
     }
     public override val active: Boolean get() = owner?.isMounted ?: false
     public override val pending: Boolean get() = requested != None
+    val preparing: GridCellAddress? get() {
+        val focus = bodyFocus ?: return None
+        val row = focus.pendingItem ?: return None
+        val address = intent ?: return None
+        return if (address.row == row)
+            Some(address)
+        else
+            None
+    }
     public override val requested: GridCellAddress? get() {
         if (!active)
             return None
@@ -221,10 +245,17 @@ internal class GridSession<Row>: GridMount {
             context.consume()
     }
     fun update(input: GridRootProps<Row>) {
-        headerSemantics.update(input.columns.headers.tree)
+        val sameModel =
+            when (model) {
+                case Some(val value) -> value === input.input.state
+                case None -> false
+            }
+        headerSemantics.update(input.columns.headers)
         columnActions.update(input)
         model = Some(input.input.state)
         columns = Some(input.columns)
+        spanColumns = Some(input.columns.spans)
+        columnSpans = input.input.columnSpans
         theme = Some(input.theme)
         enabled = input.input.enabled
         onPasteResult = input.input.onPasteResult
@@ -247,6 +278,19 @@ internal class GridSession<Row>: GridMount {
                 cancel()
             case None -> {}
         }
+        if (sameModel && enabled) {
+            // Child reconciliation can retire a covered cell before this update runs.
+            when (input.previousCell) {
+                case Some(val address) -> when (anchor(address)) {
+                    case Some(val target) -> if (target != address) {
+                        cancel()
+                        requestCell(target)
+                    }
+                    case None -> {}
+                }
+                case None -> {}
+            }
+        }
     }
     fun unmount() {
         rowHeights.close()
@@ -262,12 +306,14 @@ internal class GridSession<Row>: GridMount {
         tableSemantics = None
         intent = None
         model = None
+        spanColumns = None
+        columnSpans = None
         theme = None
         entry = None
     }
     private fun valid(address: GridCellAddress): Boolean {
         val source = rows ?: return false
-        val plan = columns ?: return false
+        val plan = currentSpanColumns() ?: return false
         return enabled &&
             source.indexOfKey(address.row) !=
             None &&
@@ -275,28 +321,65 @@ internal class GridSession<Row>: GridMount {
             None &&
             (model?.visibleColumn(address.column) ?: false)
     }
+    private fun currentSpanColumns(): GridSpanColumns? {
+        val states = model?.columnState ?: return None
+        when (spanColumns) {
+            case Some(val old) -> if (old.states === states)
+                return Some(old)
+            case None -> {}
+        }
+        val next = GridSpanColumns(states)
+        spanColumns = Some(next)
+        return Some(next)
+    }
+    private fun span(address: GridCellAddress): GridCellSpan? {
+        val source = rows ?: return None
+        val row = source.indexOfKey(address.row) ?: return None
+        val columns = currentSpanColumns() ?: return None
+        val at = columns.indexOf(address.column) ?: return None
+        return Some(
+            when (columnSpans) {
+                case Some(val resolve) -> columns.resolve(resolve(source.rowAt(row))).span(at)
+                case None -> GridCellSpan(at)
+            }
+        )
+    }
+    private fun anchor(address: GridCellAddress): GridCellAddress? {
+        val range = span(address) ?: return None
+        return Some(GridCellAddress(address.row, currentSpanColumns()!!.idAt(range.column)))
+    }
+    fun independent(row: Row, id: GridColumnId): Boolean {
+        val columns = currentSpanColumns() ?: return false
+        val at = columns.indexOf(id) ?: return false
+        return when (columnSpans) {
+            case Some(val resolve) -> columns.resolve(resolve(row)).span(at).count == 1L
+            case None -> true
+        }
+    }
     public override fun focus(address: GridCellAddress): Boolean {
         if (!active || !valid(address))
             return false
-        when (editing.cell(address)) {
-            case Some(val edit) -> return requestCell(address, Some(edit.focus))
+        val target = anchor(address) ?: return false
+        when (editing.cell(target)) {
+            case Some(val edit) -> return requestCell(target, Some(edit.focus))
             case None -> {}
         }
-        return editing.leave { requestCell(address) }
+        return editing.leave { requestCell(target) }
     }
     fun requestCell(address: GridCellAddress, editor: FocusHandle? = None): Boolean {
         if (!active || !valid(address))
             return false
+        val target = anchor(address) ?: return false
         val focus = bodyFocus ?: return false
-        intent = Some(address)
+        intent = Some(target)
         val select: () -> FocusHandle? =
             {
                 when (editor) {
                     case Some(val handle) -> Some(handle)
-                    case None -> cells[address]?.handle
+                    case None -> cells[target]?.handle
                 }
             }
-        val accepted = focus.requestFocus(address.row, select)
+        val accepted = focus.requestFocus(target.row, select)
         if (!accepted)
             intent = None
         return accepted

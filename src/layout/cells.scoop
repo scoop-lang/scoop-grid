@@ -29,32 +29,39 @@ internal class GridRowCells<Row>(
     private val columns: GridColumnsPlan<Row>,
     private val session: GridSession<Row>,
     private val policy: GridRowPolicy<Row>,
-    private val enabled: Boolean
+    private val enabled: Boolean,
+    private val spans: GridRowSpans
 ): ItemSource {
-    public override val count: Long get() = columns.columns.size
-    public override fun keyAt(index: Long): ViewKey = ViewKey.Text(columns.columns[index].id.value)
+    public override val count: Long get() = spans.count
+    public override fun keyAt(index: Long): ViewKey =
+        ViewKey.Text(columns.columns[spans.columnIndex(index)].id.value)
     public override fun indexOfKey(key: ViewKey): Long? =
         when (key) {
             case Text(val value) -> if (value == "")
                 None
             else
-                columns.indexOf(GridColumnId(value))
+                when (columns.indexOf(GridColumnId(value))) {
+                    case Some(val index) -> spans.itemIndex(index)
+                    case None -> None
+                }
             else -> None
         }
     public override fun build(index: Long): View {
-        val column = columns.columns[index]
+        val columnIndex = spans.columnIndex(index)
+        val column = columns.columns[columnIndex]
         return component(
             GridDataCellProps(
                 row,
                 rowKey,
                 rowIndex,
-                index,
+                columnIndex,
                 column,
                 columns.appearance,
                 columns.headers,
                 session,
-                policy.contributors.contains(index),
-                enabled
+                spans.contributes(columnIndex, policy.contributors),
+                enabled,
+                spans.span(columnIndex).count
             ),
             { props, scope -> GridDataCell(props, scope) }
         )
@@ -211,7 +218,8 @@ internal class GridCellProps<Row>(
     val headerReference: SemanticsReference? = None,
     val headerCell: SemanticTableCell? = None,
     val headers: Array<SemanticNodeId> = [],
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val columnSpan: Long = 1L
 )
 
 internal class GridCell<Row>(
@@ -362,6 +370,7 @@ internal class GridCell<Row>(
                             SemanticTableCell(
                                 input.row,
                                 input.column,
+                                columnSpan = input.columnSpan,
                                 columnKey = Some(SemanticItemKey.Text(input.id.value))
                             )
                         )

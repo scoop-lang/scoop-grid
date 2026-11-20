@@ -32,7 +32,7 @@ internal fun <Row> gridMeasureRows(
         var scroll = viewport.layout(size, content)
         val old = scroll.snapshot.offset
         var adjusted: Point? = None
-        when (input.session.requested) {
+        when (input.session.preparing) {
             case Some(val target) -> when (input.rows.indexOfKey(target.row)) {
                 case Some(val index) -> {
                     val top = bands.bodyPosition(index)
@@ -50,14 +50,23 @@ internal fun <Row> gridMeasureRows(
                                     old.y
                     val x =
                         when (input.columns.indexOf(target.column)) {
-                            case Some(val at) -> columns.reveal(at, old.x)
+                            case Some(val at) -> {
+                                val span =
+                                    input.rows.spansFor(input.rows.source.rowAt(index)).span(at)
+                                columns.reveal(span.column, old.x, span.count)
+                            }
                             case None -> old.x
                         }
                     adjusted = Some(Point(x, y))
                 }
                 case None -> {}
             }
-            case None -> when (anchor) {
+            case None -> when (
+                if (input.session.requested == None)
+                    anchor
+                else
+                    None
+            ) {
                 case Some(val value) -> adjusted =
                     Some(
                         Point(

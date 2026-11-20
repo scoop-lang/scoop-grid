@@ -72,7 +72,8 @@ private class HeightSetup(val fonts: FontCollection) {
             GridRows(model.result.rows, columns, session, GridRowPolicy(mode, columns)),
             scrolling,
             session,
-            theme
+            theme,
+            None
         )
 }
 
