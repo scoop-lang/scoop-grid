@@ -9,12 +9,16 @@ import scoop.ui.style.ThemeSource
 import scoop.window.*
 import scoop.window.accessibility.*
 
+internal enum GridCellMeasure {
+    Normal, Width, Height
+}
+
 internal class GridCellClip(
     val bounds: Rect,
     val region: Rect,
     val axes: ScrollAxes,
     val viewport: ScrollViewport,
-    val intrinsic: Boolean = false
+    val measure: GridCellMeasure = GridCellMeasure.Normal
 )
 
 internal class GridRowCells<Row>(
@@ -22,7 +26,9 @@ internal class GridRowCells<Row>(
     private val rowKey: ViewKey,
     private val rowIndex: Long,
     private val columns: GridColumnsPlan<Row>,
-    private val session: GridSession<Row>
+    private val session: GridSession<Row>,
+    private val policy: GridRowPolicy<Row>,
+    private val enabled: Boolean
 ): ItemSource {
     public override val count: Long get() = columns.columns.size
     public override fun keyAt(index: Long): ViewKey = ViewKey.Text(columns.columns[index].id.value)
@@ -45,7 +51,9 @@ internal class GridRowCells<Row>(
                 column,
                 columns.appearance,
                 columns.headers,
-                session
+                session,
+                policy.contributors.contains(index),
+                enabled
             ),
             { props, scope -> GridDataCell(props, scope) }
         )
@@ -201,7 +209,8 @@ internal class GridCellProps<Row>(
     val drag: GridHeaderDragInput<Row>? = None,
     val headerReference: SemanticsReference? = None,
     val headerCell: SemanticTableCell? = None,
-    val headers: Array<SemanticNodeId> = []
+    val headers: Array<SemanticNodeId> = [],
+    val enabled: Boolean = true
 )
 
 internal class GridCell<Row>(
@@ -316,7 +325,7 @@ internal class GridCell<Row>(
             Some(TextCommandAvailability(paste = input.editable && !input.submitting))
         semantics.update(
             SemanticProperties(
-                enabled = input.drag?.enabled ?: (input.session?.enabled ?: true),
+                enabled = input.drag?.enabled ?: input.enabled,
                 name =
                     if (input.address == None)
                         input.text
@@ -450,7 +459,7 @@ internal class GridCell<Row>(
         GridCellClip
     > {
         val clip = context.input<GridCellClip>()
-        if (clip.intrinsic) {
+        if (clip.measure == GridCellMeasure.Width) {
             val padding =
                 min(
                     props.value.appearance.padding,
@@ -470,6 +479,18 @@ internal class GridCell<Row>(
                 0L,
                 Point(padding, max(0.0, (size.height - child.size.height) / 2.0))
             )
+            return LayoutResult(LayoutMetrics(size), clip)
+        }
+        if (clip.measure == GridCellMeasure.Height) {
+            val width = constraints.maxWidth ?: constraints.minWidth
+            val padding = min(props.value.appearance.padding, width / 2.0)
+            val child =
+                context.measureChild(
+                    0L,
+                    Constraints(maxWidth = Some(max(0.0, width - padding * 2.0)))
+                )
+            val size = constraints.constrain(Size(width, child.size.height + padding * 2.0))
+            context.placeChild(0L, Point(padding, padding))
             return LayoutResult(LayoutMetrics(size), clip)
         }
         val size = constraints.constrain(Size(0.0, 0.0))

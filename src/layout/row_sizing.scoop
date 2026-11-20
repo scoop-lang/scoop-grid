@@ -1,0 +1,221 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+import scoop.math.max
+import scoop.math.min
+import scoop.ui.*
+import scoop.ui.component.*
+
+public enum GridRowSizing<Row> {
+    Fixed, Explicit(val height: (Row) -> Double), Content(val columns: Array<GridColumnId>)
+}
+
+internal fun <Row> gridSameRowSizing(left: GridRowSizing<Row>, right: GridRowSizing<Row>): Boolean {
+    return when ((left, right)) {
+        case(Fixed, Fixed) -> true
+        case(Explicit(val first), Explicit(val second)) -> first === second
+        case(Content(val first), Content(val second)) -> {
+            if (first.size != second.size)
+                return false
+            for (at in 0L ..< first.size)
+                if (first[at] != second[at])
+                    return false
+            return true
+        }
+        else -> false
+    }
+}
+
+internal class GridRowPolicy<Row>(val mode: GridRowSizing<Row>, val columns: GridColumnsPlan<Row>) {
+    val contributors = HashSet<Long>()
+    val variable =
+        when (mode) {
+            case Fixed -> false;
+            else -> true
+        }
+    val content =
+        when (mode) {
+            case Content(_) -> true;
+            else -> false
+        }
+    init {
+        when (mode) {
+            case Content(val selected) -> {
+                gridRequire(selected.size > 0L, "automatic row height requires a column")
+                val defined = HashSet<GridColumnId>()
+                for (column in columns.definitions)
+                    defined.add(column.id)
+                val seen = HashSet<GridColumnId>()
+                for (id in selected) {
+                    gridRequire(defined.contains(id), "unknown automatic row height column")
+                    gridRequire(seen.add(id), "duplicate automatic row height column")
+                    when (columns.indexOf(id)) {
+                        case Some(val at) -> contributors.add(at)
+                        case None -> {}
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    fun height(row: Row, estimate: Double): Double =
+        when (mode) {
+            case Explicit(val measure) -> {
+                val value = measure(row) * columns.appearance.density
+                gridRequire(value.isFinite() && value > 0.0, "invalid explicit grid row height")
+                value
+            }
+            else -> estimate
+        }
+}
+
+/** Only measured identities and sparse extent deltas are retained. */
+internal class GridRowExtents(count: Long, val estimate: Double, variable: Boolean) {
+    val index =
+        ItemExtentIndex(
+            count,
+            if (variable)
+                ItemExtent.Variable(estimate)
+            else
+                ItemExtent.Fixed(estimate)
+        )
+    val known = HashMap<ViewKey, Double>()
+    private var measureRevision = 0UL
+    val revision: ULong get() = measureRevision
+    fun record(at: Long, key: ViewKey, height: Double) {
+        if (!index.variable)
+            return
+        if (index.extent(at) != height) {
+            index.record(at, height)
+            measureRevision += 1UL
+        }
+        known.put(key, height)
+    }
+}
+
+internal class GridRowConfiguration<Row>(
+    val input: GridRootProps<Row>,
+    val columns: GridColumnLayout,
+    val estimate: Double
+) {
+    val fontRevision = input.columns.appearance.fonts.revision
+    fun sameShape(next: GridRowConfiguration<Row>): Boolean {
+        if (
+            estimate !=
+                next.estimate ||
+                !gridSameRowSizing(input.rows.policy.mode, next.input.rows.policy.mode)
+        )
+            return false
+        if (!input.rows.policy.content)
+            return true
+        return input.columns ===
+            next.input.columns &&
+            columns.widths ===
+            next.columns.widths &&
+            fontRevision ==
+            next.fontRevision
+    }
+}
+
+internal class GridReadingAnchor(val key: ViewKey, val index: Long, val inside: Double)
+
+internal class GridRowReading<Row>(
+    val model: DataGridState<Row>,
+    val source: TableSource<Row>,
+    val scroll: ScrollState,
+    val revision: ULong,
+    val anchor: GridReadingAnchor?
+)
+
+internal class GridRowMeasurements<Row> {
+    private var configuration: GridRowConfiguration<Row>? = None
+    private var extents: GridRowExtents? = None
+    private var reading: GridRowReading<Row>? = None
+    fun prepare(input: GridRootProps<Row>, columns: GridColumnLayout): GridRowExtents {
+        val next =
+            GridRowConfiguration(
+                input,
+                columns,
+                input.input.rowHeight * input.columns.appearance.density
+            )
+        val old = configuration
+        val sameModel =
+            when (old) {
+                case Some(val value) -> value.input.input.state === input.input.state
+                case None -> false
+            }
+        val sameShape = sameModel && (old?.sameShape(next) ?: false)
+        if (sameShape && old!!.input.rows.source === input.rows.source) {
+            configuration = Some(next)
+            return extents!!
+        }
+        val fresh = GridRowExtents(input.rows.count, next.estimate, input.rows.policy.variable)
+        if (sameShape && fresh.index.variable) {
+            for ((key, height) in extents!!.known) {
+                when (input.rows.indexOfKey(key)) {
+                    case Some(val at) -> fresh.record(at, key, height)
+                    case None -> {}
+                }
+            }
+        }
+        configuration = Some(next)
+        extents = Some(fresh)
+        return fresh
+    }
+    fun anchor(input: GridRootProps<Row>): GridReadingAnchor? {
+        val previous = reading ?: return None
+        if (
+            previous.model !==
+                input.input.state ||
+                previous.scroll !==
+                input.scroll ||
+                previous.revision !=
+                input.scroll.requestRevision ||
+                input.scroll.hasPositionAnimation
+        )
+            return None
+        val anchor = previous.anchor ?: return None
+        if (input.rows.count == 0L)
+            return None
+        val at = input.rows.indexOfKey(anchor.key) ?: min(anchor.index, input.rows.count - 1L)
+        return Some(GridReadingAnchor(input.rows.keyAt(at), at, anchor.inside))
+    }
+    fun capture(input: GridRootProps<Row>, plan: GridMeasurePlan): GridRowReading<Row> {
+        val index = plan.rows.index
+        val offset = max(0.0, plan.scroll.snapshot.offset.y)
+        val first = index.indexAt(offset)
+        val anchor =
+            if (first < index.count)
+                Some(
+                    GridReadingAnchor(
+                        input.rows.keyAt(first),
+                        first,
+                        max(0.0, offset - index.prefix(first))
+                    )
+                )
+            else
+                None
+        return GridRowReading(
+            input.input.state,
+            input.rows.source,
+            input.scroll,
+            input.scroll.requestRevision,
+            anchor
+        )
+    }
+    fun accept(value: GridRowReading<Row>) {
+        if (
+            value.model.result.rows ===
+                value.source &&
+                value.scroll.requestRevision ==
+                value.revision
+        )
+            reading = Some(value)
+    }
+    fun close() {
+        configuration = None
+        extents = None
+        reading = None
+    }
+}

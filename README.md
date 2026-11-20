@@ -68,6 +68,10 @@ scoop test --release .
 
 `headerHeight` 是每层高度，浅层叶占满其余层；冻结组可显示为 Start／中心／End 三个片段。横向离屏组不创建视图，宽组标题留在当前可见片段。原生节点发布实际跨度与祖先表头关系，隐藏和卸载后旧关联会撤下。组标题不参与单列内容测宽。[十万行示例](examples/basic/src/main.scoop) 展示三级表头与固定列。
 
+`rowSizing` 默认是 `GridRowSizing.Fixed`，全部行使用 `rowHeight`。可设为 `GridRowSizing.Explicit { row -> ... }`，按记录返回正的有限高度；或设为 `GridRowSizing.Content([GridColumnId("name")])`，让指定列的真实内容撑高整行。后者的默认文本会自动换行，编辑器也参与同一高度测量；`rowHeight` 是最小高度。所有高度使用逻辑单位，并随主题密度缩放。
+
+可变模式把 `rowHeight` 作为未测量行的估计值，滚动范围随实际测量更新。只为当前行窗口、overscan 和活动行准备内容；指定的高度贡献列即使横向离屏也会测量，隐藏后不再贡献，其他列继续虚拟化。数据、列宽、字体和密度改变时，按最近成功呈现的行 key 与行内偏移保持阅读位置；新的滚动和定位请求优先。[示例](examples/basic/src/main.scoop) 的长名称可用于观察换行、调宽和编辑后行高变化。
+
 浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。双击或 Enter／F2 进入可编辑列的编辑器；Enter／F2 也可进入自定义单元格的真实控件。编辑中的 Enter／Tab、点击其他格和失焦会先尝试提交，校验失败保留草稿。Escape 先交给输入法，再取消草稿；内部控件先处理自己的键盘与文本输入。
 
 列通过 `edit = Some(gridEdit<Row, T>(...))` 明确声明编辑器、校验和有类型的应用回调。内置 `gridTextEditor`、`gridLongEditor`、`gridDoubleEditor` 复用原生文本编辑器；`gridBooleanEditor`、`gridDateEditor` 和 `gridChoiceEditor<T>` 分别复用 Checkbox、DatePicker 和 Select。`GridEditor<T>` 可接入自定义控件。应用用 `GridCommit<Row>.accept(nextSource)` 发布真实数据快照，或 `reject(message)` 保留草稿；异步 completion 只完成原会话一次，取消／卸载后的结果返回 false。`handle.editingCell`、`editError` 和 `isSubmitting` 可用于响应式状态栏。
@@ -99,9 +103,11 @@ scoop check --tests --release tests-cones/sizing
 scoop test --release tests-cones/sizing
 scoop check --tests --release tests-cones/groups
 scoop test --release tests-cones/groups
+scoop check --tests --release tests-cones/heights
+scoop test --release tests-cones/heights
 ```
 
-原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系。
+原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

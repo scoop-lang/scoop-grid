@@ -1,6 +1,8 @@
 package scoop.grid
 
 import scoop.test.*
+import scoop.ui.component.ItemExtent
+import scoop.ui.component.ItemExtentIndex
 
 @Test
 private class GridContentWidthTest {
@@ -14,7 +16,13 @@ private class GridContentWidthTest {
             end: Long,
             width: Double = 500.0
         ) {
-            val range = gridContentRows(offset, height, 32.0, count, width)
+            val range =
+                gridContentRows(
+                    offset,
+                    height,
+                    ItemExtentIndex(count, ItemExtent.Fixed(32.0)),
+                    width
+                )
             assertEquals(first, range.first)
             assertEquals(end, range.end)
         }
@@ -27,6 +35,20 @@ private class GridContentWidthTest {
         check(0.0, 128.0, 0L, 0L, 0L)
         val large = 9223372036854775807L
         check(large.toDouble() * 32.0, 128.0, large, large, large)
+    }
+
+    @Test
+    fun `variable height sampling uses intersecting rows rather than an estimated row count`() {
+        val rows = ItemExtentIndex(100000000L, ItemExtent.Variable(32.0))
+        rows.record(1L, 64.0)
+        rows.record(2L, 48.0)
+        rows.record(3L, 96.0)
+        val first = gridContentRows(40.0, 104.0, rows, 500.0)
+        assertEquals(1L, first.first)
+        assertEquals(3L, first.end)
+        val partial = gridContentRows(40.0, 105.0, rows, 500.0)
+        assertEquals(1L, partial.first)
+        assertEquals(4L, partial.end)
     }
 
     @Test

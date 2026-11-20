@@ -19,7 +19,15 @@ private class SampleRows(private val changes: HashMap<Long, SampleRow> = HashMap
     public override val count: Long get() = 100000L
     public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
     public override fun rowAt(index: Long): SampleRow =
-        changes[index] ?: SampleRow(index + 1L, f"记录 ${index + 1L}", (index + 1L) * 10L)
+        changes[index] ?:
+            SampleRow(
+                index + 1L,
+                if (index % 7L == 0L)
+                    f"记录 ${index + 1L}：本条包含跨区域协作的详细说明，名称可随列宽自动换行。"
+                else
+                    f"记录 ${index + 1L}",
+                (index + 1L) * 10L
+            )
     public override fun indexOfKey(key: ViewKey): Long? =
         when (key) {
             case Number(val index) -> if (index >= 0L && index < count)
@@ -177,7 +185,8 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 add(
                     dataGrid(model) {
                         height = 480.0
-                        rowHeight = 64.0
+                        rowHeight = 48.0
+                        rowSizing = GridRowSizing.Content([GridColumnId("name")])
                         this.handle = Some(handle)
                         onEditEnd =
                             {

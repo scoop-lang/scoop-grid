@@ -13,23 +13,27 @@ import scoop.window.accessibility.*
 internal class GridRows<Row>(
     val source: TableSource<Row>,
     val columns: GridColumnsPlan<Row>,
-    val session: GridSession<Row>
+    val session: GridSession<Row>,
+    val policy: GridRowPolicy<Row>,
+    val enabled: Boolean = true
 ): ItemSource {
     public override val count: Long get() = source.count
     public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
     public override fun indexOfKey(key: ViewKey): Long? = source.indexOfKey(key)
     public override fun build(index: Long): View {
-        val cells = GridRowCells(source.rowAt(index), keyAt(index), index, columns, session)
+        val row = source.rowAt(index)
+        val key = keyAt(index)
+        val cells = GridRowCells(row, key, index, columns, session, policy, enabled)
         return lazyElement(
             cells,
-            GridRowProps(index, keyAt(index), columns, session),
+            GridRowProps(row, index, key, columns, session, policy),
             { props, scope -> GridRow(props, scope) }
         )
     }
     fun semantics(): ItemSemantics =
         ItemSemantics(
             this,
-            { _ -> Some(SemanticItemProperties(enabled = session.enabled, focusable = true)) },
+            { _ -> Some(SemanticItemProperties(enabled = enabled, focusable = true)) },
             grid =
                 Some(
                     SemanticGrid(
@@ -53,7 +57,7 @@ internal class GridRows<Row>(
                                 case Some(val at) -> Some(
                                     SemanticItemProperties(
                                         value = columns.columns[column].text(source.rowAt(at)),
-                                        enabled = session.enabled,
+                                        enabled = enabled,
                                         focusable = true
                                     )
                                 )
@@ -88,7 +92,7 @@ internal class GridBody<Row>(
         semantics.update(
             SemanticProperties(
                 name = Some("Data grid"),
-                enabled = props.value.session.enabled,
+                enabled = rows.enabled,
                 table = Some(SemanticTableSize(rows.count, rows.columns.columns.size))
             )
         )
@@ -106,17 +110,21 @@ internal class GridBody<Row>(
         }
         val offset = plan.scroll.presentationOffset
         val selected = HashSet<Long>()
-        val first = max(0L, ((offset.y - plan.overscan) / plan.rowHeight).toLong())
-        val end =
-            min(
-                context.itemCount,
-                ((offset.y + plan.bodyHeight + plan.overscan) / plan.rowHeight).toLong() + 1L
-            )
+        val extents = plan.rows.index
+        val first = extents.indexAt(max(0.0, offset.y - plan.overscan))
+        val end = extents.endBefore(max(0.0, offset.y + plan.bodyHeight + plan.overscan))
         if (plan.bodyHeight > 0.0 && plan.columns.viewport > 0.0)
             for (index in first ..< end)
                 selected.add(index)
         for (index in context.pinnedItems)
             selected.add(index)
+        when (props.value.session.requested) {
+            case Some(val target) -> when (props.value.rows.indexOfKey(target.row)) {
+                case Some(val index) -> selected.add(index)
+                case None -> {}
+            }
+            case None -> {}
+        }
         when (props.value.session.editing.current) {
             case Some(val edit) -> when (props.value.rows.indexOfKey(edit.address.row)) {
                 case Some(val index) -> selected.add(index)
@@ -125,10 +133,23 @@ internal class GridBody<Row>(
             case None -> {}
         }
         for (index in selected) {
-            context.measureItem(index, Constraints.tight(Size(plan.columns.total, plan.rowHeight)))
+            val metrics =
+                context.measureItem(
+                    index,
+                    if (extents.variable)
+                        Constraints(
+                            minWidth = plan.columns.total,
+                            maxWidth = Some(plan.columns.total)
+                        )
+                    else
+                        Constraints.tight(Size(plan.columns.total, plan.rows.estimate))
+                )
+            plan.rows.record(index, props.value.rows.keyAt(index), metrics.size.height)
+        }
+        for (index in selected) {
             context.placeItem(
                 index,
-                Point(0.0, index.toDouble() * plan.rowHeight - plan.scroll.snapshot.offset.y)
+                Point(0.0, extents.prefix(index) - plan.scroll.snapshot.offset.y)
             )
         }
         return LayoutResult(
@@ -149,10 +170,12 @@ internal class GridBody<Row>(
 }
 
 internal class GridRowProps<Row>(
+    val row: Row,
     val index: Long,
     val key: ViewKey,
     val columns: GridColumnsPlan<Row>,
-    val session: GridSession<Row>
+    val session: GridSession<Row>,
+    val policy: GridRowPolicy<Row>
 )
 
 internal class GridRow<Row>(
@@ -185,6 +208,8 @@ internal class GridRow<Row>(
         val selected = HashSet<Long>()
         for (index in plan.visibleColumns)
             selected.add(index)
+        for (index in props.value.policy.contributors)
+            selected.add(index)
         for (index in context.pinnedItems)
             selected.add(index)
         when (props.value.session.requested) {
@@ -205,11 +230,32 @@ internal class GridRow<Row>(
             }
             case None -> {}
         }
+        var height = props.value.policy.height(props.value.row, plan.rows.estimate)
+        for (index in props.value.policy.contributors) {
+            val box = plan.columns.box(index, plan.scroll.presentationOffset.x, height)
+            if (box.width <= 0.0)
+                continue
+            val metrics =
+                context.measureItem(
+                    index,
+                    Constraints(minWidth = box.width, maxWidth = Some(box.width)),
+                    LayoutInput(
+                        GridCellClip(
+                            box.clip,
+                            plan.columns.region(index, plan.headerHeight, plan.bodyHeight),
+                            ScrollAxes.Both,
+                            plan.viewport,
+                            GridCellMeasure.Height
+                        )
+                    )
+                )
+            height = max(height, metrics.size.height)
+        }
         for (index in selected) {
-            val box = plan.columns.box(index, plan.scroll.presentationOffset.x, plan.rowHeight)
+            val box = plan.columns.box(index, plan.scroll.presentationOffset.x, height)
             context.measureItem(
                 index,
-                Constraints.tight(Size(box.width, plan.rowHeight)),
+                Constraints.tight(Size(box.width, height)),
                 LayoutInput(
                     GridCellClip(
                         box.clip,
@@ -225,7 +271,7 @@ internal class GridRow<Row>(
             context.placeItem(index, Point(box.x - plan.scroll.snapshot.offset.x, 0.0))
         }
         return LayoutResult(
-            LayoutMetrics(constraints.constrain(Size(plan.columns.total, plan.rowHeight))),
+            LayoutMetrics(constraints.constrain(Size(plan.columns.total, height))),
             Unit
         )
     }

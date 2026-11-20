@@ -3,6 +3,7 @@ package scoop.grid
 import scoop.math.max
 import scoop.math.min
 import scoop.ui.*
+import scoop.ui.component.ItemExtentIndex
 
 private class GridColumnContent<Row>(
     val fit: GridColumnFit,
@@ -116,8 +117,7 @@ internal class GridColumnSizing<Row>(private val session: GridSession<Row>): Clo
             gridContentRows(
                 plan.scroll.presentationOffset.y,
                 plan.bodyHeight,
-                plan.rowHeight,
-                value.rows.count,
+                plan.rows.index,
                 plan.columns.viewport
             )
         return Some(GridColumnProbe(pending.fit, column, rows.first, rows.end))
@@ -192,35 +192,12 @@ internal struct GridContentRows(val first: Long, val end: Long)
 internal fun gridContentRows(
     offset: Double,
     height: Double,
-    rowHeight: Double,
-    count: Long,
+    rows: ItemExtentIndex,
     width: Double
 ): GridContentRows {
-    if (height <= 0.0 || width <= 0.0 || count == 0L)
+    if (height <= 0.0 || width <= 0.0 || rows.count == 0L)
         return GridContentRows(0L, 0L)
-    val top = offset / rowHeight
-    val first =
-        if (top >= count.toDouble())
-            count
-        else
-            max(0L, top.toLong())
-    val bottom = (offset + height) / rowHeight
-    val end =
-        if (bottom >= count.toDouble())
-            count
-        else {
-            val floor = bottom.toLong()
-            min(
-                count,
-                max(
-                    first,
-                    floor +
-                        if (bottom > floor.toDouble())
-                            1L
-                        else
-                            0L
-                )
-            )
-        }
+    val first = rows.indexAt(max(0.0, offset))
+    val end = rows.endBefore(max(0.0, offset + height))
     return GridContentRows(first, end)
 }

@@ -10,7 +10,9 @@ internal class GridDataCellProps<Row>(
     val column: GridColumn<Row>,
     val appearance: GridAppearance,
     val headers: GridHeadersPlan,
-    val session: GridSession<Row>
+    val session: GridSession<Row>,
+    val wraps: Boolean,
+    val enabled: Boolean
 )
 
 /** One stable cell element hosts either its display content or its actual editor. */
@@ -44,7 +46,12 @@ internal class GridDataCell<Row>(
                     input.row,
                     Some(appearance.fonts),
                     Some(appearance.body),
-                    Some(appearance.paragraph)
+                    Some(
+                        if (input.wraps)
+                            appearance.wrapping
+                        else
+                            appearance.paragraph
+                    )
                 )
             }
         return element(
@@ -61,7 +68,8 @@ internal class GridDataCell<Row>(
                 error = edit?.error ?: None,
                 submitting = edit?.submitting ?: false,
                 headers =
-                    input.session.headerSemantics.headers(input.headers, input.columnIndex, true)
+                    input.session.headerSemantics.headers(input.headers, input.columnIndex, true),
+                enabled = input.enabled
             ),
             { props, scope -> GridCell(props, scope) },
             [element(content, { props, scope -> GridContent(props, scope) }, [child])]

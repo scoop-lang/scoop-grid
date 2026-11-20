@@ -38,11 +38,9 @@ internal fun gridMeasureContentRows(
 ): LayoutResult<Rect> {
     var width = 0.0
     for (index in probe.firstRow ..< probe.endRow) {
+        val height = plan.rows.index.extent(index)
         val row =
-            context.measureItem(
-                index,
-                Constraints(minHeight = plan.rowHeight, maxHeight = Some(plan.rowHeight))
-            )
+            context.measureItem(index, Constraints(minHeight = height, maxHeight = Some(height)))
         width = max(width, row.size.width)
     }
     val offset = plan.scroll.presentationOffset
@@ -81,7 +79,7 @@ internal fun gridMeasureContentCell(
         if (header)
             headerBox!!.height
         else
-            plan.rowHeight
+            constraints.maxHeight ?: plan.rows.estimate
     val box = plan.columns.box(probe.column, plan.scroll.presentationOffset.x, height)
     val child =
         context.measureItem(
@@ -106,7 +104,7 @@ internal fun gridMeasureContentCell(
                         ),
                     ScrollAxes.Both,
                     plan.viewport,
-                    intrinsic = true
+                    measure = GridCellMeasure.Width
                 )
             )
         )

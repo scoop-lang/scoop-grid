@@ -24,6 +24,7 @@ path = "src"
 
 [test-dependencies]
 "scoop:scoop.test" = "0.1.0"
+"scoop:scoop.ui.style.shadcn" = "0.1.0"
 
 [[test.sources]]
 path = "tests"

@@ -31,6 +31,7 @@ internal class GridSession<Row>: GridMount {
     val columnReorder = GridColumnReorder<Row>(this)
     val columnSizing = GridColumnSizing<Row>(this)
     val headerSemantics = GridHeaderSemantics()
+    val rowHeights = GridRowMeasurements<Row>()
     private var owner: ComponentScope? = None
     private var model: DataGridState<Row>? = None
     private val rows: TableSource<Row>? get() = model?.result?.rows
@@ -46,10 +47,18 @@ internal class GridSession<Row>: GridMount {
         plan: GridMeasurePlan,
         input: GridRootProps<Row>,
         time: MonotonicInstant?,
-        measured: GridColumnMeasured?
+        measured: GridColumnMeasured?,
+        reading: GridRowReading<Row>
     ) {
         if (active) {
-            pageRows = max(1L, (plan.bodyHeight / plan.rowHeight).toLong())
+            val offset = max(0.0, plan.scroll.snapshot.offset.y)
+            pageRows =
+                max(
+                    1L,
+                    plan.rows.index.indexAt(min(plan.rows.index.total, offset + plan.bodyHeight)) -
+                        plan.rows.index.indexAt(offset)
+                )
+            rowHeights.accept(reading)
             columnActions.accept(plan, input)
             columnReorder.accept(plan, input, time)
             columnSizing.accept(plan, input, measured)
@@ -199,6 +208,7 @@ internal class GridSession<Row>: GridMount {
         }
     }
     fun unmount() {
+        rowHeights.close()
         columnSizing.close()
         columnReorder.close()
         columnActions.close()

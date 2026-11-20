@@ -11,6 +11,7 @@ public class DataGrid<Row> public constructor(
     private val session = GridSession<Row>()
     private var ambient: ThemeSource? = None
     private var plan: GridColumnsPlan<Row>? = None
+    private var rowPolicy: GridRowPolicy<Row>? = None
     private var fontRevision = -1L
     public override fun onMount() {
         when (props.value.theme) {
@@ -58,7 +59,18 @@ public class DataGrid<Row> public constructor(
             fontRevision = fonts.revision
         }
         val layout = plan!!
-        val rows = GridRows(input.state.result.rows, layout, session)
+        val policy =
+            when (val previous = rowPolicy) {
+                case Some(val old) -> if (
+                    old.columns === layout && gridSameRowSizing(old.mode, input.rowSizing)
+                )
+                    old
+                else
+                    GridRowPolicy(input.rowSizing, layout)
+                case None -> GridRowPolicy(input.rowSizing, layout)
+            }
+        rowPolicy = Some(policy)
+        val rows = GridRows(input.state.result.rows, layout, session, policy, input.enabled)
         val header =
             GridHeaderCells(
                 layout,

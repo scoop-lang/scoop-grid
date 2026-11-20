@@ -19,7 +19,8 @@ public class DataGridProps<Row> public constructor(
     public val onEditEnd: (GridEditEnd) -> Unit = { _ -> Unit },
     public val onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit },
     public val multiSortModifier: GridMultiSortModifier = GridMultiSortModifier.Shift,
-    public val minimumCenterWidth: Double = 80.0
+    public val minimumCenterWidth: Double = 80.0,
+    public val rowSizing: GridRowSizing<Row> = GridRowSizing.Fixed
 ) {
     init {
         gridRequire(height.isFinite() && height >= 0.0, "invalid grid height")
@@ -40,7 +41,7 @@ public class DataGridProps<Row> public constructor(
     }
 }
 
-public class DataGridBuilder internal constructor() {
+public class DataGridBuilder<Row> internal constructor() {
     public var height: Double = 320.0
     public var width: Double? = None
     public var rowHeight: Double = 48.0
@@ -55,8 +56,9 @@ public class DataGridBuilder internal constructor() {
     public var onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit }
     public var multiSortModifier: GridMultiSortModifier = GridMultiSortModifier.Shift
     public var minimumCenterWidth: Double = 80.0
+    public var rowSizing: GridRowSizing<Row> = GridRowSizing.Fixed
     public var key: ViewKey = ViewKey.Position
-    internal fun <Row> snapshot(state: DataGridState<Row>): DataGridProps<Row> =
+    internal fun snapshot(state: DataGridState<Row>): DataGridProps<Row> =
         DataGridProps(
             state,
             height,
@@ -72,15 +74,16 @@ public class DataGridBuilder internal constructor() {
             onEditEnd,
             onPasteResult,
             multiSortModifier,
-            minimumCenterWidth
+            minimumCenterWidth,
+            rowSizing
         )
 }
 
 public fun <Row> dataGrid(
     state: DataGridState<Row>,
-    configure: DataGridBuilder.() -> Unit = {}
+    configure: DataGridBuilder<Row>.() -> Unit = {}
 ): View {
-    val builder = DataGridBuilder()
+    val builder = DataGridBuilder<Row>()
     builder.configure()
     return component(
         builder.snapshot(state),

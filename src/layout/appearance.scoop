@@ -34,6 +34,14 @@ internal class GridAppearance(
                 else
                     TextDirection.Ltr
         }
+    val wrapping =
+        paragraphStyle {
+            this.direction =
+                if (this @GridAppearance.direction == LayoutDirection.Rtl)
+                    TextDirection.Rtl
+                else
+                    TextDirection.Ltr
+        }
     fun label(text: String): View =
         component(
             LabelProps(
