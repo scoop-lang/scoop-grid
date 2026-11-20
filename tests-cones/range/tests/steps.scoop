@@ -31,6 +31,10 @@ internal fun RangeProbe.accepted() {
 
 internal fun RangeProbe.inspect(tag: Int) {
     assertEquals(phase, tag)
+    if (phase >= 43) {
+        inspectDrag()
+        return
+    }
     when (phase) {
         case 0 -> {
             table = Some(findTable(root!!) ?: fail(Some("native table is missing")))
@@ -207,10 +211,6 @@ internal fun RangeProbe.inspect(tag: Int) {
         }
         case 41 -> selectedRange(rangeAddress(0L), rangeAddress(1L, 1L))
         case 42 -> assertTrue(handle.isAttached)
-        case 43 -> {
-            assertFalse(handle.isAttached);
-            assertFalse(node!!.flag(0))
-        }
         else -> fail(Some("unexpected range phase"))
     }
 }
@@ -224,6 +224,10 @@ internal fun RangeProbe.completed(tag: Int, result: Int) {
         return
     }
     phase += 1
+    if (phase >= 43) {
+        advanceDrag()
+        return
+    }
     when (phase) {
         case 1 -> {
             assertTrue(
@@ -341,19 +345,6 @@ internal fun RangeProbe.completed(tag: Int, result: Int) {
             assertFalse(handle.clearCellRange())
             rejected(handle.copyCells())
             enabled.value = true
-        }
-        case 43 -> {
-            ui!!.close()
-            assertFalse(handle.clearCellRange())
-            rejected(handle.copyCells())
-            waiting = true
-            calls!!.post(root!!, phase, 20)
-            return
-        }
-        case 44 -> {
-            finished = true;
-            application!!.requestExit();
-            return
         }
         else -> {}
     }

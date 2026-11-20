@@ -22,6 +22,7 @@ internal class RangeScene(private val probe: RangeProbe, scope: ComponentScope):
                         handle = Some(probe.handle)
                         enabled = probe.enabled.value
                         selectionCheckboxes = false
+                        touchCellSelection = probe.touchSelection.value
                         onCopyResult = { result -> probe.copied(result) }
                         columnSpans =
                             if (probe.spans.value)

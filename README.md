@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行单选／多选、单矩形键盘／点击选择与系统复制、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。拖选、其余配套操作与分析功能继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行单选／多选、单矩形键盘／点击／拖动选择与系统复制、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。其余配套操作与分析功能继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -50,7 +50,9 @@ scoop test --release .
 
 矩形的数据操作使用 `model.setCellRange(Some(GridCellRange(anchor, end)))`，端点均为 `GridCellAddress`；`cellRange`／`isCellInRange(address)` 读取范围，`clearCellRange()` 清空。范围按当前结果和可见逻辑列序解释，设置时不读取 Row、不构造 View。查询、固定行配置或可见列结构变化清除范围，调宽和结构不变的值替换保留。`model.copyText(fallback = Some(address), includeHeaders = false)` 优先生成范围 TSV，否则生成指定单格文字；没有有效目标时返回 None。操作列保留空字段，跨列呈现仍读取各逻辑列的实际值；离屏复制读取同一数据快照，不依赖界面是否挂载。
 
-普通点击建立单格范围；Shift＋点击、方向键、Home／End 和 PageUp／PageDown 扩展唯一范围，普通导航清除范围，Escape 在浏览状态清除矩形。系统 Copy／平台主修饰键＋C 优先复制范围，否则复制活动格；真实编辑器继续处理自身文本复制。工具栏可以调用 `handle.copyCells(includeHeaders = true)`，通过 `GridCopyResult` 或 `onCopyResult` 获取结果；文字完整生成后才写入剪贴板，格式化失败保留原内容。`handle.setCellRange`／`clearCellRange` 不抢焦点、不隐式滚动，禁用、卸载或编辑中拒绝。拖选与边缘滚动尚在实施。
+普通点击建立单格范围；Shift＋点击、方向键、Home／End 和 PageUp／PageDown 扩展唯一范围，普通导航清除范围，Escape 在浏览状态清除矩形。系统 Copy／平台主修饰键＋C 优先复制范围，否则复制活动格；真实编辑器继续处理自身文本复制。工具栏可以调用 `handle.copyCells(includeHeaders = true)`，通过 `GridCopyResult` 或 `onCopyResult` 获取结果；文字完整生成后才写入剪贴板，格式化失败保留原内容。`handle.setCellRange`／`clearCellRange` 不抢焦点、不隐式滚动，禁用、卸载或编辑中拒绝。
+
+鼠标拖选支持 Shift 延展、固定行列、RTL 和两轴边缘滚动，释放后聚焦端点；来源格的实际输入认领沿虚拟化保留，选区不保留其他离屏 View。Touch／Pen 默认滚动，应用可显式设置 `touchCellSelection = true` 进入选择模式。失焦、第二触点、禁用、模型更新或关闭结束旧手势，Escape 同时清空范围；结束后停止请求动画帧。
 
 界面操作可用 `handle.setRowSelected`、`handle.selectPageRows` 和 `handle.clearRowSelection`，未挂载或禁用时返回 `GridRowActionResult.Rejected`。真实点击遵守当前编辑的提交／拒绝规则；直接模型和原生行选择动作本身不会隐式改写编辑草稿。[十万行示例](examples/basic/src/main.scoop) 展示已选条数与清空入口。
 
@@ -143,7 +145,7 @@ scoop test --release tests-cones/range
 
 `spans` 覆盖跨列锚点与导航、远端原生定位、规则变化、只读编辑限制，以及固定行列、自动行高、内容测宽、多级表头和零宽成员的组合。
 
-`selection` 覆盖业务行选择与 Checkbox、原生选择、编辑提交及模型生命周期；`range` 覆盖唯一矩形的键盘／点击扩展、系统菜单和快捷键复制、离屏语义、RTL、结构变化、内部按钮、真实编辑器及失败原子性。系统输入回归在本机通过正常的 macOS 应用启动入口运行，保留真实窗口焦点条件；纯模型测试不依赖窗口焦点。
+`selection` 覆盖业务行选择与 Checkbox、原生选择、编辑提交及模型生命周期；`range` 覆盖唯一矩形的键盘／点击／拖动扩展、两轴边缘滚动与停帧、触点选择模式、系统菜单和快捷键复制、离屏语义、RTL、结构变化、内部按钮、真实编辑器及失败原子性。系统输入回归在本机通过正常的 macOS 应用启动入口运行，保留真实窗口焦点条件；纯模型测试不依赖窗口焦点。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

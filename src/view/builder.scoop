@@ -23,7 +23,8 @@ public class DataGridProps<Row> public constructor(
     public val rowSizing: GridRowSizing<Row> = GridRowSizing.Fixed,
     public val columnSpans: ((Row) -> Array<GridColumnSpan>)? = None,
     public val selectionCheckboxes: Boolean = true,
-    public val onCopyResult: (GridCopyResult) -> Unit = { _ -> Unit }
+    public val onCopyResult: (GridCopyResult) -> Unit = { _ -> Unit },
+    public val touchCellSelection: Boolean = false
 ) {
     init {
         gridRequire(height.isFinite() && height >= 0.0, "invalid grid height")
@@ -63,6 +64,7 @@ public class DataGridBuilder<Row> internal constructor() {
     public var columnSpans: ((Row) -> Array<GridColumnSpan>)? = None
     public var selectionCheckboxes: Boolean = true
     public var onCopyResult: (GridCopyResult) -> Unit = { _ -> Unit }
+    public var touchCellSelection: Boolean = false
     public var key: ViewKey = ViewKey.Position
     internal fun snapshot(state: DataGridState<Row>): DataGridProps<Row> =
         DataGridProps(
@@ -84,7 +86,8 @@ public class DataGridBuilder<Row> internal constructor() {
             rowSizing,
             columnSpans,
             selectionCheckboxes,
-            onCopyResult
+            onCopyResult,
+            touchCellSelection
         )
 }
 

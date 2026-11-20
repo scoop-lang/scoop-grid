@@ -11,6 +11,7 @@ coordinate = "scoop.grid.tests:range:0.1.0"
 kind = "library"
 dependencies = ["scoop:scoop.core:0.1.0"]
 test-dependencies = [
+    "scoop.tests:surface-native:0.1.0",
     "scoop.tests:ui-accessibility-native:0.1.0",
     "scoop.tests:window-native:0.1.0",
     "scoop:scoop.graphics:0.1.0",
@@ -29,6 +30,21 @@ test-dependencies = [
 [resolutions.nodes.source]
 kind = "path"
 path = "."
+
+[[resolutions.nodes]]
+coordinate = "scoop.tests:surface-native:0.1.0"
+kind = "library"
+dependencies = [
+    "scoop.tests:window-native:0.1.0",
+    "scoop:scoop.core:0.1.0",
+    "scoop:scoop.graphics:0.1.0",
+    "scoop:scoop.window:0.1.0",
+]
+test-dependencies = []
+
+[resolutions.nodes.source]
+kind = "path"
+path = "../../../scoop/sysroot/src/scoop.surface/test-native"
 
 [[resolutions.nodes]]
 coordinate = "scoop.tests:ui-accessibility-native:0.1.0"

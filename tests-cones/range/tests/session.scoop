@@ -6,6 +6,7 @@ import scoop.grid.*
 import scoop.platform.time.MonotonicTimeSource
 import scoop.test.*
 import scoop.tests.ui.accessibility.native.*
+import scoop.tests.surface.*
 import scoop.tests.window.*
 import scoop.time.Duration
 import scoop.ui.*
@@ -83,6 +84,14 @@ internal class RangeProbe: Closeable {
     val enabled = state(true)
     val direction = state(LayoutDirection.Ltr)
     val spans = state(false)
+    val touchSelection = state(false)
+    var dragRange: GridCellRange? = None
+    var dragScroll = Point(0.0, 0.0)
+    var dragClicks = 0
+    var frames: FrameProbe? = None
+    var idleDeadline: WindowDeadline? = None
+    var idlePass = 0
+    var idleFrames = 0L
     var editor: GridTextEditor<Long>? = None
     var pending: GridCommit<RangeRecord>? = None
     var pendingRows: TableRows<RangeRecord>? = None
@@ -177,6 +186,8 @@ internal class RangeProbe: Closeable {
                         }
                     )
                 window = Some(native)
+                frames = Some(observeFrames(native))
+                idleDeadline = Some(native.createDeadline { dragIdleTick() })
                 ui = host.attach(native, { scope -> RangeScene(this, scope) })
                 val menu = active.createMenu()
                 val edit = menu.insert(MenuItemDescription("Edit", kind = MenuItemKind.Submenu))
@@ -307,7 +318,7 @@ internal class RangeProbe: Closeable {
         }
         inputQueued()
     }
-    private fun inputQueued() {
+    fun inputQueued() {
         waitingInput = true
         // Native events are dispatched before the next owner mailbox batch.
         assertTrue(
@@ -348,7 +359,9 @@ internal class RangeProbe: Closeable {
         }
     }
     public override fun close() {
+        idleDeadline?.close()
         calls?.close()
+        frames?.close()
         for (node in held)
             node.close()
         held.clear()

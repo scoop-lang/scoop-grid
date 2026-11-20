@@ -31,6 +31,7 @@ internal class GridSession<Row>: GridMount {
     val editing = GridEditCoordinator<Row>(this)
     val columnActions = GridColumnActions<Row>(this)
     val columnReorder = GridColumnReorder<Row>(this)
+    val rangeDrag = GridRangeDrag<Row>(this)
     val columnSizing = GridColumnSizing<Row>(this)
     val headerSemantics = GridHeaderSemantics()
     val rowHeights = GridRowMeasurements<Row>()
@@ -42,6 +43,7 @@ internal class GridSession<Row>: GridMount {
     private var columnSpans: ((Row) -> Array<GridColumnSpan>)? = None
     private var reference: DataGridHandle? = None
     var enabled = true
+    var touchCellSelection = false
     private var intent: GridCellAddress? = None
     private var recent: GridColumnId? = None
     private val cells = HashMap<GridCellAddress, GridCellFocus>()
@@ -175,6 +177,7 @@ internal class GridSession<Row>: GridMount {
             rowHeights.accept(reading)
             columnActions.accept(plan, input)
             columnReorder.accept(plan, input, time)
+            rangeDrag.accept(plan, input, time)
             columnSizing.accept(plan, input, measured)
         }
     }
@@ -387,10 +390,12 @@ internal class GridSession<Row>: GridMount {
         columnSpans = input.input.columnSpans
         theme = Some(input.theme)
         enabled = input.input.enabled
+        touchCellSelection = input.input.touchCellSelection
         onPasteResult = input.input.onPasteResult
         onCopyResult = input.input.onCopyResult
         editing.update(input.input)
         columnReorder.update(input)
+        rangeDrag.update(input)
         columnSizing.update(input)
         val sameHandle =
             when ((reference, input.input.handle)) {
@@ -426,6 +431,7 @@ internal class GridSession<Row>: GridMount {
         rowHeights.close()
         columnSizing.close()
         columnReorder.close()
+        rangeDrag.close()
         columnActions.close()
         editing.close()
         reference?.unbind(this)

@@ -117,7 +117,10 @@ Element<GridRootLayout<Row>>(scope) {
         val session = props.value.session
         val input = props.value
         val time =
-            if (session.columnReorder.animating(plan, input))
+            if (
+                session.columnReorder.animating(plan, input) ||
+                    session.rangeDrag.animating(plan, input)
+            )
                 Some(context.time)
             else
                 None

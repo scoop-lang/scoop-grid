@@ -28,6 +28,7 @@ when = { os = "darwin" }
 "scoop.tests:ui-accessibility-native" = { version = "0.1.0", path = "../../../scoop/sysroot/src/scoop.ui/test-native" }
 
 "scoop.tests:window-native" = { version = "0.1.0", path = "../../../scoop/sysroot/src/scoop.window/test-native" }
+"scoop.tests:surface-native" = { version = "0.1.0", path = "../../../scoop/sysroot/src/scoop.surface/test-native" }
 
 [native]
 objc_flags = ["-Wall", "-Wextra", "-Werror"]

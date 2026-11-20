@@ -232,7 +232,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
         val table =
             column {
                 label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
-                label("Shift＋方向键或点击扩展选区，Command / Ctrl＋C 复制，Escape 清除选区")
+                label("拖动选择矩形，Shift＋方向键或点击扩展，Command / Ctrl＋C 复制，Escape 清除")
                 add(gridQuickFilter(model) { this.handle = Some(handle) })
                 row {
                     add(

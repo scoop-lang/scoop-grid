@@ -253,6 +253,11 @@ internal class GridCell<Row>(
             case Some(_) -> Some(GridHeaderDrag(scope, area, handle, { props.value.drag!! }))
             case None -> None
         }
+    private val cellDrag =
+        if (props.value.address != None)
+            Some(GridCellDrag(scope, area, handle, { props.value }))
+        else
+            None
     private val press =
         scope.press(area, PressOptions(acceptsEnter = props.value.address == None)) { activate() }
     private val starter =
@@ -357,6 +362,7 @@ internal class GridCell<Row>(
     }
     public override fun onUnmount() {
         headerDrag?.cancel()
+        cellDrag?.cancel()
         when (registered) {
             case Some(val address) -> props.value.session?.remove(address);
             case None -> {}
@@ -365,6 +371,7 @@ internal class GridCell<Row>(
     public override fun update(): UiInvalidation {
         val input = props.value
         headerDrag?.update()
+        cellDrag?.update()
         starter?.update(input.enabled && input.editable && !input.submitting) {
             state -> startInput(state)
         }

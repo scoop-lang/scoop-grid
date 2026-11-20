@@ -1,0 +1,100 @@
+package scoop.grid.tests.range
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.tests.window.*
+import scoop.time.Duration
+import scoop.ui.*
+
+internal fun RangeProbe.dragPress(x: Double, y: Double, shift: Boolean = false) {
+    pointer = Point(x, y)
+    assertTrue(moveSurfacePointer(window!!, x, y))
+    @Unsafe
+    {
+        assertEquals(0, nativeEditorPointer(view!!, x, y, true, 1, shift))
+    }
+    inputQueued()
+}
+
+internal fun RangeProbe.dragMove(x: Double, y: Double) {
+    pointer = Point(x, y)
+    assertTrue(moveSurfacePointer(window!!, x, y))
+    inputQueued()
+}
+
+internal fun RangeProbe.dragRelease() {
+    @Unsafe
+    {
+        assertEquals(0, nativeEditorPointer(view!!, pointer.x, pointer.y, false, 1, false))
+    }
+    inputQueued()
+}
+
+internal fun RangeProbe.contact(id: Long, phase: Int, x: Double, y: Double, pen: Boolean = false) {
+    @Unsafe
+    {
+        sendNativeContact(
+            view!!,
+            id,
+            if (pen)
+                1
+            else
+                0,
+            phase,
+            x,
+            y
+        )
+    }
+    inputQueued()
+}
+
+internal fun RangeProbe.resetDrag(large: Boolean = false, rtl: Boolean = false) {
+    direction.value =
+        if (rtl)
+            LayoutDirection.Rtl
+        else
+            LayoutDirection.Ltr
+    selected.value =
+        if (large)
+            DataGridState(
+                RangeRows(this),
+                rangeColumns(this),
+                pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(99999999L)])
+            )
+        else
+            small()
+    model.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))
+    model.setColumnState(GridColumnState(GridColumnId("c79"), pin = GridPin.End))
+    scroll.scrollTo(
+        Point(
+            if (rtl)
+                1000000.0
+            else
+                0.0,
+            0.0
+        )
+    )
+}
+
+internal fun RangeProbe.beginDragIdle() {
+    waiting = true
+    idlePass = 0
+    idleDeadline!!.schedule(MonotonicTimeSource.now() + Duration.milliseconds(250L))
+}
+
+internal fun RangeProbe.dragIdleTick() {
+    assertEquals(83, phase)
+    val snapshot = frames!!.snapshot()
+    assertFalse(snapshot.required, Some("range dragging must stop requesting frames"))
+    if (idlePass == 0) {
+        idleFrames = snapshot.presentations
+        idlePass = 1
+        idleDeadline!!.schedule(MonotonicTimeSource.now() + Duration.milliseconds(100L))
+    } else {
+        assertEquals(idleFrames, snapshot.presentations, Some("static selection must stop drawing"))
+        completed(phase, 1)
+    }
+}

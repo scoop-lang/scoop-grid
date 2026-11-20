@@ -1,0 +1,266 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.max
+import scoop.math.min
+import scoop.platform.time.MonotonicInstant
+import scoop.ui.*
+import scoop.ui.component.TableSource
+
+internal class GridRangeMove<Row>(
+    val model: DataGridState<Row>,
+    val source: TableSource<Row>,
+    val columns: GridColumnsPlan<Row>,
+    val origin: GridCellAddress,
+    val anchor: GridCellAddress,
+    val scroll: ScrollState,
+    val input: DataGridProps<Row>,
+    val stop: () -> Unit,
+    var expected: GridCellRange?
+) {
+    var point: Point? = None
+    var time: MonotonicInstant? = None
+}
+
+private class GridRangeLayout<Row>(val plan: GridMeasurePlan, val input: GridRootProps<Row>)
+
+/** Keeps one claimed gesture and its accepted geometry, never the selected cell views. */
+internal class GridRangeDrag<Row>(private val session: GridSession<Row>): Closeable {
+    private var active: GridRangeMove<Row>? = None
+    private var accepted: GridRangeLayout<Row>? = None
+
+    private fun valid(move: GridRangeMove<Row>, input: GridRootProps<Row>): Boolean =
+        session.active &&
+            session.inputEnabled &&
+            input.input.enabled &&
+            session.editingCell ==
+            None &&
+            session.usesModel(move.model) &&
+            input.input.state ===
+            move.model &&
+            input.rows.source ===
+            move.source &&
+            move.model.result.rows ===
+            move.source &&
+            input.columns ===
+            move.columns &&
+            move.model.columns ===
+            move.columns.definitions &&
+            move.model.columnState ===
+            move.columns.states &&
+            input.scroll ===
+            move.scroll &&
+            input.input.rowHeight ==
+            move.input.rowHeight &&
+            input.input.headerHeight ==
+            move.input.headerHeight &&
+            input.input.touchCellSelection ==
+            move.input.touchCellSelection &&
+            gridSameRowSizing(input.input.rowSizing, move.input.rowSizing) &&
+            gridSameColumnSpans(input.input.columnSpans, move.input.columnSpans) &&
+            move.model.cellRange ==
+            move.expected
+
+    fun update(input: GridRootProps<Row>) {
+        when (active) {
+            case Some(val move) -> if (!valid(move, input))
+                cancel(move)
+            case None -> {}
+        }
+    }
+
+    fun begin(
+        origin: GridCellAddress,
+        anchor: GridCellAddress?,
+        point: Point,
+        stop: () -> Unit
+    ): GridRangeMove<Row>? {
+        cancelCurrent()
+        val layout = accepted ?: return None
+        if (!session.active || !session.inputEnabled || !layout.input.input.enabled)
+            return None
+        val model = layout.input.input.state
+        val source = layout.input.rows.source
+        val columns = layout.input.columns
+        when (session.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return None
+        }
+        val move =
+            GridRangeMove(
+                model,
+                source,
+                columns,
+                origin,
+                anchor ?: origin,
+                layout.input.scroll,
+                layout.input.input,
+                stop,
+                model.cellRange
+            )
+        if (
+            !valid(move, layout.input) ||
+                source.indexOfKey(origin.row) ==
+                None ||
+                columns.indexOf(origin.column) ==
+                None
+        )
+            return None
+        active = Some(move)
+        position(move, point)
+        return if (owns(move))
+            Some(move)
+        else
+            None
+    }
+
+    fun position(move: GridRangeMove<Row>, local: Point) {
+        if (!owns(move))
+            return
+        val layout = accepted ?: return cancel(move)
+        if (!valid(move, layout.input))
+            return cancel(move)
+        val row = move.source.indexOfKey(move.origin.row) ?: return cancel(move)
+        val column = move.columns.indexOf(move.origin.column) ?: return cancel(move)
+        val plan = layout.plan
+        val offset = plan.scroll.presentationOffset
+        val columnBox = plan.columns.box(column, offset.x, plan.rows.index.extent(row))
+        val rowBox = plan.bands.box(row, offset.y, plan.rows.index.extent(row))
+        move.point = Some(Point(columnBox.x - offset.x + local.x, rowBox.y + local.y))
+        extend(move, layout)
+        session.requestFrame()
+    }
+
+    private fun extend(move: GridRangeMove<Row>, layout: GridRangeLayout<Row>) {
+        val point = move.point ?: return
+        val plan = layout.plan
+        val hit =
+            gridRangeHit(plan.columns, plan.bands, plan.scroll.presentationOffset, point) ?: return
+        val column =
+            when (layout.input.rows.columnSpans) {
+                case Some(_) -> layout.input.rows.spansFor(move.source.rowAt(hit.row)).span(
+                    hit.column
+                ).column
+                case None -> hit.column
+            }
+        val target = GridCellAddress(move.source.keyAt(hit.row), move.columns.columns[column].id)
+        val next = Some(GridCellRange(move.anchor, target))
+        if (next == move.expected)
+            return
+        if (move.model.setCellRange(next))
+            move.expected = move.model.cellRange
+        else
+            cancel(move)
+    }
+
+    fun finish(move: GridRangeMove<Row>, local: Point) {
+        position(move, local)
+        if (!owns(move))
+            return
+        active = None
+        when (move.expected) {
+            case Some(val range) -> session.requestCell(range.end)
+            case None -> {}
+        }
+    }
+
+    private fun speed(plan: GridMeasurePlan, input: GridRootProps<Row>): Point {
+        val move = active ?: return Point(0.0, 0.0)
+        val point = move.point ?: return Point(0.0, 0.0)
+        if (!valid(move, input))
+            return Point(0.0, 0.0)
+        return gridRangeSpeed(
+            plan.columns,
+            plan.bands,
+            point,
+            move.columns.appearance.density,
+            plan.scroll.snapshot.offset,
+            plan.scroll.snapshot.maximum
+        )
+    }
+
+    fun animating(plan: GridMeasurePlan, input: GridRootProps<Row>): Boolean =
+        speed(plan, input) != Point(0.0, 0.0)
+
+    fun accept(plan: GridMeasurePlan, input: GridRootProps<Row>, time: MonotonicInstant?) {
+        if (
+            input.rows.source !==
+                input.input.state.result.rows ||
+                input.columns.definitions !==
+                input.input.state.columns ||
+                input.columns.states !==
+                input.input.state.columnState
+        )
+            return
+        val layout = GridRangeLayout(plan, input)
+        accepted = Some(layout)
+        val move = active ?: return
+        if (
+            !valid(move, input) ||
+                !session.windowHasFocus() ||
+                plan.columns.viewport <=
+                0.0 ||
+                plan.bands.available <=
+                0.0
+        )
+            return cancel(move)
+        extend(move, layout)
+        if (!owns(move))
+            return
+        val previous = move.time
+        move.time = time
+        val velocity = speed(plan, input)
+        if (velocity == Point(0.0, 0.0))
+            return
+        val now = time ?: return
+        when (previous) {
+            case Some(val instant) -> {
+                val elapsed = now - instant
+                val seconds =
+                    min(
+                        0.05,
+                        max(
+                            0.0,
+                            elapsed.floorSeconds.toDouble() +
+                                elapsed.nanosecondsOfSecond.toDouble() /
+                                1000000000.0
+                        )
+                    )
+                if (seconds > 0.0)
+                    move.scroll.scrollBy(
+                        Point(velocity.x * seconds, velocity.y * seconds),
+                        ScrollOrigin.User
+                    )
+            }
+            case None -> {}
+        }
+        session.requestFrame()
+    }
+
+    private fun owns(move: GridRangeMove<Row>): Boolean =
+        when (active) {
+            case Some(val value) -> value === move
+            case None -> false
+        }
+
+    fun cancel(move: GridRangeMove<Row>) {
+        if (!owns(move))
+            return
+        active = None
+        move.stop()
+        session.requestFrame()
+    }
+
+    private fun cancelCurrent() {
+        when (active) {
+            case Some(val move) -> cancel(move)
+            case None -> {}
+        }
+    }
+
+    public override fun close() {
+        cancelCurrent()
+        accepted = None
+    }
+}
