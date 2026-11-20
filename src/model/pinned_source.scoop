@@ -35,7 +35,7 @@ internal fun <Row> gridPinResult(
     return GridResult(rows, page, ordered, total, pages, top.count, bottom.count)
 }
 
-private class GridPickedRows<Row>(
+internal class GridPickedRows<Row>(
     private val source: TableSource<Row>,
     keys: Array<ViewKey>
 ): TableSource<Row> {

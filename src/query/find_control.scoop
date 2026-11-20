@@ -1,0 +1,174 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.text.TextEditorState
+import scoop.ui.component.input as findInput
+import scoop.ui.component.button as findButton
+import scoop.ui.component.row as findRow
+import scoop.ui.component.label as findLabel
+
+public class GridFindLabels public constructor(
+    public val input: String = "查找单元格",
+    public val previous: String = "上一项",
+    public val next: String = "下一项",
+    public val notFound: String = "未找到匹配单元格",
+    public val found: (GridFindMatch) -> String =
+        {
+            match -> if (match.wrapped)
+                "已从边界继续查找"
+            else
+                "已定位匹配单元格"
+        }
+)
+
+public class GridFindProps public constructor(
+    public val handle: DataGridHandle,
+    public val enabled: Boolean = true,
+    public val matchCase: Boolean = false,
+    public val wrap: Boolean = true,
+    public val labels: GridFindLabels = GridFindLabels(),
+    public val fonts: FontCollection? = None,
+    public val theme: ThemeSource? = None,
+    public val focus: FocusOptions = FocusOptions(),
+    public val onResult: (GridFindResult) -> Unit = { _ -> Unit }
+)
+
+public class GridFind public constructor(
+    private val props: Props<GridFindProps>,
+    scope: ComponentScope
+): Component(scope) {
+    private val draft = TextEditorState()
+    private val message = state("")
+    private var handle = props.value.handle
+    private var applied = ""
+    private var after: GridCellAddress? = None
+    private var ambient: ThemeSource? = None
+    public override fun onMount() {
+        when (props.value.theme) {
+            case None -> ambient = Some(currentThemeSource())
+            case Some(_) -> {}
+        }
+    }
+    private fun find(backwards: Boolean) {
+        val input = props.value
+        if (!scope.isMounted || !input.enabled || draft.isComposing)
+            return
+        val text = draft.committedText
+        if (text == "")
+            return
+        val origin =
+            if (applied == text)
+                after
+            else
+                None
+        val result = input.handle.findCell(text, origin, backwards, input.matchCase, input.wrap)
+        if (!scope.isMounted || props.value.handle !== input.handle)
+            return
+        when (result) {
+            case Found(val match) -> {
+                after = Some(match.address)
+                applied = text
+                message.value = input.labels.found(match)
+            }
+            case NotFound -> message.value = input.labels.notFound
+            case Rejected(val reason) -> message.value = reason
+        }
+        input.onResult(result)
+    }
+    public override fun render(): View {
+        val input = props.value
+        if (handle !== input.handle) {
+            handle = input.handle
+            applied = ""
+            after = None
+        }
+        val source = input.theme ?: (ambient ?: currentThemeSource())
+        val density = source.read(scope).tokens.typography.body.fontSize / 14.0
+        val editor = draft
+        val status = message.value
+        val available =
+            input.enabled &&
+                input.handle.isAttached &&
+                !input.handle.isSubmitting &&
+                !draft.isComposing &&
+                draft.committedText !=
+                ""
+        return column {
+            add(
+                findRow {
+                    item(
+                        findInput(editor) {
+                            enabled = input.enabled
+                            fonts = input.fonts
+                            theme = input.theme
+                            focus = input.focus
+                            placeholder = input.labels.input
+                            semantics =
+                                ComponentSemantics(
+                                    name = Some(input.labels.input),
+                                    automationId = Some("grid-find-input")
+                                )
+                            onSubmit = { _ -> this @GridFind.find(false) }
+                        }
+                    ) { grow = 1.0 }
+                    add(
+                        findButton(input.labels.previous, { this @GridFind.find(true) }) {
+                            enabled = available
+                            fonts = input.fonts
+                            theme = input.theme
+                            variant = ButtonVariant.Outline
+                            semantics =
+                                ComponentSemantics(automationId = Some("grid-find-previous"))
+                        }
+                    )
+                    add(
+                        findButton(input.labels.next, { this @GridFind.find(false) }) {
+                            enabled = available
+                            fonts = input.fonts
+                            theme = input.theme
+                            semantics = ComponentSemantics(automationId = Some("grid-find-next"))
+                        }
+                    )
+                    spacing = 8.0 * density
+                    alignment = CrossAlignment.Center
+                }
+            )
+            if (status != "")
+                add(
+                    findLabel(status) {
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = ComponentSemantics(automationId = Some("grid-find-status"))
+                    }
+                )
+            spacing = 4.0 * density
+        }
+    }
+}
+
+public class GridFindBuilder internal constructor() {
+    public var enabled: Boolean = true
+    public var matchCase: Boolean = false
+    public var wrap: Boolean = true
+    public var labels: GridFindLabels = GridFindLabels()
+    public var fonts: FontCollection? = None
+    public var theme: ThemeSource? = None
+    public var focus: FocusOptions = FocusOptions()
+    public var onResult: (GridFindResult) -> Unit = { _ -> Unit }
+    public var key: ViewKey = ViewKey.Position
+    internal fun snapshot(handle: DataGridHandle): GridFindProps =
+        GridFindProps(handle, enabled, matchCase, wrap, labels, fonts, theme, focus, onResult)
+}
+
+public fun gridFind(handle: DataGridHandle, configure: GridFindBuilder.() -> Unit = {}): View {
+    val builder = GridFindBuilder()
+    builder.configure()
+    return component(
+        builder.snapshot(handle),
+        { props, scope -> GridFind(props, scope) },
+        builder.key
+    )
+}

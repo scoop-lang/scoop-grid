@@ -116,11 +116,25 @@
 
 落点以最近 Accepted 布局、当前横向滚动和表头实际区域计算，RTL 镜像物理位置。中心区拖动接近水平边缘时沿既有 ScrollState 与帧时钟自动滚动，离开边缘、结束拖动或抵达边界后停帧；冻结区不驱动中心滚动。跨冻结区或移出表头释放视为取消，冻结仍由列工具显式操作。Escape、焦点离开、禁用、模型／列快照／主题布局配置改变或卸载取消现有拖动，不回写开始时的列状态，不覆盖应用更新。普通行数据更新不取消列重排。键盘及无障碍用户通过列工具的前移／后移按钮执行相同列操作。
 
+## 查找定位
+
+`model.findCell(text, after = None, backwards = false, matchCase = false, wrap = true)` 返回 `GridFindMatch(address, wrapped)` 或 None。它在动作开始时捕获当前 Top／Body／Bottom 结果和可见逻辑列序，逐行读取允许导出列的数据文字，不创建 View、不改变查询或选择。纯操作列和不可导出列不参与；跨列显示仍按底层逻辑格的数据文字匹配。空查找文字直接返回 None。默认忽略 ASCII 大小写，其余 Unicode 按原文匹配；`matchCase = true` 使用原文子串匹配，不使用正则或额外搜索索引。
+
+有效 `after` 从其后一个／前一个格开始；没有有效起点时从首格／末格开始。`wrap` 允许到达边界后继续，并通过 `wrapped` 标明命中跨越了边界；每格最多检查一次。查询顺序是逻辑列序，RTL 不反转；查找只覆盖当前可呈现结果，不能由查找隐式翻页或获取远端数据。返回值属于捕获的结果快照，模型层不承诺外部同时发布的数据仍含该地址。
+
+`handle.findCell(...)` 使用相同参数和起点规则，返回 `GridFindResult.Found(match)`、`NotFound` 或 `Rejected(message)`；从活动格继续时传 `after = handle.focusedCell`。它先通过单格编辑门控，确认扫描期间模型、结果和列未改变，再清除矩形并经现有按 key 路径显露／聚焦目标。Found 表示定位请求已接受，实际焦点仍等待 Accepted；跨列目标归一到真实锚格。未命中、禁用、组合输入、非法草稿、等待保存和扫描失败不改变现有范围，也不重放旧操作。
+
+`gridFind(handle) { ... }` 提供输入、上一项／下一项按钮和结果提示；Enter 查找下一项，连续操作记住上一次匹配地址，修改文字重新从边界查找。草稿不改变查询。`matchCase`、`wrap`、`labels`、字体／主题／焦点和 `onResult` 可配置，组合输入期间不提交查找；应用负责该组合控件的位置。
+
 ## 文本导出与单格粘贴解析
 
 `gridCsv(rows, columns, includeHeaders = true)` 输出 CSV 字符串，使用逗号、CRLF、标准双引号转义，每条记录以 CRLF 结束。`gridTsv(rows, columns)` 输出适合矩形复制的制表符分隔文本，行间使用 LF，不额外增加末行换行。调用者明确提供数据范围及列顺序；当前呈现含固定行使用 `model.result.rows`，原始查询本页使用 `model.result.pageRows`，全部筛选结果使用 `model.result.ordered`。函数不取数、不持有文件或剪贴板、不创建 View，也不建立额外的单元格矩阵。
 
 不允许导出的列被省略；全部列均不可导出时报告错误。可导出列必须提供数据文字，缺值由该列正常格式化。逗号／制表符、双引号、CR 和 LF 按对应格式加引号。不存在公式解析或导出为 Excel 公式的特殊分支。
+
+`model.exportCsv(GridCsvOptions(...))` 在同一个快照中解析范围和列，然后复用 `gridCsv`。`scope` 缺省 `GridExportScope.CurrentPage`，包含当前呈现页；`AllFiltered` 包含全部筛选／排序结果；`SelectedRows` 按已选 key 的保存顺序读取完整本地来源，包含其他页和暂被筛选隐藏的已选记录。只解析选中 key，不扫描完整来源收集选择。
+
+缺省 `includePinnedRows = true`：页和全部结果按 Top／Body／Bottom 导出，同一业务 key 只出现一次；已选范围只含实际选中的记录，不额外加入固定记录。设为 false 时排除当前配置的固定行。`includeHiddenColumns = false` 缺省仅含可见列，列序按当前逻辑 Start／普通／End 排列；可用 `columns = Some(ids)` 指定唯一列序，未知或重复 ID 拒绝，隐藏列仍服从显式包含选项，不可导出列始终排除。`includeHeaders` 缺省 true。应用持有输出文字并选择写入位置；格式化失败不返回半份 CSV，不执行文件或剪贴板写入。
 
 `parseGridCellPaste(text)` 返回 `GridCellPaste.Value` 或带原因的 `Rejected`。允许标准引用字段、字段内部换行、转义双引号，以及一个可选的末行换行；多字段、多记录均拒绝，不截取首格。结束引号后的杂字符及未闭合引号也拒绝。该解析器供网格浏览模式使用，文本编辑器内的原生粘贴不调用它。
 

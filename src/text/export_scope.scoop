@@ -1,0 +1,87 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+public enum GridExportScope {
+    CurrentPage, SelectedRows, AllFiltered
+}
+
+public class GridCsvOptions public constructor(
+    public val scope: GridExportScope = GridExportScope.CurrentPage,
+    public val includeHeaders: Boolean = true,
+    public val includeHiddenColumns: Boolean = false,
+    public val includePinnedRows: Boolean = true,
+    public val columns: Array<GridColumnId>? = None
+)
+
+internal fun <Row> gridExportCsv(
+    snapshot: GridComputed<Row>,
+    states: Array<GridColumnState>,
+    selection: GridSelectedRows,
+    options: GridCsvOptions
+): String {
+    val columns = ArrayList<GridColumn<Row>>()
+    val ordered = gridOrderedColumnStates(states)
+    when (options.columns) {
+        case Some(val ids) -> {
+            val lookup = HashMap<GridColumnId, GridColumnState>()
+            for (entry in ordered)
+                lookup.put(entry.id, entry)
+            val seen = HashSet<GridColumnId>()
+            for (id in ids) {
+                gridRequire(seen.add(id), "duplicate export column")
+                val entry =
+                    lookup[id] ?:
+                        throw IllegalArgumentException(Some(f"unknown export column: ${id.value}"))
+                if (entry.visible || options.includeHiddenColumns)
+                    columns.add(snapshot.columns.get(id))
+            }
+        }
+        case None -> for (entry in ordered)
+            if (entry.visible || options.includeHiddenColumns)
+                columns.add(snapshot.columns.get(entry.id))
+    }
+    return gridCsv(
+        gridExportRows(snapshot, selection, options),
+        columns.toArray(),
+        options.includeHeaders
+    )
+}
+
+private fun <Row> gridExportRows(
+    snapshot: GridComputed<Row>,
+    selection: GridSelectedRows,
+    options: GridCsvOptions
+): TableSource<Row> {
+    val result =
+        when (options.scope) {
+            case CurrentPage -> snapshot.result
+            case AllFiltered -> gridPinResult(
+                snapshot.result.ordered,
+                snapshot.result.ordered,
+                snapshot.result.totalRows,
+                1L,
+                snapshot.pins
+            )
+            case SelectedRows -> {
+                if (options.includePinnedRows)
+                    return GridPickedRows(snapshot.source, selection.keys)
+                val pinned = HashSet<ViewKey>()
+                for (keys in [snapshot.pins.top, snapshot.pins.bottom])
+                    for (key in keys)
+                        pinned.add(key)
+                val keys = ArrayList<ViewKey>()
+                for (key in selection.keys)
+                    if (!pinned.contains(key))
+                        keys.add(key)
+                return GridPickedRows(snapshot.source, keys.toArray())
+            }
+        }
+    return if (options.includePinnedRows)
+        result.rows
+    else
+        GridPageRows(result.rows, result.topCount, result.bodyCount)
+}

@@ -26,11 +26,19 @@ internal fun RangeProbe.accepted() {
         assertTrue(handle.focusCell(rangeAddress(2L, 1L)))
     waiting = true
     retry = false
+    if (phase >= 123) {
+        postFind()
+        return
+    }
     calls!!.post(root!!, phase, 20)
 }
 
 internal fun RangeProbe.inspect(tag: Int) {
     assertEquals(phase, tag)
+    if (phase >= 123) {
+        inspectFind()
+        return
+    }
     if (phase >= 43) {
         inspectDrag()
         return
@@ -224,6 +232,10 @@ internal fun RangeProbe.completed(tag: Int, result: Int) {
         return
     }
     phase += 1
+    if (phase >= 123) {
+        advanceFind()
+        return
+    }
     if (phase >= 43) {
         advanceDrag()
         return

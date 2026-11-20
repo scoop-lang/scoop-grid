@@ -254,6 +254,27 @@ public class DataGridState<Row> public constructor(
         return Some(gridCopyText(snapshot.result.rows, columns, bounds, includeHeaders))
     }
     public val query: GridQuery get() = computed.value.query
+    public fun findCell(
+        text: String,
+        after: GridCellAddress? = None,
+        backwards: Boolean = false,
+        matchCase: Boolean = false,
+        wrap: Boolean = true
+    ): GridFindMatch? {
+        val snapshot = computed.value
+        return gridFindCell(
+            snapshot.result.rows,
+            snapshot.columns,
+            columnState,
+            text,
+            after,
+            backwards,
+            matchCase,
+            wrap
+        )
+    }
+    public fun exportCsv(options: GridCsvOptions = GridCsvOptions()): String =
+        gridExportCsv(computed.value, columnState, selectedRows, options)
     public val result: GridResult<Row> get() = computed.value.result
     public val pinnedRows: GridPinnedRows get() = computed.value.pins
     public val columns: Array<GridColumn<Row>> get() = computed.value.columns.values

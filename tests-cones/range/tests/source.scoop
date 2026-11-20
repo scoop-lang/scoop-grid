@@ -86,6 +86,9 @@ internal fun rangeColumns(probe: RangeProbe): Array<GridColumn<RangeRecord>> =
                     f"Column ${index}",
                     {
                         row ->
+                        val callback = probe.onTextRead
+                        probe.onTextRead = None
+                        callback?.invoke()
                         if (probe.failCopy)
                             throw IllegalStateException(Some("copy formatting failed"))
                         f"R${row.value}C${index}"

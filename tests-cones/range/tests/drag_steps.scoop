@@ -110,19 +110,6 @@ internal fun RangeProbe.advanceDrag() {
         case 120 -> dragRelease()
         case 121 -> dragPress(180.0, 112.0)
         case 122 -> dragMove(420.0, 176.0)
-        case 123 -> {
-            ui!!.close()
-            assertFalse(handle.clearCellRange())
-            rejected(handle.copyCells())
-            waiting = true
-            calls!!.post(root!!, phase, 20)
-            return
-        }
-        case 124 -> {
-            finished = true;
-            application!!.requestExit();
-            return
-        }
         else -> fail(Some("unexpected drag action"))
     }
     frame!!.requestFrame()
@@ -219,10 +206,6 @@ internal fun RangeProbe.inspectDrag() {
         case 119 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
         case 120 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
         case 122 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
-        case 123 -> {
-            assertFalse(handle.isAttached)
-            assertFalse(node!!.flag(0))
-        }
         else -> {}
     }
 }

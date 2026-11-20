@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行单选／多选、单矩形键盘／点击／拖动选择与系统复制、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。其余配套操作与分析功能继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行单选／多选、单矩形键盘／点击／拖动选择与系统复制、查找定位、明确范围的 CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。其余配套操作与分析功能继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -28,7 +28,7 @@ fun main() {
         ])
     ]))
     model.setQuery(GridQuery([GridSort(GridColumnId("price"))]))
-    println(gridCsv(model.result.rows, model.columns))
+    println(model.exportCsv())
 }
 ```
 
@@ -59,6 +59,12 @@ scoop test --release .
 点击表头在升序、降序和无排序之间切换。默认按住 Shift 追加或调整多列排序，表头同时显示方向和优先级；可用 `multiSortModifier = GridMultiSortModifier.Primary` 改为平台主修饰键。真实表头焦点下的 Enter／Space 使用同一规则，并先处理当前编辑会话。
 
 可在网格上方组合 `gridQuickFilter(model) { handle = Some(handle) }`，按 Enter 或“应用”提交快速筛选，输入草稿期间不执行查询；`gridPager(model) { handle = Some(handle) }` 提供结果条数、页大小和翻页。“全部”取消分页，仍使用同一个虚拟网格。两个控件通过同一 handle 检查单元格编辑，非法草稿或等待保存时不改变查询。`pageSizes` 可配置允许选择的正整数，外部当前值也会正确显示。
+
+`gridFind(handle) { ... }` 提供真实查找输入框、上一项／下一项和结果提示，Enter 查找下一项。它在当前呈现结果与可见逻辑列的数据文字中定位，不改变筛选／排序／分页。默认忽略 ASCII 大小写，Unicode 原文保留；可配置 `matchCase`、`wrap`、`labels`、字体／主题／焦点与 `onResult`。连续操作从上次匹配继续，修改文字重新开始；组合输入期间不提交查找。未命中或编辑校验拒绝时保留原范围，成功时清除矩形并显露匹配格。
+
+只读取模型时调用 `model.findCell(text, after, backwards, matchCase, wrap)`，返回包含地址与是否循环的 `GridFindMatch` 或 None；它不创建 View。`handle.findCell(...)` 返回 `Found`／`NotFound`／`Rejected`，通过当前编辑门控后使用既有按 key 定位；Found 表示请求接受，实际焦点等布局呈现后到达。扫描期间应用更新结果时拒绝旧定位。
+
+`model.exportCsv(GridCsvOptions(...))` 默认导出当前呈现页、可见逻辑列与表头，固定记录按 key 去重。`scope` 可选 `CurrentPage`、`AllFiltered` 或 `SelectedRows`；已选记录按选择 key 的保存顺序读取完整本地来源，包含其他页和暂被筛选隐藏的选择。`includePinnedRows = false` 排除固定记录，`includeHiddenColumns = true` 包含隐藏列，`columns = Some(ids)` 指定列序；纯操作列与不可导出列始终省略。整个动作读取同一快照，只返回 CSV 文字，由应用决定文件或剪贴板去向。[十万行示例](examples/basic/src/main.scoop) 提供当前页／已选 CSV 的复制按钮。
 
 `gridFilterPanel(model) { handle = Some(handle) }` 编辑文本、整数、数值、日期、布尔和集合条件，可嵌套 AND／OR 组。修改草稿后点击“应用筛选”才更新查询；“还原草稿”恢复当前模型条件，“清除筛选”移除条件并保留排序与快速筛选。整数保留完整 Long 精度，日期复用现有 DatePicker；非法输入和反向区间保留原文供修正。通过同一 handle 处理当前单元格的校验和异步提交，等待保存后不会自动重放先前被拒绝的筛选动作。
 
@@ -145,7 +151,7 @@ scoop test --release tests-cones/range
 
 `spans` 覆盖跨列锚点与导航、远端原生定位、规则变化、只读编辑限制，以及固定行列、自动行高、内容测宽、多级表头和零宽成员的组合。
 
-`selection` 覆盖业务行选择与 Checkbox、原生选择、编辑提交及模型生命周期；`range` 覆盖唯一矩形的键盘／点击／拖动扩展、两轴边缘滚动与停帧、触点选择模式、系统菜单和快捷键复制、离屏语义、RTL、结构变化、内部按钮、真实编辑器及失败原子性。系统输入回归在本机通过正常的 macOS 应用启动入口运行，保留真实窗口焦点条件；纯模型测试不依赖窗口焦点。
+`selection` 覆盖业务行选择与 Checkbox、原生选择、编辑提交及模型生命周期；`range` 覆盖唯一矩形的键盘／点击／拖动扩展、两轴边缘滚动与停帧、触点选择模式、系统菜单和快捷键复制、离屏语义、RTL、结构变化、内部按钮、真实编辑器、查找控件／循环／离屏定位／组合输入及失败原子性。系统输入回归在本机通过正常的 macOS 应用启动入口运行，保留真实窗口焦点条件；纯模型测试不依赖窗口焦点。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

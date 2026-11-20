@@ -80,6 +80,17 @@ public class DataGridHandle public constructor() {
         guard.checkMutation()
         return target?.copyCells(fallback, includeHeaders) ?: GridCopyResult.Rejected("网格未挂载")
     }
+    public fun findCell(
+        text: String,
+        after: GridCellAddress? = None,
+        backwards: Boolean = false,
+        matchCase: Boolean = false,
+        wrap: Boolean = true
+    ): GridFindResult {
+        guard.checkMutation()
+        return target?.findCell(text, after, backwards, matchCase, wrap) ?:
+            GridFindResult.Rejected("网格未挂载")
+    }
     public fun beginEdit(address: GridCellAddress): Boolean {
         guard.checkMutation()
         gridRequire(address.row != ViewKey.Position, "grid editing requires an explicit row key")
@@ -194,6 +205,13 @@ internal interface GridMount {
     fun pasteCell(address: GridCellAddress, text: String): GridPasteResult
     fun setCellRange(value: GridCellRange?): Boolean
     fun copyCells(fallback: GridCellAddress?, includeHeaders: Boolean): GridCopyResult
+    fun findCell(
+        text: String,
+        after: GridCellAddress?,
+        backwards: Boolean,
+        matchCase: Boolean,
+        wrap: Boolean
+    ): GridFindResult
     fun setColumnState(value: GridColumnState): GridColumnActionResult
     fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult
     fun moveColumnGroup(id: GridColumnGroupId, index: Long): GridColumnActionResult

@@ -67,6 +67,35 @@ private class GridExample(scope: ComponentScope): Component(scope) {
     private val lastEdit = state("名称与金额可编辑")
     private val tool = state<String?>(Some("filters"))
     private val mergeDescriptions = state(true)
+    private fun copyCsv(selected: Boolean) {
+        when (handle.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> {
+                lastEdit.value = "请先完成当前单元格的编辑或保存";
+                return
+            }
+        }
+        try {
+            val text =
+                model.exportCsv(
+                    GridCsvOptions(
+                        if (selected)
+                            GridExportScope.SelectedRows
+                        else
+                            GridExportScope.CurrentPage
+                    )
+                )
+            scope.nativeWindow.clipboard.writeText(text)
+            lastEdit.value =
+                if (selected)
+                    "已复制所选记录 CSV"
+                else
+                    "已复制当前页 CSV（含固定行）"
+        } catch (error: Exception) {
+            lastEdit.value = error.message ?: "无法生成 CSV"
+        }
+    }
     private fun toggleSpans() {
         when (handle.commitEdit()) {
             case NoEdit -> mergeDescriptions.value = !mergeDescriptions.value
@@ -234,6 +263,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
                 label("拖动选择矩形，Shift＋方向键或点击扩展，Command / Ctrl＋C 复制，Escape 清除")
                 add(gridQuickFilter(model) { this.handle = Some(handle) })
+                add(gridFind(handle))
                 row {
                     add(
                         gridPinButton(
@@ -273,7 +303,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 )
                 add(
                     dataGrid(model) {
-                        height = 480.0
+                        height = 420.0
                         rowHeight = 48.0
                         rowSizing = GridRowSizing.Content([GridColumnId("name")])
                         columnSpans =
@@ -348,6 +378,12 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                                         lastEdit.value = "已清除单元格选区"
                                 }
                         ) { enabled = model.cellRange != None }
+                    )
+                    add(gridPinButton("复制本页 CSV", { example.copyCsv(false) }))
+                    add(
+                        gridPinButton("复制已选 CSV", { example.copyCsv(true) }) {
+                            enabled = model.selectedRowKeys.size > 0L
+                        }
                     )
                 }
                 label(handle.editError ?: lastEdit.value)

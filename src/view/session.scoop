@@ -111,6 +111,56 @@ internal class GridSession<Row>: GridMount {
             case Some(val current) -> current === value
             case None -> false
         }
+    public override fun findCell(
+        text: String,
+        after: GridCellAddress?,
+        backwards: Boolean,
+        matchCase: Boolean,
+        wrap: Boolean
+    ): GridFindResult {
+        if (!active || !enabled || !inputEnabled)
+            return GridFindResult.Rejected("网格未挂载或已禁用")
+        val current = model ?: return GridFindResult.Rejected("网格未挂载")
+        if (text == "")
+            return GridFindResult.NotFound
+        when (commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return GridFindResult.Rejected("请先完成当前单元格的编辑或保存")
+        }
+        if (!active || !enabled || !inputEnabled || !usesModel(current))
+            return GridFindResult.Rejected("网格已更新，请重新查找")
+        val rows = current.result
+        val definitions = current.columns
+        val states = current.columnState
+        return try {
+            val found = current.findCell(text, after, backwards, matchCase, wrap)
+            if (
+                !active ||
+                    !enabled ||
+                    !inputEnabled ||
+                    !usesModel(current) ||
+                    current.result !==
+                    rows ||
+                    current.columns !==
+                    definitions ||
+                    current.columnState !==
+                    states
+            )
+                return GridFindResult.Rejected("查找期间结果已更新，请重试")
+            when (found) {
+                case Some(val match) -> {
+                    if (!requestCell(match.address))
+                        return GridFindResult.Rejected("无法定位匹配单元格")
+                    current.clearCellRange()
+                    GridFindResult.Found(match)
+                }
+                case None -> GridFindResult.NotFound
+            }
+        } catch (error: Exception) {
+            GridFindResult.Rejected(error.message ?: "无法读取查找内容")
+        }
+    }
     val rowSelectionEnabled: Boolean get() =
         when (model) {
             case Some(val value) -> value.rowSelection != GridRowSelectionMode.Disabled
