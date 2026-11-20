@@ -56,7 +56,7 @@ private fun <Row> gridDelimited(
     return output.toString()
 }
 
-private fun appendGridField(output: StringBuilder, text: String, delimiter: Char) {
+internal fun appendGridField(output: StringBuilder, text: String, delimiter: Char) {
     val quoted =
         text.contains(delimiter) || text.contains('"') || text.contains('\r') || text.contains('\n')
     if (quoted)

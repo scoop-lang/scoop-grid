@@ -48,6 +48,8 @@ scoop test --release .
 
 应用读取 `selectedRowKeys`／`isRowSelected(key)`，或订阅 `onSelectionChange`；主动更新使用 `setRowSelected`、`setSelectedRows`、`selectRowRange`、`selectPageRows` 与 `clearRowSelection`。过滤、排序、翻页和固定保留业务 key 选择，完整本地来源真正删除记录时清理。选择与当前单元格焦点独立，不重跑查询、不因选择离屏记录而构造 View。默认全部可选时，单行选择和表头状态计算也不扫描数据来源。
 
+矩形的数据操作使用 `model.setCellRange(Some(GridCellRange(anchor, end)))`，端点均为 `GridCellAddress`；`cellRange`／`isCellInRange(address)` 读取范围，`clearCellRange()` 清空。范围按当前结果和可见逻辑列序解释，设置时不读取 Row、不构造 View。查询、固定行配置或可见列结构变化清除范围，调宽和结构不变的值替换保留。`model.copyText(fallback = Some(address), includeHeaders = false)` 优先生成范围 TSV，否则生成指定单格文字；没有有效目标时返回 None。操作列保留空字段，跨列呈现仍读取各逻辑列的实际值；离屏复制读取同一数据快照，不依赖界面是否挂载。窗口的范围手势和系统复制接入仍在实施。
+
 界面操作可用 `handle.setRowSelected`、`handle.selectPageRows` 和 `handle.clearRowSelection`，未挂载或禁用时返回 `GridRowActionResult.Rejected`。真实点击遵守当前编辑的提交／拒绝规则；直接模型和原生行选择动作本身不会隐式改写编辑草稿。[十万行示例](examples/basic/src/main.scoop) 展示已选条数与清空入口。
 
 点击表头在升序、降序和无排序之间切换。默认按住 Shift 追加或调整多列排序，表头同时显示方向和优先级；可用 `multiSortModifier = GridMultiSortModifier.Primary` 改为平台主修饰键。真实表头焦点下的 Enter／Space 使用同一规则，并先处理当前编辑会话。

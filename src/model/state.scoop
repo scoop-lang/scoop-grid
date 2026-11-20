@@ -41,6 +41,8 @@ public class DataGridState<Row> public constructor(
     private val observers = ArrayList<GridModelObserver>()
     private val filterCandidates = HashMap<GridColumnId, GridFilterValues>()
     private val selection = state(GridSelectedRows([]))
+    private val rangeSelection = state<GridCellRange?>(None)
+    private var rangeColumns: GridSpanColumns? = None
     private var selectionAnchor: ViewKey? = None
     private var selectablePage: GridSelectablePage<Row>? = None
     internal val selectedRows: GridSelectedRows get() = selection.value
@@ -191,6 +193,66 @@ public class DataGridState<Row> public constructor(
                 count += 1L
         return gridSelectionState(count, total)
     }
+    public val cellRange: GridCellRange? get() = rangeSelection.value
+    public fun setCellRange(value: GridCellRange?): Boolean {
+        rangeSelection.checkMutation()
+        when (value) {
+            case Some(val range) -> when (gridCellRangeBounds(range, result.rows, cellColumns())) {
+                case Some(_) -> {}
+                case None -> return false
+            }
+            case None -> {}
+        }
+        rangeSelection.value = value
+        return true
+    }
+    public fun clearCellRange() {
+        rangeSelection.value = None
+    }
+    public fun isCellInRange(address: GridCellAddress): Boolean {
+        val range = cellRange ?: return false
+        val rows = result.rows
+        val columns = cellColumns()
+        val bounds = gridCellRangeBounds(range, rows, columns) ?: return false
+        val row = rows.indexOfKey(address.row) ?: return false
+        val column = columns.indexOf(address.column) ?: return false
+        return bounds.contains(row, column)
+    }
+    internal val cellRangeBounds: GridCellRangeBounds? get() =
+        when (cellRange) {
+            case Some(val range) -> gridCellRangeBounds(range, result.rows, cellColumns())
+            case None -> None
+        }
+    private fun cellColumns(): GridSpanColumns {
+        val states = columnState
+        when (rangeColumns) {
+            case Some(val old) -> if (old.states === states)
+                return old
+            case None -> {}
+        }
+        val next = GridSpanColumns(states)
+        rangeColumns = Some(next)
+        return next
+    }
+    public fun copyText(
+        fallback: GridCellAddress? = None,
+        includeHeaders: Boolean = false
+    ): String? {
+        val snapshot = computed.value
+        val order = cellColumns()
+        val range =
+            cellRange ?:
+                when (fallback) {
+                    case Some(val address) -> GridCellRange(address, address)
+                    case None -> return None
+                }
+        val bounds = gridCellRangeBounds(range, snapshot.result.rows, order) ?: return None
+        val columns =
+            Array<GridColumn<Row>>(bounds.lastColumn - bounds.firstColumn + 1L) {
+                index -> snapshot.columns.get(order.idAt(bounds.firstColumn + index))
+            }
+        return Some(gridCopyText(snapshot.result.rows, columns, bounds, includeHeaders))
+    }
     public val query: GridQuery get() = computed.value.query
     public val result: GridResult<Row> get() = computed.value.result
     public val pinnedRows: GridPinnedRows get() = computed.value.pins
@@ -256,6 +318,8 @@ public class DataGridState<Row> public constructor(
             return
         val next = gridCompute(old.source, old.columns, requested, Some(old), old.pins)
         computed.value = next
+        if (old.query != next.query)
+            clearCellRange()
         notify(old.query, next.query)
     }
     public fun setPage(index: Long) {
@@ -294,8 +358,14 @@ public class DataGridState<Row> public constructor(
         val next =
             gridCompute(source, old.columns, old.query, Some(old), old.pins.surviving(source))
         val kept = gridSurvivingSelection(selection.value, source, selectable)
+        val keepRange =
+            cellRange ==
+                None ||
+                (old.query == next.query && gridSameCellRows(old.result.rows, next.result.rows))
         filterCandidates.clear()
         computed.value = next
+        if (!keepRange)
+            clearCellRange()
         publishSelection(kept)
         when (selectionAnchor) {
             case Some(val key) -> if (source.indexOfKey(key) == None)
@@ -339,7 +409,6 @@ public class DataGridState<Row> public constructor(
         for (column in values)
             if (!retained.contains(column.id))
                 states.add(GridColumnState(column.id))
-        filterCandidates.clear()
         val nextStates =
             when (headers) {
                 case Some(_) -> {
@@ -350,9 +419,21 @@ public class DataGridState<Row> public constructor(
                 }
                 case None -> states.toArray()
             }
+        val keepRange =
+            cellRange ==
+                None ||
+                (
+                    old.query ==
+                        next.query &&
+                        gridSameCellColumns(presentation.value, nextStates) &&
+                        gridSameCellRows(old.result.rows, next.result.rows)
+                )
+        filterCandidates.clear()
         headerState.value = nextHeaders
         presentation.value = nextStates
         computed.value = next
+        if (!keepRange)
+            clearCellRange()
         notify(old.query, next.query)
     }
     public fun setColumnState(value: GridColumnState) {
@@ -385,6 +466,7 @@ public class DataGridState<Row> public constructor(
                 value
             )
         computed.value = GridComputed(old.source, old.columns, old.query, result, value)
+        clearCellRange()
         changed()
     }
     public fun pinRow(key: ViewKey, pin: GridRowPin) {
@@ -422,7 +504,10 @@ public class DataGridState<Row> public constructor(
         }
         if (gridArrayEqual(presentation.value, next))
             return
+        val keepRange = cellRange == None || gridSameCellColumns(presentation.value, next)
         presentation.value = next
+        if (!keepRange)
+            clearCellRange()
         changed()
     }
     public fun moveColumn(id: GridColumnId, index: Long) {
@@ -437,7 +522,10 @@ public class DataGridState<Row> public constructor(
             case Ready(val next) -> {
                 if (next === presentation.value)
                     return
+                val keepRange = cellRange == None || gridSameCellColumns(presentation.value, next)
                 presentation.value = next
+                if (!keepRange)
+                    clearCellRange()
                 changed()
             }
             case Rejected(val message) -> throw IllegalArgumentException(Some(message))

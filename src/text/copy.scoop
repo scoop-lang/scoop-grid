@@ -1,0 +1,45 @@
+package scoop.grid
+
+import scoop.ui.component.TableSource
+
+/** Reads one captured result and keeps empty fields for columns without copy text. */
+internal fun <Row> gridCopyText(
+    rows: TableSource<Row>,
+    columns: Array<GridColumn<Row>>,
+    bounds: GridCellRangeBounds,
+    includeHeaders: Boolean
+): String {
+    val output = StringBuilder()
+    if (includeHeaders) {
+        for (index in 0L ..< columns.size) {
+            if (index > 0L)
+                output.append('\t')
+            val column = columns[index]
+            appendGridField(
+                output,
+                if (column.exportable)
+                    column.title
+                else
+                    "",
+                '\t'
+            )
+        }
+    }
+    for (index in bounds.firstRow .. bounds.lastRow) {
+        if (includeHeaders || index != bounds.firstRow)
+            output.append('\n')
+        val row = rows.rowAt(index)
+        for (at in 0L ..< columns.size) {
+            if (at > 0L)
+                output.append('\t')
+            val column = columns[at]
+            val value =
+                if (column.exportable)
+                    column.text(row) ?: ""
+                else
+                    ""
+            appendGridField(output, value, '\t')
+        }
+    }
+    return output.toString()
+}
