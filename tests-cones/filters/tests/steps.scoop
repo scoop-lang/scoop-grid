@@ -169,7 +169,11 @@ internal fun FilterProbe.inspect(tag: Int) {
             count(1074L);
             control = Some(named("条件 1 Date 下限 日历"))
         }
-        case 82 -> assertEquals(1L, control!!.trait(1))
+        case 82 -> {
+            assertEquals(1L, control!!.trait(1))
+            assertTrue(named("Earlier month").flag(1))
+            assertTrue(named("Later month").flag(1))
+        }
         case 84 -> {
             value(field, "2026-11-02");
             assertEquals(0L, control!!.trait(1))

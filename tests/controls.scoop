@@ -22,10 +22,19 @@ private enum GridTestChoice: Equals<GridTestChoice> {
 private class GridControlEditorTest {
     @Test
     fun `boolean import rejects unknown text without changing its typed value`() {
-        val editor = gridBooleanEditor(false)
+        val editor =
+            gridBooleanEditor(
+                false,
+                GridEditorLabels(
+                    yes = "Enabled",
+                    no = "Disabled",
+                    invalidBoolean = "Use boolean syntax"
+                )
+            )
         assertEquals(None, editor.importText(" TRUE "))
         assertTrue(editor.value.value)
-        assertTrue(editor.importText("yes please") != None)
+        assertEquals(Some("Use boolean syntax"), editor.importText("yes please"))
+        assertEquals(Some("Use boolean syntax"), editor.importText("Enabled"))
         assertTrue(editor.value.value)
         assertEquals(None, editor.importText("否"))
         assertFalse(editor.value.value)
@@ -33,10 +42,17 @@ private class GridControlEditorTest {
 
     @Test
     fun `date drafts retain invalid text and do not replace active composition`() {
-        val editor = gridDateEditor(LocalDate(2024, 2, 29))
+        val editor =
+            gridDateEditor(
+                LocalDate(2024, 2, 29),
+                GridEditorLabels(
+                    invalidDate = "Use an ISO date",
+                    finishComposing = "Finish input first"
+                )
+            )
         assertEquals(None, editor.importText("2025-02-29"))
         when (editor.candidate()) {
-            case Rejected(_) -> {}
+            case Rejected(val message) -> assertEquals("Use an ISO date", message)
             else -> fail(Some("invalid leap date was accepted"))
         }
         assertEquals("2025-02-29", editor.draft.editor.text)
@@ -59,7 +75,7 @@ private class GridControlEditorTest {
             )
         )
         assertTrue(editor.composing)
-        assertTrue(editor.importText("2026-11-20") != None)
+        assertEquals(Some("Finish input first"), editor.importText("2026-11-20"))
         editor.cancelComposition()
         when (editor.candidate()) {
             case Value(val date) -> assertEquals(LocalDate(2024, 2, 29), date)
@@ -75,10 +91,19 @@ private class GridControlEditorTest {
                 Choice(ViewKey.Text("second"), GridTestChoice.Second, "同名"),
                 Choice(ViewKey.Text("disabled"), GridTestChoice.Disabled, "禁用", false)
             ]
-        val editor = gridChoiceEditor(GridTestChoice.First, choices)
-        assertEquals(Some("多个选项名称相同，请使用列表选择"), editor.importText("同名"))
+        val editor =
+            gridChoiceEditor(
+                GridTestChoice.First,
+                choices,
+                labels =
+                    GridEditorLabels(
+                        ambiguousChoice = "Choose from the list",
+                        invalidChoice = "Choose an available value"
+                    )
+            )
+        assertEquals(Some("Choose from the list"), editor.importText("同名"))
         assertEquals(GridTestChoice.First, editor.value.value)
-        assertTrue(editor.importText("禁用") != None)
+        assertEquals(Some("Choose an available value"), editor.importText("禁用"))
         assertEquals(GridTestChoice.First, editor.value.value)
         val parsed =
             gridChoiceEditor(

@@ -8,25 +8,30 @@ import scoop.ui.text.TextEditorState
 import scoop.window.LogicalKey
 import scoop.window.NamedKey
 
-public class GridDateEditor public constructor(private val initial: LocalDate): GridEditor<
-    LocalDate
-> {
+public class GridDateEditor public constructor(
+    private val initial: LocalDate,
+    private val labels: GridEditorLabels = GridEditorLabels()
+): GridEditor<LocalDate> {
     public val draft: DatePickerDraft = DatePickerDraft(TextEditorState(initial.toString()))
     public val picker: DatePickerHandle = DatePickerHandle()
     private val selected = state<LocalDate?>(Some(initial))
     private val reference = FieldTarget()
     private var ownsPopup = false
-    private val calendar = calendarOptions { rules = CalendarRules(required = true) }
+    private val calendar =
+        calendarOptions {
+            rules = CalendarRules(required = true)
+            locale = labels.calendarLocale
+        }
     public override val composing: Boolean get() = draft.editor.isComposing
     public override val holdsFocus: Boolean get() = ownsPopup
     public override fun candidate(): GridCandidate<LocalDate> =
         when (LocalDate.parseOrNone(draft.editor.committedText.trim())) {
             case Some(val value) -> GridCandidate.Value(value)
-            case None -> GridCandidate.Rejected("请输入有效日期（YYYY-MM-DD）")
+            case None -> GridCandidate.Rejected(labels.invalidDate)
         }
     public override fun importText(text: String): String? {
         if (composing)
-            return Some("请先完成组合输入")
+            return Some(labels.finishComposing)
         draft.reset(text)
         selected.value = LocalDate.parseOrNone(text.trim())
         return None
@@ -58,7 +63,9 @@ public class GridDateEditor public constructor(private val initial: LocalDate): 
                 theme = Some(options.theme)
                 readOnly = options.submitting
                 invalid = options.error != None
-                placeholder = "YYYY-MM-DD"
+                placeholder = editor.labels.datePlaceholder
+                calendarButtonSemantics =
+                    ComponentSemantics(name = Some(editor.labels.calendarName))
                 calendar = editor.calendar
                 onOpenChange =
                     {
@@ -77,7 +84,7 @@ public class GridDateEditor public constructor(private val initial: LocalDate): 
                         _,
                         _ -> when (LocalDate.parseOrNone(text.trim())) {
                             case Some(val day) -> DatePickerParse.Date(day)
-                            case None -> DatePickerParse.Invalid("请输入有效日期（YYYY-MM-DD）")
+                            case None -> DatePickerParse.Invalid(editor.labels.invalidDate)
                         }
                     }
                 format =
@@ -109,4 +116,7 @@ public class GridDateEditor public constructor(private val initial: LocalDate): 
     }
 }
 
-public fun gridDateEditor(value: LocalDate): GridDateEditor = GridDateEditor(value)
+public fun gridDateEditor(
+    value: LocalDate,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridDateEditor = GridDateEditor(value, labels)

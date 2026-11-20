@@ -27,6 +27,10 @@ static id rowAt(id grid, int64_t index) {
   return rows.count == 1 ? rows.firstObject : nil;
 }
 
+void *scoop_grid_selection_table(void *view) {
+  return (__bridge_retained void *)table(view);
+}
+
 void *scoop_grid_selection_row(void *view, int64_t index) {
   return (__bridge_retained void *)rowAt(table(view), index);
 }

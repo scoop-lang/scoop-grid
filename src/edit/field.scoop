@@ -29,5 +29,5 @@ internal fun gridEditorField(
             case None -> {}
         }
         if (options.submitting)
-            description("正在保存…")
+            description(options.savingText)
     }

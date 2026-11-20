@@ -65,8 +65,15 @@ internal fun RangeProbe.advanceFind() {
             assertTrue(outside.requestFocus())
         }
         case 150 -> key(36)
-        case 153 -> findText(1, "pin")
-        case 155 -> findText(2, "")
+        case 153 -> {
+            findLabels.value =
+                GridFindLabels(input = "Search values", found = { _ -> "Current match" })
+            findText(1, "pin")
+        }
+        case 155 -> {
+            findLabels.value = GridFindLabels()
+            findText(2, "")
+        }
         case 156 -> enabled.value = false
         case 157 -> enabled.value = true
         else -> {}
@@ -175,8 +182,16 @@ internal fun RangeProbe.inspectFind() {
         case 154 -> {
             assertFalse(findNext!!.flag(1));
             assertEquals(5, searches)
+            assertTrue(findField!!.text(0, Some("Search values")))
+            assertTrue(findField!!.flag(4))
+            assertTrue(findField!!.same(keep(root!!.find("grid-find-input")!!)))
+            assertTrue(keep(root!!.find("grid-find-status")!!).text(1, Some("Current match")))
         }
-        case 155 -> assertTrue(findNext!!.flag(1))
+        case 155 -> {
+            assertTrue(findNext!!.flag(1))
+            assertTrue(findField!!.text(0, Some("查找单元格")))
+            assertTrue(keep(root!!.find("grid-find-status")!!).text(1, Some("已从边界继续查找")))
+        }
         case 156 -> assertFalse(findNext!!.flag(1))
         case 157 -> {
             assertTrue(findNext!!.flag(1));

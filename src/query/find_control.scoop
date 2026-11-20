@@ -21,7 +21,8 @@ public class GridFindLabels public constructor(
                 "已从边界继续查找"
             else
                 "已定位匹配单元格"
-        }
+        },
+    public val error: (String) -> String = { message -> message }
 )
 
 public class GridFindProps public constructor(
@@ -41,7 +42,7 @@ public class GridFind public constructor(
     scope: ComponentScope
 ): Component(scope) {
     private val draft = TextEditorState()
-    private val message = state("")
+    private val message = state<GridFindResult?>(None)
     private var handle = props.value.handle
     private var applied = ""
     private var after: GridCellAddress? = None
@@ -71,11 +72,10 @@ public class GridFind public constructor(
             case Found(val match) -> {
                 after = Some(match.address)
                 applied = text
-                message.value = input.labels.found(match)
             }
-            case NotFound -> message.value = input.labels.notFound
-            case Rejected(val reason) -> message.value = reason
+            else -> {}
         }
+        message.value = Some(result)
         input.onResult(result)
     }
     public override fun render(): View {
@@ -88,7 +88,15 @@ public class GridFind public constructor(
         val source = input.theme ?: (ambient ?: currentThemeSource())
         val density = source.read(scope).tokens.typography.body.fontSize / 14.0
         val editor = draft
-        val status = message.value
+        val status =
+            when (val result = message.value) {
+                case Some(val value) -> when (value) {
+                    case Found(val match) -> input.labels.found(match)
+                    case NotFound -> input.labels.notFound
+                    case Rejected(val reason) -> input.labels.error(reason)
+                }
+                case None -> ""
+            }
         val available =
             input.enabled &&
                 input.handle.isAttached &&

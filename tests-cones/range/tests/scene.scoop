@@ -57,6 +57,7 @@ internal class RangeScene(private val probe: RangeProbe, scope: ComponentScope):
                 button("Outside grid", onClick = {}) { focus = FocusOptions(Some(probe.outside)) },
                 gridFind(probe.handle) {
                     enabled = probe.enabled.value
+                    labels = probe.findLabels.value
                     onResult =
                         {
                             result ->
@@ -77,7 +78,8 @@ internal class RangeScene(private val probe: RangeProbe, scope: ComponentScope):
                                         value.average?.toString() ?: "—"
                                     }"
                                 },
-                            changed = "Result changed"
+                            changed = "Result changed",
+                            error = { text -> f"Problem: ${text}" }
                         )
                 }
             ]

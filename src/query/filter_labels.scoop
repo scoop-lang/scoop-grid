@@ -1,5 +1,7 @@
 package scoop.grid
 
+import scoop.ui.component.CalendarLocale
+
 /** Localizable presentation for filter drafts; query and candidate keys remain typed. */
 public class GridFilterLabels public constructor(
     public val apply: String = "应用筛选",
@@ -86,5 +88,6 @@ public class GridFilterLabels public constructor(
     public val columnRemoved: (String) -> String = { id -> f"筛选列已移除：${id}" },
     public val columnUnfilterable: (String) -> String = { title -> f"列不可筛选：${title}" },
     public val columnWithoutValue: (String) -> String = { title -> f"列没有可筛选的值：${title}" },
-    public val error: (String) -> String = { message -> message }
+    public val error: (String) -> String = { message -> message },
+    public val calendarLocale: CalendarLocale = CalendarLocale()
 )

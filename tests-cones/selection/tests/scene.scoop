@@ -24,6 +24,7 @@ internal class SelectionScene(private val probe: SelectionProbe, scope: Componen
                         handle = Some(probe.handle)
                         enabled = probe.enabled.value
                         selectionCheckboxes = probe.checkboxes.value
+                        labels = probe.labels.value
                     },
                     probe.direction.value
                 ),

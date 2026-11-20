@@ -19,7 +19,8 @@ public class GridStatusLabels public constructor(
             }  最大 ${value.maximum?.toString() ?: "—"}  平均 ${value.average?.toString() ?: "—"}"
         },
     public val unavailable: String = "无法统计当前选区",
-    public val changed: String = "统计期间选区已更新，请重新计算"
+    public val changed: String = "统计期间选区已更新，请重新计算",
+    public val error: (String) -> String = { message -> message }
 )
 
 public class GridStatusBarProps<Row> public constructor(
@@ -147,7 +148,7 @@ public class GridStatusBar<Row> public constructor(
             )
             when (message) {
                 case Some(val text) -> add(
-                    statusLabel(text) {
+                    statusLabel(labels.error(text)) {
                         fonts = input.fonts;
                         theme = input.theme
                         semantics = ComponentSemantics(automationId = Some("grid-status-values"))

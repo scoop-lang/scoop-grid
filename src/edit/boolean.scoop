@@ -4,7 +4,10 @@ import scoop.text.*
 import scoop.ui.*
 import scoop.ui.component.*
 
-public class GridBooleanEditor public constructor(initial: Boolean): GridEditor<Boolean> {
+public class GridBooleanEditor public constructor(
+    initial: Boolean,
+    private val labels: GridEditorLabels = GridEditorLabels()
+): GridEditor<Boolean> {
     public val value: State<Boolean> = state(initial)
     private val reference = FieldTarget()
     public override val composing: Boolean get() = false
@@ -17,7 +20,7 @@ public class GridBooleanEditor public constructor(initial: Boolean): GridEditor<
             case "false" -> value.value = false
             case "0" -> value.value = false
             case "否" -> value.value = false
-            else -> return Some("请输入 true／false、1／0 或是／否")
+            else -> return Some(labels.invalidBoolean)
         }
         return None
     }
@@ -49,12 +52,15 @@ public class GridBooleanEditor public constructor(initial: Boolean): GridEditor<
             reference,
             Some(
                 if (draft.value)
-                    "是"
+                    labels.yes
                 else
-                    "否"
+                    labels.no
             )
         )
     }
 }
 
-public fun gridBooleanEditor(value: Boolean): GridBooleanEditor = GridBooleanEditor(value)
+public fun gridBooleanEditor(
+    value: Boolean,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridBooleanEditor = GridBooleanEditor(value, labels)

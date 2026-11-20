@@ -5,12 +5,16 @@ import scoop.graphics.*
 import scoop.grid.*
 import scoop.surface.FrameSubmission
 import scoop.ui.*
+import scoop.ui.component.CalendarLocale
 
 internal class FilterScene(private val probe: FilterProbe, scope: ComponentScope): Component(
     scope
 ) {
+    private val calendarLocale =
+        CalendarLocale(previousMonth = "Earlier month", nextMonth = "Later month")
     public override fun render(): View {
         val probe = this.probe
+        val calendarLocale = this.calendarLocale
         return element(
             { mount -> FilterLayout(probe, mount) },
             [
@@ -20,6 +24,7 @@ internal class FilterScene(private val probe: FilterProbe, scope: ComponentScope
                     height = 560.0
                     candidatesHeight = 160.0
                     referenceDate = Some(LocalDate(2026, 11, 20))
+                    labels = GridFilterLabels(calendarLocale = calendarLocale)
                     if (probe.localized.value)
                         labels =
                             GridFilterLabels(
@@ -35,7 +40,8 @@ internal class FilterScene(private val probe: FilterProbe, scope: ComponentScope
                                 loadedStatus =
                                     { selected, shown -> f"chosen:${selected}; shown:${shown}" },
                                 invalidDate = "Use an ISO date",
-                                error = { text -> f"Problem:${text}" }
+                                error = { text -> f"Problem:${text}" },
+                                calendarLocale = calendarLocale
                             )
                 },
                 dataGrid(probe.model) {

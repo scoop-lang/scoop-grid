@@ -102,6 +102,8 @@ DataGrid 的正文、列头与列组复用现有 ContextMenu、Menu、Overlay �
 
 打开与执行菜单均遵守既有编辑门控，未完成的组合输入、非法草稿或等待保存拒绝操作；没有迟到重放。每次执行按当前模型重新检查目标和可用命令，再调用同一列、选择、编辑或复制入口。禁用、删除目标或更换模型使旧菜单失效，重新启用或切回原模型不会自动重开；虚拟回收沿原 Overlay 生命周期关闭菜单。失败保留菜单并显示说明，成功关闭；`GridMenuResult.Sizing(request)` 表示已接受内容测量，最终结果通过原 `GridColumnFit.result` 读取。
 
+菜单、查找、状态栏和面板的 Labels 均可通过 `error(message)` 格式化呈现中的错误；原操作结果与应用回调不被改写。业务列名、Choice 标签和数据格式继续由相应列／应用配置提供。
+
 ## 状态栏与矩形数值统计
 
 `model.rangeStatistics()` 从同一捕获结果、逻辑列序与唯一矩形读取数据，无选区返回 None。`GridRangeStatistics` 包含 `range`、`rowCount`、`columnCount`、数值 `count`、`sum`、`minimum`、`maximum` 和 `average`。只读取范围中的行，每行一次，不构造 View；固定区连续，跨列显示仍按真实逻辑字段统计，缺值和非数值不参与。已知空数值集合的 count／sum 为零，最值与平均值为 None；读取或数值转换失败抛出异常，不返回部分统计或伪造零值。
@@ -180,6 +182,8 @@ DataGrid 的正文、列头与列组复用现有 ContextMenu、Menu、Overlay �
 
 `dataGrid(state) { ... }` 创建 `DataGrid<Row>`，消费同一模型的当前呈现结果。`DataGridProps<Row>` 与 `DataGridBuilder<Row>` 提供外框宽高、行高模式／表头高、像素 overscan、可借用的 `ScrollState`／`DataGridHandle`、字体、主题及启用状态。尺寸按主题密度缩放；明确宽高受父约束限制。默认行高 48、表头高 40、外框高度 320。模型可以被多个挂载消费，但每个挂载有自己的滚动与焦点会话；一个 handle 或 ScrollState 同时只绑定一个挂载。
 
+`labels = GridLabels(...)` 配置表格的无障碍名称、当前页／行选择名称、列／组拖动说明及保存状态。行名称 formatter 接收从 1 开始的当前呈现序号。替换 labels 不改变查询、列几何、选择、焦点和活动草稿；文字不参与行列身份。`error(message)` 只格式化视图和编辑控件收到的错误，`handle.editError`、模型结果与应用回调保留原消息。
+
 普通父 Element 拥有唯一滚动视口，表头与正文分别按列、按行虚拟化，每个正文行再按列虚拟化。所有条目使用本次 `LayoutInput` 中的相同列宽和滚动结果；scene 只消费自己的完整 LayoutResult。列宽复用 `TableTracks`，Auto 只测表头及声明的文字样本，不创建业务行。横向滚动只挂载可见列、冻结区、自动行高贡献列和实际活动项；不为每个行列组合预建 View 或 FocusHandle。
 
 Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一套列宽和单元格实例。表头保持垂直固定，正文不能绘制或命中表头区域。窄窗口先保留 Start，再裁剪 End，中心剩余宽度可以为零；零面积不发布命中区域。
@@ -247,6 +251,8 @@ Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一
 `gridBooleanEditor` 使用 Checkbox，Space 改变草稿，Enter／Tab／失焦沿网格提交；文本导入接受 true／false、1／0 和“是”／“否”。`gridDateEditor` 使用 DatePicker 与公开的 DatePickerDraft，值为非空 LocalDate，文字格式为 YYYY-MM-DD。日期输入确认或日历选择提交当前格，选择原日期仍按不变值结束。Escape 先关闭日历；弹层已关闭且没有组合输入时，通过会话绑定的 `onCancel` 取消当前格草稿。
 
 `gridChoiceEditor<T>` 使用 Select，接收现有 `Choice<T>`（稳定 key、类型化值、显示名及 enabled）。默认粘贴只匹配唯一可用显示名；重名、未知或禁用项返回错误，可提供类型化 parse 回调，但结果仍须是可用选项。选择及显式关闭选项弹层提交当前格，Escape 先关闭弹层。选项名称不作为身份。布尔、日期与选项编辑器通过既有 Field 呈现业务错误与提交中说明，保存期间限制修改。
+
+内置编辑器和便捷工厂接受 `labels = GridEditorLabels(...)`，配置解析／组合输入错误、布尔显示、选项占位与不可用状态、日期占位和日历按钮名称。配置在创建该草稿时捕获，不通过重新创建编辑器改变活动草稿。布尔导入规则和严格 ISO 日期格式保持不变；本地化不改变实际 Boolean／LocalDate／Choice 值。`calendarLocale` 直接采用组件库的 `CalendarLocale`，涵盖月／星期／数字／日期及前后翻月名称；筛选面板的 `GridFilterLabels.calendarLocale` 使用同一接入方式。`GridEditorOptions.savingText` 将网格当前保存提示传给内置或自定义编辑器。
 
 带原生弹层的编辑器在打开至 `onClosed` 期间用 `holdsFocus`（默认 false）保留没有实际焦点的交接间隙；真正移到外部目标仍按失焦提交。弹层释放输入域、完成焦点恢复后调用 `onFocusSettled`。所有编辑器回调只作用于创建它的会话。选择弹层中的 Tab／Shift+Tab 先关闭弹层，再通过 `onNavigate` 交还原始按键，焦点仍属于该格时沿 Grid 行列顺序继续；不合成按键或让 Select 自行跳出整个网格。
 

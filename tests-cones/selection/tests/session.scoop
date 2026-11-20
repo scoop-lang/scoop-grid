@@ -75,6 +75,9 @@ internal class SelectionProbe: Closeable {
     val outside = FocusHandle()
     val enabled = state(true)
     val checkboxes = state(true)
+    val labels = state(GridLabels())
+    var labelRows: TableSource<Long>? = None
+    var labelColumns: Array<GridColumnState>? = None
     val direction = state(LayoutDirection.Ltr)
     var editor: GridTextEditor<Long>? = None
     var pending: GridCommit<Long>? = None
@@ -96,6 +99,7 @@ internal class SelectionProbe: Closeable {
     var header: NativeNode? = None
     var checkbox: NativeNode? = None
     var row: NativeNode? = None
+    var tableNode: NativeNode? = None
     var before = 0L
     var pointer = Point(0.0, 0.0)
     private val held = ArrayList<NativeNode>()
@@ -200,6 +204,12 @@ internal class SelectionProbe: Closeable {
             return keep(NativeNode(nativeSelectionRow(view!!, index)!!))
         }
     }
+    fun table(): NativeNode {
+        @Unsafe
+        {
+            return keep(NativeNode(nativeSelectionTable(view!!)!!))
+        }
+    }
     fun nativeSelection(index: Long, selected: Boolean, count: Long) {
         @Unsafe
         {
@@ -248,6 +258,9 @@ internal class SelectionProbe: Closeable {
 
 @Extern(name = "scoop_grid_selection_row")
 private fun nativeSelectionRow(view: Ptr<Unit>, index: Long): Ptr<Unit>?
+
+@Extern(name = "scoop_grid_selection_table")
+private fun nativeSelectionTable(view: Ptr<Unit>): Ptr<Unit>?
 
 @Extern(name = "scoop_grid_selection_control")
 private fun nativeSelectionControl(view: Ptr<Unit>, index: Long): Ptr<Unit>?

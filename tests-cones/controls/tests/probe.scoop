@@ -19,6 +19,7 @@ internal class ControlRow(
 internal class ControlProbe {
     val handle = DataGridHandle()
     val outside = FocusHandle()
+    val labels = state(GridLabels())
     var data =
         TableRows(
             Array<TableRecord<ControlRow>>(5L) {

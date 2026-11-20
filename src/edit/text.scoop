@@ -10,7 +10,8 @@ public class GridTextEditor<T> public constructor(
     initial: T,
     format: (T) -> String,
     private val parse: (String) -> GridCandidate<T>,
-    public val multiline: Boolean = false
+    public val multiline: Boolean = false,
+    private val labels: GridEditorLabels = GridEditorLabels()
 ): GridEditor<T> {
     private var document = TextEditorState(format(initial))
     public val state: TextEditorState get() = document
@@ -22,7 +23,7 @@ public class GridTextEditor<T> public constructor(
     public override fun candidate(): GridCandidate<T> = parse(state.committedText)
     public override fun importText(text: String): String? {
         if (composing)
-            return Some("请先完成组合输入")
+            return Some(labels.finishComposing)
         state.replaceAll(text)
         return None
     }
@@ -38,7 +39,7 @@ public class GridTextEditor<T> public constructor(
                 invalid = options.error != None
                 description =
                     if (options.submitting)
-                        "正在保存…"
+                        options.savingText
                     else
                         options.error ?: ""
                 readOnly = options.submitting
@@ -55,22 +56,39 @@ public class GridTextEditor<T> public constructor(
     }
 }
 
-public fun gridTextEditor(value: String, multiline: Boolean = false): GridTextEditor<String> =
-    GridTextEditor(value, { text -> text }, { text -> GridCandidate.Value(text) }, multiline)
+public fun gridTextEditor(
+    value: String,
+    multiline: Boolean = false,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridTextEditor<String> =
+    GridTextEditor(
+        value,
+        { text -> text },
+        { text -> GridCandidate.Value(text) },
+        multiline,
+        labels
+    )
 
-public fun gridLongEditor(value: Long): GridTextEditor<Long> =
+public fun gridLongEditor(
+    value: Long,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridTextEditor<Long> =
     GridTextEditor(
         value,
         { number -> f"${number}" },
         {
             text -> when (text.toLongOrNone()) {
                 case Some(val number) -> GridCandidate.Value(number)
-                case None -> GridCandidate.Rejected("请输入有效整数")
+                case None -> GridCandidate.Rejected(labels.invalidInteger)
             }
-        }
+        },
+        labels = labels
     )
 
-public fun gridDoubleEditor(value: Double): GridTextEditor<Double> =
+public fun gridDoubleEditor(
+    value: Double,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridTextEditor<Double> =
     GridTextEditor(
         value,
         { number -> f"${number}" },
@@ -79,8 +97,9 @@ public fun gridDoubleEditor(value: Double): GridTextEditor<Double> =
                 case Some(val number) -> if (number.isFinite())
                     GridCandidate.Value(number)
                 else
-                    GridCandidate.Rejected("请输入有限数值")
-                case None -> GridCandidate.Rejected("请输入有效数值")
+                    GridCandidate.Rejected(labels.nonfiniteNumber)
+                case None -> GridCandidate.Rejected(labels.invalidNumber)
             }
-        }
+        },
+        labels = labels
     )

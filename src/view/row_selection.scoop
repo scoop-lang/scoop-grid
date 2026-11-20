@@ -14,7 +14,8 @@ internal class GridSelectionView<Row>(
     val enabled: Boolean,
     private val checkboxes: Boolean,
     val theme: ThemeSource,
-    private val appearance: GridAppearance
+    private val appearance: GridAppearance,
+    val labels: GridLabels
 ) {
     val selected = model.selectedRows
     fun change(key: ViewKey, value: Boolean, extend: Boolean = false): GridRowActionResult =
@@ -62,7 +63,7 @@ internal class GridSelectionView<Row>(
                 theme = Some(view.theme)
                 semantics =
                     ComponentSemantics(
-                        name = Some("选择当前页"),
+                        name = Some(view.labels.selectPage),
                         automationId = Some("grid-page-selection")
                     )
             }
@@ -127,7 +128,7 @@ private class GridRowCheckbox<Row>(
             theme = Some(input.view.theme)
             semantics =
                 ComponentSemantics(
-                    name = Some(f"选择第 ${input.index + 1L} 行"),
+                    name = Some(input.view.labels.selectRow(input.index + 1L)),
                     automationId = Some(f"grid-row-selection-${input.index}")
                 )
         }

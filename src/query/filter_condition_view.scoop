@@ -237,6 +237,7 @@ private fun <Row> gridFilterScalarView(
             theme = ui.input.theme
             referenceDate = Some(ui.referenceDate)
             placeholder = ui.labels.datePlaceholder
+            calendar = calendarOptions { locale = ui.labels.calendarLocale }
             semantics = gridFilterControl(nodeKey, part, title)
             calendarButtonSemantics =
                 gridFilterControl(nodeKey, f"${part}-calendar", ui.labels.calendarName(title))

@@ -49,7 +49,8 @@ public enum GridMenuResult {
 public class GridMenuLabels public constructor(
     text: ((GridMenuCommand) -> String)? = None,
     public val unavailable: String = "当前目标或操作已不可用",
-    public val finishEditing: String = "请先完成当前单元格的编辑或保存"
+    public val finishEditing: String = "请先完成当前单元格的编辑或保存",
+    public val error: (String) -> String = { message -> message }
 ) {
     public val text: (GridMenuCommand) -> String = text ?: ::gridMenuText
 }

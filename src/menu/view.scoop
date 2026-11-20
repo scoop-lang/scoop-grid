@@ -115,7 +115,7 @@ private class GridMenu<Row>(
                             ComponentSemantics(automationId = Some(f"grid-menu-${command.id}"))
                     }
                 when (val message = current.error.value) {
-                    case Some(val text) -> label(ViewKey.Text("error"), text)
+                    case Some(val text) -> label(ViewKey.Text("error"), options.labels.error(text))
                     case None -> {}
                 }
             }

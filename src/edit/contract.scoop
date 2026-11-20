@@ -22,7 +22,8 @@ public class GridEditorOptions public constructor(
     public val onCancel: () -> Unit,
     public val onEdited: () -> Unit,
     public val onNavigate: (KeyEvent) -> Boolean,
-    public val onFocusSettled: () -> Unit
+    public val onFocusSettled: () -> Unit,
+    public val savingText: String = "正在保存…"
 )
 
 /** A single typed draft; its view uses ordinary native UI controls. */

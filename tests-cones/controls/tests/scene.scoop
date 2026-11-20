@@ -22,6 +22,7 @@ internal class ControlScene(
                     height = 264.0;
                     rowHeight = 72.0;
                     handle = Some(probe.handle)
+                    labels = probe.labels.value
                 },
                 button("After editor", {}) { focus = FocusOptions(Some(probe.outside)) }
             ]

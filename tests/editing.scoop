@@ -60,7 +60,12 @@ private class GridEditingTest {
 
     @Test
     fun `typed drafts preserve integers and distinguish parse errors from validation`() {
-        val editor = gridLongEditor(9007199254740993L)
+        val labels =
+            GridEditorLabels(
+                invalidInteger = "Use an integer",
+                nonfiniteNumber = "Use a finite number"
+            )
+        val editor = gridLongEditor(9007199254740993L, labels)
         assertEquals("9007199254740993", editor.state.text)
         assertEquals(None, editor.importText("9223372036854775807"))
         when (editor.candidate()) {
@@ -70,13 +75,13 @@ private class GridEditingTest {
         editor.state.replaceAll("9223372036854775808")
         when (editor.candidate()) {
             case Value(_) -> fail(Some("integer overflow was accepted"))
-            case Rejected(val message) -> assertTrue(message != "")
+            case Rejected(val message) -> assertEquals("Use an integer", message)
         }
-        val floating = gridDoubleEditor(1.0)
+        val floating = gridDoubleEditor(1.0, labels)
         floating.state.replaceAll("NaN")
         when (floating.candidate()) {
             case Value(_) -> fail(Some("nonfinite number was accepted"))
-            case Rejected(_) -> {}
+            case Rejected(val message) -> assertEquals("Use a finite number", message)
         }
     }
 
@@ -133,7 +138,11 @@ private class GridEditingTest {
 
     @Test
     fun `text draft composition and undo remain owned by TextEditorState`() {
-        val editor = gridTextEditor("base")
+        val editor =
+            gridTextEditor(
+                "base",
+                labels = GridEditorLabels(finishComposing = "Finish input first")
+            )
         editor.state.applyInput(
             TextInputBatch(
                 None,
@@ -147,7 +156,7 @@ private class GridEditingTest {
             )
         )
         assertTrue(editor.composing)
-        assertEquals(Some("请先完成组合输入"), editor.importText("must not replace preedit"))
+        assertEquals(Some("Finish input first"), editor.importText("must not replace preedit"))
         assertTrue(editor.composing)
         when (editor.candidate()) {
             case Value(val value) -> assertEquals("base", value)

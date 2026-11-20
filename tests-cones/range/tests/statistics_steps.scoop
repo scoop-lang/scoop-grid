@@ -74,7 +74,7 @@ internal fun RangeProbe.inspectStatistics() {
         case 196 -> assertTrue(statisticsButton!!.flag(1))
         case 198 -> {
             statisticsValues = Some(keep(root!!.find("grid-status-values")!!))
-            assertTrue(statisticsValues!!.text(1, Some("Result changed")))
+            assertTrue(statisticsValues!!.text(1, Some("Problem: Result changed")))
             assertEquals(202L, model.result.rows.rowAt(2L).value)
         }
         case 200 -> assertTrue(statisticsValues!!.text(1, Some("N 1 Sum 202 Avg 202")))

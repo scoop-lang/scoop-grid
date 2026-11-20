@@ -17,11 +17,6 @@ internal class GridHeaderTarget(val key: GridHeaderKey, val pin: GridPin) {
             case Column(val id) -> f"grid-header-${id.value}"
             case Group(val id) -> f"grid-group-header-${gridHeaderPin(pin)}-${id.value}"
         }
-    fun description(): String =
-        when (key) {
-            case Column(_) -> "拖动调整列顺序；也可使用列工具前移或后移"
-            case Group(_) -> "拖动调整整组顺序；也可使用列工具中的组移动按钮"
-        }
 }
 
 private fun gridHeaderPin(pin: GridPin): String =

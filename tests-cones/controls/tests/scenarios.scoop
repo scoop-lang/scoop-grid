@@ -30,6 +30,17 @@ internal class GridControlScenarios(private val probe: ControlProbe) {
     private var options: GridEditorOptions? = None
     private var staleOptions: GridEditorOptions? = None
     private var flag: GridBooleanEditor? = None
+    private var labelledFlag: GridBooleanEditor? = None
+    private var labelledFocus: FocusHandle? = None
+    private val labels =
+        GridEditorLabels(
+            invalidDate = "Use an ISO date",
+            yes = "Enabled",
+            no = "Disabled",
+            calendarName = "Choose a date",
+            calendarLocale =
+                CalendarLocale(previousMonth = "Previous page", nextMonth = "Next page")
+        )
     private var date: GridDateEditor? = None
     private var choice: GridChoiceEditor<Long>? = None
     private var submitted = 0
@@ -74,7 +85,7 @@ internal class GridControlScenarios(private val probe: ControlProbe) {
                         gridEdit<ControlRow, Boolean>(
                             {
                                 value ->
-                                val editor = gridBooleanEditor(value)
+                                val editor = gridBooleanEditor(value, controls.labels)
                                 controls.flag = Some(editor)
                                 controls.track(editor)
                             },
@@ -107,7 +118,7 @@ internal class GridControlScenarios(private val probe: ControlProbe) {
                         gridEdit<ControlRow, LocalDate>(
                             {
                                 value ->
-                                val editor = gridDateEditor(value)
+                                val editor = gridDateEditor(value, controls.labels)
                                 controls.date = Some(editor)
                                 controls.track(editor)
                             },
@@ -148,7 +159,12 @@ internal class GridControlScenarios(private val probe: ControlProbe) {
                         gridEdit<ControlRow, Long>(
                             {
                                 value ->
-                                val editor = gridChoiceEditor(value, controls.choices)
+                                val editor =
+                                    gridChoiceEditor(
+                                        value,
+                                        controls.choices,
+                                        labels = controls.labels
+                                    )
                                 controls.choice = Some(editor)
                                 controls.track(editor)
                             },
@@ -190,9 +206,17 @@ internal class GridControlScenarios(private val probe: ControlProbe) {
                 probe.phase = 2
             }
             case 2 -> if (focused) {
+                labelledFlag = flag
+                labelledFocus = focus
+                probe.labels.value =
+                    GridLabels(saving = "Saving changes", error = { text -> f"Problem: ${text}" })
                 key(active, 3, 49)
             }
             case 3 -> {
+                assertTrue(flag!! === labelledFlag!!)
+                assertTrue(focus!! === labelledFocus!!)
+                assertTrue(focused)
+                assertEquals("Saving changes", options!!.savingText)
                 assertTrue(flag!!.value.value)
                 assertFalse(row().flag)
                 key(active, 4, 36)
@@ -241,18 +265,20 @@ internal class GridControlScenarios(private val probe: ControlProbe) {
             }
             case 12 -> if (focused) {
                 assertEquals("", date!!.draft.editor.text)
-                assertTrue(handle.editError != None)
+                assertEquals(Some("Use an ISO date"), handle.editError)
+                assertEquals(Some("Problem: Use an ISO date"), options!!.error)
                 date!!.draft.editor.replaceAll("2026-02-30")
                 key(active, 13, 36)
             }
             case 13 -> {
                 assertEquals(Some(probe.address(2L, "date")), handle.editingCell)
-                assertTrue(date!!.draft.error != None)
+                assertEquals(Some("Use an ISO date"), date!!.draft.error)
                 date!!.draft.editor.replaceAll("2026-11-19")
                 key(active, 14, 36)
             }
             case 14 -> {
                 assertEquals(Some("日期太早"), handle.editError)
+                assertEquals(Some("Problem: 日期太早"), options!!.error)
                 assertEquals(LocalDate(2026, 11, 21), row().date)
                 date!!.draft.editor.replaceAll("2026-12-01")
                 key(active, 15, 36)
@@ -347,6 +373,8 @@ internal class GridControlScenarios(private val probe: ControlProbe) {
             }
             case 36 -> {
                 assertTrue(handle.isSubmitting)
+                assertTrue(options!!.submitting)
+                assertEquals("Saving changes", options!!.savingText)
                 assertFalse(focused)
                 assertTrue(probe.completion!!.reject("请重试"))
                 probe.phase = 37
@@ -355,6 +383,7 @@ internal class GridControlScenarios(private val probe: ControlProbe) {
                 assertFalse(handle.isSubmitting)
                 assertFalse(flag!!.value.value)
                 assertEquals(Some("请重试"), handle.editError)
+                assertEquals(Some("Problem: 请重试"), options!!.error)
                 assertTrue(row().flag)
                 probe.defer = false
                 assertEquals(GridEditAttempt.Committed, handle.commitEdit())

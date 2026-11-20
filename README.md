@@ -42,6 +42,10 @@ scoop test --release .
 
 原生窗口使用 `dataGrid(model) { height = 480.0; handle = Some(handle) }`，其中 `handle` 是可选的 `DataGridHandle`。`handle.focusCell(GridCellAddress(rowKey, columnId))` 定位到真实单元格；焦点在成功布局后完成。Grid 使用应用的 `ThemeSource`，自定义单元格继续组合普通 View。
 
+`labels = GridLabels(name = "订单", selectPage = "选择本页", saving = "保存中")` 配置网格名称、行选择、表头拖动说明与保存提示，切换文案保留查询、焦点和草稿。`labels.error` 只格式化显示错误，`handle.editError` 和应用回调保留原消息；菜单、查找、状态栏和面板的 Labels 也提供相同的错误呈现入口。
+
+内置编辑器可传 `labels = GridEditorLabels(...)`，例如 `gridLongEditor(value, GridEditorLabels(invalidInteger = "Use an integer"))`；它在创建草稿时捕获提示，不改变实际值或解析规则。日期编辑器与筛选面板通过各自 Labels 的 `calendarLocale` 复用 `CalendarLocale` 的月／星期／数字／日期及前后翻月名称；日期文字仍使用严格的 YYYY-MM-DD。布尔显示文字可改，导入仍接受 true／false、1／0 和“是”／“否”。
+
 原生无障碍支持按行列读取离屏值，以及明确的 Realize／Reveal／Focus。读取不创建 View；显露使用表头和冻结区扣除后的实际空间，RTL 沿逻辑 Start／End 解析。`pendingCell`、`isPending` 与 `cancelFocus()` 同样覆盖原生焦点请求。
 
 `DataGridState(..., rowSelection = GridRowSelectionMode.Multiple)` 启用业务行多选，`Single` 启用单选，默认 `Disabled`。首个可见业务列显示 Checkbox，Shift＋点击按当前结果顺序扩展行范围；浏览格的 Shift＋Space 切换该行。多选表头的三态 Checkbox 只选择当前页的合格记录，不包含额外固定行。`selectable = Some { row -> ... }` 可限定不可变记录的选择资格；`selectionCheckboxes = false` 隐藏控件，保留选中底色和原生行选择动作。

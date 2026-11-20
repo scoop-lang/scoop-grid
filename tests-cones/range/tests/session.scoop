@@ -74,6 +74,7 @@ internal class RangeProbe: Closeable {
     var findNext: NativeNode? = None
     var findPrevious: NativeNode? = None
     var findQuery: GridQuery? = None
+    val findLabels = state(GridFindLabels())
     var savedView: GridViewState? = None
     var restoredView: GridRestoreResult? = None
     var savedOffset = Point(0.0, 0.0)

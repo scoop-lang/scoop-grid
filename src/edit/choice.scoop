@@ -7,7 +7,8 @@ import scoop.window.*
 public class GridChoiceEditor<T: Equals<T>> public constructor(
     initial: T,
     public val choices: Array<Choice<T>>,
-    private val parse: ((String) -> GridCandidate<T>)? = None
+    private val parse: ((String) -> GridCandidate<T>)? = None,
+    private val labels: GridEditorLabels = GridEditorLabels()
 ): GridEditor<T> {
     public val value: State<T> = state(initial)
     public val popup: OverlayHandle = OverlayHandle()
@@ -32,20 +33,20 @@ public class GridChoiceEditor<T: Equals<T>> public constructor(
         if (available(value.value))
             GridCandidate.Value(value.value)
         else
-            GridCandidate.Rejected("请选择一个可用选项")
+            GridCandidate.Rejected(labels.invalidChoice)
     private fun parseLabel(text: String): GridCandidate<T> {
         var match: Choice<T>? = None
         for (choice in choices) {
             if (!choice.enabled || choice.label != text)
                 continue
             when (match) {
-                case Some(_) -> return GridCandidate.Rejected("多个选项名称相同，请使用列表选择")
+                case Some(_) -> return GridCandidate.Rejected(labels.ambiguousChoice)
                 case None -> match = Some(choice)
             }
         }
         return when (match) {
             case Some(val choice) -> GridCandidate.Value(choice.value)
-            case None -> GridCandidate.Rejected("请选择一个可用选项")
+            case None -> GridCandidate.Rejected(labels.invalidChoice)
         }
     }
     public override fun importText(text: String): String? {
@@ -60,7 +61,7 @@ public class GridChoiceEditor<T: Equals<T>> public constructor(
                 value.value = next
                 None
             } else
-                Some("请选择一个可用选项")
+                Some(labels.invalidChoice)
         }
     }
     public override fun cancelComposition(): Unit = Unit
@@ -90,6 +91,8 @@ public class GridChoiceEditor<T: Equals<T>> public constructor(
                     labelTarget = Some(reference),
                     fonts = Some(options.fonts),
                     theme = Some(options.theme),
+                    placeholder = labels.choicePlaceholder,
+                    unavailableText = labels.unavailableChoice,
                     handle = Some(popup),
                     onOpenChange =
                         {
@@ -153,5 +156,6 @@ public class GridChoiceEditor<T: Equals<T>> public constructor(
 public fun <T: Equals<T>> gridChoiceEditor(
     value: T,
     choices: Array<Choice<T>>,
-    parse: ((String) -> GridCandidate<T>)? = None
-): GridChoiceEditor<T> = GridChoiceEditor(value, choices, parse)
+    parse: ((String) -> GridCandidate<T>)? = None,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridChoiceEditor<T> = GridChoiceEditor(value, choices, parse, labels)

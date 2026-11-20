@@ -15,7 +15,8 @@ internal class GridDataCellProps<Row>(
     val enabled: Boolean,
     val columnSpan: Long,
     val selection: GridSelectionView<Row>?,
-    val range: GridCellRangeBounds?
+    val range: GridCellRangeBounds?,
+    val labels: GridLabels
 )
 
 /** One stable cell element hosts either its display content or its actual editor. */
@@ -30,6 +31,11 @@ internal class GridDataCell<Row>(
         val appearance = input.appearance
         val address = GridCellAddress(input.key, input.column.id)
         val edit = input.session.editing.cell(address)
+        val error =
+            when (val message = edit?.error ?: None) {
+                case Some(val text) -> Some(input.labels.error(text))
+                case None -> None
+            }
         val child =
             when (edit) {
                 case Some(val active) -> active.draft.view(
@@ -37,13 +43,14 @@ internal class GridDataCell<Row>(
                         active.focus,
                         appearance.fonts,
                         input.session.theme!!,
-                        active.error,
+                        error,
                         active.submitting,
                         { input.session.editing.submitFrom(active) },
                         { input.session.editing.cancelFrom(active) },
                         { input.session.editing.clearError(active) },
                         { key -> input.session.editing.navigateFrom(active, key) },
-                        { input.session.editing.focusSettled(active) }
+                        { input.session.editing.focusSettled(active) },
+                        input.labels.saving
                     )
                 )
                 case None -> input.column.cell(
@@ -72,7 +79,7 @@ internal class GridDataCell<Row>(
                     Some(input.session),
                     content = Some(content),
                     editable = editable,
-                    error = edit?.error ?: None,
+                    error = error,
                     submitting = edit?.submitting ?: false,
                     headers =
                         input.session.headerSemantics.headers(

@@ -20,7 +20,8 @@ internal class GridRows<Row>(
     val bottomCount: Long = 0L,
     val columnSpans: ((Row) -> Array<GridColumnSpan>)? = None,
     val selection: GridSelectionView<Row>? = None,
-    val range: GridCellRangeBounds? = None
+    val range: GridCellRangeBounds? = None,
+    val labels: GridLabels = GridLabels()
 ): ItemSource {
     public override val count: Long get() = source.count
     public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
@@ -40,7 +41,8 @@ internal class GridRows<Row>(
                 enabled,
                 spans,
                 selection,
-                range
+                range,
+                labels
             )
         return lazyElement(
             cells,
@@ -177,7 +179,7 @@ internal class GridBody<Row>(
         val rows = props.value.rows
         semantics.update(
             SemanticProperties(
-                name = Some("Data grid"),
+                name = Some(rows.labels.name),
                 enabled = rows.enabled,
                 table = Some(SemanticTableSize(rows.count, rows.columns.columns.size))
             )

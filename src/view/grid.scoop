@@ -82,7 +82,8 @@ public class DataGrid<Row> public constructor(
                         input.enabled,
                         input.selectionCheckboxes,
                         source,
-                        layout.appearance
+                        layout.appearance,
+                        input.labels
                     )
                 )
         val rows =
@@ -96,7 +97,8 @@ public class DataGrid<Row> public constructor(
                 result.bottomCount,
                 input.columnSpans,
                 selection,
-                input.state.cellRangeBounds
+                input.state.cellRangeBounds,
+                input.labels
             )
         val header =
             GridHeaderCells(
@@ -106,7 +108,8 @@ public class DataGrid<Row> public constructor(
                 input.multiSortModifier,
                 input.enabled,
                 source,
-                selection
+                selection,
+                input.labels
             )
         val previousCell: GridCellAddress? =
             when (session.requested) {

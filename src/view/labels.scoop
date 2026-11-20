@@ -1,0 +1,12 @@
+package scoop.grid
+
+/** Presentation only; stable model, cell and control identities never use these labels. */
+public class GridLabels public constructor(
+    public val name: String = "Data grid",
+    public val selectPage: String = "选择当前页",
+    public val selectRow: (Long) -> String = { index -> f"选择第 ${index} 行" },
+    public val moveColumnHelp: String = "拖动调整列顺序；也可使用列工具前移或后移",
+    public val moveGroupHelp: String = "拖动调整整组顺序；也可使用列工具中的组移动按钮",
+    public val saving: String = "正在保存…",
+    public val error: (String) -> String = { message -> message }
+)

@@ -59,6 +59,8 @@ internal fun SelectionProbe.inspect(tag: Int) {
         }
         case 3 -> {
             assertFalse(far!!.flag(0))
+            tableNode = Some(table())
+            assertTrue(tableNode!!.text(0, Some("Data grid")))
             header = Some(control(-1L))
             checkbox = Some(control(0L))
             assertFalse(control(2L).flag(1))
@@ -96,9 +98,22 @@ internal fun SelectionProbe.inspect(tag: Int) {
         case 13 -> {
             keys([0L, 1L, 3L, 4L]);
             assertEquals(None, handle.editingCell)
+            assertEquals(Some(selectionAddress(3L)), handle.focusedCell)
+            assertTrue(tableNode!!.text(0, Some("Orders")))
+            assertTrue(tableNode!!.same(table()))
+            assertTrue(header!!.text(0, Some("Select page")))
+            assertTrue(header!!.same(control(-1L)))
+            assertTrue(checkbox!!.text(0, Some("Select row 1")))
+            assertTrue(checkbox!!.same(control(0L)))
+            assertTrue(labelRows!! === model.result.rows)
+            assertTrue(labelColumns!! === model.columnState)
+            assertTrue(keep(root!!.find("grid-header-c0")!!).text(5, Some("Move columns")))
+            assertEquals(0, queries)
         }
         case 14 -> {
             keys([0L, 1L, 3L, 4L])
+            assertTrue(tableNode!!.text(0, Some("Data grid")))
+            assertTrue(header!!.text(0, Some("选择当前页")))
             header = Some(control(-1L))
             assertEquals(0L, header!!.numericValue)
             nativeSelection(0L, false, 0L)
@@ -236,8 +251,22 @@ internal fun SelectionProbe.completed(tag: Int, result: Int) {
         case 6 -> click()
         case 9 -> click(true)
         case 12 -> assertTrue(handle.focusCell(selectionAddress(3L)))
-        case 13 -> shiftSpace()
-        case 14 -> model.setPage(1L)
+        case 13 -> {
+            labelRows = Some(model.result.rows)
+            labelColumns = Some(model.columnState)
+            labels.value =
+                GridLabels(
+                    name = "Orders",
+                    selectPage = "Select page",
+                    selectRow = { index -> f"Select row ${index}" },
+                    moveColumnHelp = "Move columns"
+                )
+            shiftSpace()
+        }
+        case 14 -> {
+            labels.value = GridLabels()
+            model.setPage(1L)
+        }
         case 17 -> model.setQuery(
             GridQuery(quickFilter = "1", pagination = GridPagination.Page(0L, 5L))
         )
