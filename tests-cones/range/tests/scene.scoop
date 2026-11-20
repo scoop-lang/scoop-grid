@@ -46,6 +46,22 @@ internal class RangeScene(private val probe: RangeProbe, scope: ComponentScope):
                             probe.lastFind = Some(result);
                             probe.searches += 1
                         }
+                },
+                gridStatusBar(probe.model) {
+                    enabled = probe.enabled.value
+                    labels =
+                        GridStatusLabels(
+                            rows = { count -> f"Rows ${count}" },
+                            selected = { count -> f"Selected ${count}" },
+                            calculate = "Calculate",
+                            summary =
+                                {
+                                    value -> f"N ${value.count} Sum ${value.sum} Avg ${
+                                        value.average?.toString() ?: "—"
+                                    }"
+                                },
+                            changed = "Result changed"
+                        )
                 }
             ]
         )
@@ -67,7 +83,9 @@ private class RangePanel(private val probe: RangeProbe, scope: ComponentScope): 
         context.placeChild(1L, Point(460.0, 320.0))
         context.measureChild(2L, Constraints.tight(Size(450.0, 80.0)))
         context.placeChild(2L, Point(0.0, 320.0))
-        return LayoutResult(LayoutMetrics(constraints.constrain(Size(640.0, 400.0))), Unit)
+        context.measureChild(3L, Constraints.tight(Size(640.0, 72.0)))
+        context.placeChild(3L, Point(0.0, 400.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(640.0, 472.0))), Unit)
     }
     public override fun scene(context: SceneContext, value: Unit) {
         context.children()

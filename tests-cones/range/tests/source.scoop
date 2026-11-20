@@ -60,7 +60,13 @@ internal fun rangeColumns(probe: RangeProbe): Array<GridColumn<RangeRecord>> =
                 gridColumn<RangeRecord, Long>(
                     id,
                     "Value",
-                    { row -> row.value },
+                    {
+                        row ->
+                        val callback = probe.onNumberRead
+                        probe.onNumberRead = None
+                        callback?.invoke()
+                        row.value
+                    },
                     gridLongValues(),
                     size,
                     cell =

@@ -70,6 +70,10 @@ scoop test --release .
 
 `handle.saveViewState()` 还可包含最近 Accepted 的阅读行 key、行内／水平逻辑偏移与最近成功的单元格地址；用 `includePosition`、`includeFocus` 可分别关闭。`handle.restoreViewState(snapshot)` 经当前编辑门控恢复阅读位置，默认保持现有外部焦点；`restoreFocus = true` 在布局完成后显式定位保存的单元格。新滚动、查询或模型替换取消旧定位，卸载后的调用返回 Rejected。[十万行示例](examples/basic/src/main.scoop) 提供会话内的“保存视图／恢复视图”按钮。
 
+`gridStatusBar(model)` 显示结果数、业务选择数和“统计选区”按钮；只有明确点击才读取选区，拖选和滚动不反复扫描数据。统计包含数值个数、合计、最小／最大和平均值；来源、列或范围变化后旧结果失效，调宽和普通滚动保留结果。`labels` 可配置全部文案与结果格式，`content` 可附加应用状态 View，`showStatistics = false` 隐藏统计入口。
+
+程序可直接调用 `model.rangeStatistics()`，无选区返回 None。整数经 `BigDecimal` 精确转换和累加，保留超过 2^53 或 Long 范围的总和；浮点采用最短十进制表示，平均值使用 34 位有效数字、HalfEven。自定义列可实现 `numericValue(row)` 提供自身十进制数值；默认使用已有 `number(row)`。缺值与非数值不参与，读取或转换错误不生成成功的零值。
+
 `gridFilterPanel(model) { handle = Some(handle) }` 编辑文本、整数、数值、日期、布尔和集合条件，可嵌套 AND／OR 组。修改草稿后点击“应用筛选”才更新查询；“还原草稿”恢复当前模型条件，“清除筛选”移除条件并保留排序与快速筛选。整数保留完整 Long 精度，日期复用现有 DatePicker；非法输入和反向区间保留原文供修正。通过同一 handle 处理当前单元格的校验和异步提交，等待保存后不会自动重放先前被拒绝的筛选动作。
 
 集合条件的“加载候选”按完整本地数据读取该列，候选列表按视口构造。可搜索、选中当前列表或清空选择；搜索不会丢弃列表外已选值。重名标签仍保留不同的真实值，缺值和空字符串分别显示。数据或列定义替换后提示重新加载；查询、分页和调宽复用已加载的候选。自定义 `GridValues<T>` 须同时提供字面量解码 `literal` 和编码 `encode`，不使用格式化文字作为候选身份。

@@ -326,7 +326,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 )
                 add(
                     dataGrid(model) {
-                        height = 420.0
+                        height = 380.0
                         rowHeight = 48.0
                         rowSizing = GridRowSizing.Content([GridColumnId("name")])
                         columnSpans =
@@ -369,7 +369,6 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 row {
                     alignment = CrossAlignment.Center
                     spacing = 8.0
-                    label(f"已选择 ${model.selectedRowKeys.size} 条记录")
                     add(
                         gridPinButton(
                             "清空选择",
@@ -409,6 +408,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                         }
                     )
                 }
+                add(gridStatusBar(model))
                 label(handle.editError ?: lastEdit.value)
             }
         val content =

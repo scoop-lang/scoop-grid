@@ -275,6 +275,11 @@ public class DataGridState<Row> public constructor(
     }
     public fun exportCsv(options: GridCsvOptions = GridCsvOptions()): String =
         gridExportCsv(computed.value, columnState, selectedRows, options)
+    public fun rangeStatistics(): GridRangeStatistics? {
+        val snapshot = computed.value
+        val range = cellRange ?: return None
+        return Some(gridRangeStatistics(snapshot.result.rows, snapshot.columns, columnState, range))
+    }
     public fun saveViewState(
         readingPosition: GridReadingPosition? = None,
         focusedCell: GridCellAddress? = None

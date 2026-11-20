@@ -1,0 +1,59 @@
+package scoop.grid
+
+import scoop.math.BigInteger
+import scoop.math.BigDecimal
+import scoop.math.MathContext
+import scoop.ui.component.TableSource
+
+public class GridRangeStatistics public constructor(
+    public val range: GridCellRange,
+    public val rowCount: Long,
+    public val columnCount: Long,
+    public val count: BigInteger,
+    public val sum: BigDecimal,
+    public val minimum: BigDecimal?,
+    public val maximum: BigDecimal?,
+    public val average: BigDecimal?
+)
+
+internal fun <Row> gridRangeStatistics(
+    rows: TableSource<Row>,
+    definitions: GridColumns<Row>,
+    states: Array<GridColumnState>,
+    range: GridCellRange
+): GridRangeStatistics {
+    val order = GridSpanColumns(states)
+    val bounds =
+        gridCellRangeBounds(range, rows, order) ?: throw IllegalArgumentException(Some("统计选区已失效"))
+    val columns =
+        Array<GridColumn<Row>>(bounds.lastColumn - bounds.firstColumn + 1L) {
+            index -> definitions.get(order.idAt(bounds.firstColumn + index))
+        }
+    var count = BigInteger.ZERO
+    var sum = BigDecimal.ZERO
+    var minimum: BigDecimal? = None
+    var maximum: BigDecimal? = None
+    for (index in bounds.firstRow .. bounds.lastRow) {
+        val row = rows.rowAt(index)
+        for (column in columns) {
+            val value = column.numericValue(row) ?: continue
+            count += BigInteger.ONE
+            sum += value
+            minimum = Some(minimum?.min(value) ?: value)
+            maximum = Some(maximum?.max(value) ?: value)
+        }
+    }
+    return GridRangeStatistics(
+        range,
+        bounds.lastRow - bounds.firstRow + 1L,
+        columns.size,
+        count,
+        sum,
+        minimum,
+        maximum,
+        if (count == BigInteger.ZERO)
+            None
+        else
+            Some(sum.div(BigDecimal(count), MathContext.Decimal128))
+    )
+}

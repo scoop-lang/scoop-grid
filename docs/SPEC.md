@@ -90,6 +90,14 @@
 
 开始前执行既有编辑门控；非法输入、组合输入或等待保存时拒绝，也不在保存完成后重放旧手势。Escape 结束拖动并清除范围；失焦、第二触点、输入取消、禁用、关闭、几何失效，以及模型／结果来源／列配置／主题布局配置／触摸选择模式变化结束手势，保留仍有效的最后范围。应用更新范围时结束旧手势，不覆盖应用结果。结束、离开边缘或抵达滚动边界后停止请求动画帧。
 
+## 状态栏与矩形数值统计
+
+`model.rangeStatistics()` 从同一捕获结果、逻辑列序与唯一矩形读取数据，无选区返回 None。`GridRangeStatistics` 包含 `range`、`rowCount`、`columnCount`、数值 `count`、`sum`、`minimum`、`maximum` 和 `average`。只读取范围中的行，每行一次，不构造 View；固定区连续，跨列显示仍按真实逻辑字段统计，缺值和非数值不参与。已知空数值集合的 count／sum 为零，最值与平均值为 None；读取或数值转换失败抛出异常，不返回部分统计或伪造零值。
+
+`GridColumn.numericValue(row)` 提供可统计的 `BigDecimal` 值，默认使用已有 `number(row)` 的有限 Double；内置类型化整数直接从 Long 转换，保持超过 2^53 的整数及累加结果精确，浮点使用 `BigDecimal.fromDouble` 的最短十进制表示。它不调用 formatter。`count` 为 `BigInteger`，求和与比较使用精确十进制运算，平均值按 `MathContext.Decimal128`（34 位有效数字、HalfEven）计算。这是只读数据摘要，不引入表达式、公式或计算列。
+
+`gridStatusBar(model) { ... }` 显示结果条数、业务选择条数和“统计选区”入口。明确点击才计算当前矩形，呈现、滚动和持续拖选本身不扫描数据。结果按捕获来源、列定义、可见逻辑列序和范围复用；数据或范围变化后旧统计不再显示，需要再次计算。计算回调导致模型变化时不展示旧结果。无选区或禁用时按钮不可用。`labels` 配置文案及结果格式，`showStatistics` 可关闭统计入口，`content` 可附加应用状态 View；字体、主题和按钮焦点复用现有 UI。
+
 ## 列操作与工具面板
 
 `DataGridState` 的可选 `headers` 声明多级列树：`GridHeaderNode.Column(columnId)` 引用现有列，`Group(groupId, title, children)` 声明一个非空组。`GridColumnGroupId` 是非空稳定字符串，与列 ID 分属不同身份域。树必须恰好包含所有列，每列一次；组 ID 在整棵树内唯一。省略时为平面表头，初始顺序按树的叶节点顺序。标题不参与身份，隐藏列仍属于原组。

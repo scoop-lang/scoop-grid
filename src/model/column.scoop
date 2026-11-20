@@ -1,6 +1,7 @@
 package scoop.grid
 
 import scoop.graphics.text.*
+import scoop.math.BigDecimal
 import scoop.ui.*
 import scoop.ui.component.TableColumnSize
 import scoop.ui.component.Label
@@ -25,6 +26,11 @@ public interface GridColumn<Row> {
     ): View
     public fun text(row: Row): String?
     public fun number(row: Row): Double?
+    public fun numericValue(row: Row): BigDecimal? =
+        when (number(row)) {
+            case Some(val value) -> Some(BigDecimal.fromDouble(value))
+            case None -> None
+        }
     public fun missing(row: Row): Boolean
     public fun compare(left: Row, right: Row): Long
     public fun predicate(condition: GridCondition): (Row) -> Boolean
@@ -73,6 +79,25 @@ private class TypedGridColumn<Row, T>(
 ): GridColumn<Row> {
     public override val valueKind: GridValueKind? get() = Some(values.kind)
     public override val editing: GridColumnEditing<Row>? = edit?.bind(value)
+    public override fun numericValue(row: Row): BigDecimal? {
+        val current = value(row)
+        if (values.missing(current))
+            return None
+        if (values.kind == GridValueKind.Integer || values.kind == GridValueKind.Number) {
+            return when (values.encode(current)) {
+                case Integer(val number) -> Some(BigDecimal(number))
+                case Number(val number) -> Some(BigDecimal.fromDouble(number))
+                case Empty -> None
+                else -> throw IllegalArgumentException(
+                    Some("numeric column requires a numeric literal")
+                )
+            }
+        }
+        return when (values.number(current)) {
+            case Some(val number) -> Some(BigDecimal.fromDouble(number))
+            case None -> None
+        }
+    }
     public override fun cell(
         row: Row,
         fonts: FontCollection?,

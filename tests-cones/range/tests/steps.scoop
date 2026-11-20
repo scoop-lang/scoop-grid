@@ -26,6 +26,10 @@ internal fun RangeProbe.accepted() {
         assertTrue(handle.focusCell(rangeAddress(2L, 1L)))
     waiting = true
     retry = false
+    if (phase >= 186) {
+        postStatistics()
+        return
+    }
     if (phase >= 158) {
         calls!!.post(root!!, phase, 20)
         return
@@ -39,6 +43,10 @@ internal fun RangeProbe.accepted() {
 
 internal fun RangeProbe.inspect(tag: Int) {
     assertEquals(phase, tag)
+    if (phase >= 186) {
+        inspectStatistics()
+        return
+    }
     if (phase >= 158) {
         inspectViewState()
         return
@@ -240,6 +248,10 @@ internal fun RangeProbe.completed(tag: Int, result: Int) {
         return
     }
     phase += 1
+    if (phase >= 186) {
+        advanceStatistics()
+        return
+    }
     if (phase >= 158) {
         advanceViewState()
         return

@@ -76,6 +76,9 @@ internal class RangeProbe: Closeable {
     var savedView: GridViewState? = None
     var restoredView: GridRestoreResult? = None
     var savedOffset = Point(0.0, 0.0)
+    var statisticsButton: NativeNode? = None
+    var statisticsValues: NativeNode? = None
+    var onNumberRead: (() -> Unit)? = None
     val live = HashSet<GridCellAddress>()
     val selected =
         state(
@@ -192,7 +195,7 @@ internal class RangeProbe: Closeable {
                     active.createWindow(
                         windowAttributes {
                             title = "Scoop Grid cell range"
-                            size = LogicalSize(640.0, 400.0)
+                            size = LogicalSize(640.0, 472.0)
                         }
                     )
                 window = Some(native)

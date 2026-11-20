@@ -104,21 +104,6 @@ internal fun RangeProbe.advanceViewState() {
             restoredView = Some(handle.restoreViewState(pendingView(), restoreFocus = true))
             handle.cancelFocus()
         }
-        case 186 -> {
-            restoredView = Some(handle.restoreViewState(savedView!!))
-            ui!!.close()
-            assertFalse(handle.clearCellRange())
-            rejected(handle.copyCells())
-            restoredView = Some(handle.restoreViewState(savedView!!))
-            waiting = true
-            calls!!.post(root!!, phase, 20)
-            return
-        }
-        case 187 -> {
-            finished = true
-            application!!.requestExit()
-            return
-        }
         else -> {}
     }
     frame!!.requestFrame()
@@ -214,13 +199,6 @@ internal fun RangeProbe.inspectViewState() {
             restored()
             assertEquals(Point(0.0, 0.0), scroll.offset)
             assertTrue(outside.hasFocus)
-        }
-        case 186 -> {
-            restoreRejected()
-            assertFalse(handle.isAttached)
-            assertFalse(node!!.flag(0))
-            assertFalse(findField!!.flag(0))
-            assertEquals(None, handle.saveViewState()?.focusedCell ?: None)
         }
         else -> {}
     }
