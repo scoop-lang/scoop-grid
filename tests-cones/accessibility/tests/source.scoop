@@ -1,0 +1,97 @@
+package scoop.grid.tests.accessibility
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class AxRows(
+    private val probe: GridAxProbe,
+    private val omitted: Long? = None
+): TableSource<Long> {
+    public override val count: Long get() =
+        if (omitted == None)
+            100000000L
+        else
+            99999999L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(value(index))
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (
+                value < 0L || value >= 100000000L || omitted == Some(value)
+            )
+                None
+            else
+                when (omitted) {
+                    case Some(val missing) -> Some(
+                        if (value > missing)
+                            value - 1L
+                        else
+                            value
+                    )
+                    case None -> Some(value)
+                }
+            else -> None
+        }
+    private fun value(index: Long): Long =
+        when (omitted) {
+            case Some(val missing) -> if (index >= missing)
+                index + 1L
+            else
+                index
+            case None -> index
+        }
+    public override fun rowAt(index: Long): Long {
+        assertTrue(index >= 0L && index < count)
+        probe.rowReads += 1L
+        return value(index)
+    }
+}
+
+internal fun axColumns(probe: GridAxProbe): Array<GridColumn<Long>> =
+    Array<GridColumn<Long>>(300L) {
+        column -> gridColumn<Long, Long>(
+            GridColumnId(f"column-${column}"),
+            f"Column ${column}",
+            { row -> row * 1000L + column },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(90.0)),
+            cell =
+                Some {
+                    row ->
+                    probe.built += 1L
+                    element(
+                        axAddress(row, column),
+                        { props, scope -> AxObserved(probe, props, scope) },
+                        [label(f"${row}:${column}")]
+                    )
+                }
+        )
+    }
+
+internal fun axAddress(row: Long, column: Long): GridCellAddress =
+    GridCellAddress(ViewKey.Number(row), GridColumnId(f"column-${column}"))
+
+private class AxObserved(
+    private val probe: GridAxProbe,
+    private val props: Props<GridCellAddress>,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    public override fun onMount() {
+        assertTrue(probe.live.add(props.value), Some("a frozen or center cell mounted twice"))
+    }
+    public override fun onUnmount() {
+        assertTrue(probe.live.remove(props.value))
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val child = context.measureChild(0L, constraints)
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(child, Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+    }
+}

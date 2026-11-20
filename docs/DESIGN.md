@@ -307,7 +307,8 @@ D0 原型必须验证以下能力，并只对确实缺失的部分扩展 UI spec
 | 表头与正文共享唯一视口 | 上游 [PR #158](https://github.com/scoop-lang/scoop/pull/158) 允许正文 LazyFocus 与集合语义绑定真实祖先 ScrollViewport；表头保持独立，不占业务行身份或正文 Tab 入口 |
 | 自定义单元格内部 Tab 与离开单元格 | 已使用现有 FocusScope 与域边界默认动作实现；双按钮内容、Tab／Shift＋Tab、Escape 返回浏览及首尾跨出网格的原生测试通过 |
 | 真实编辑器及系统输入法 | 已沿现有 TextEditorState／TextEditHost 实现类型化草稿和应用提交；系统拼音候选取消、选词和 Enter 提交通过。浏览直接输入启动编辑仍需单独闭合 |
-| 原生访问离屏列 | 扩展现有 Grid 单元格 Realize／Reveal／Focus 路径，按行列 key 准备真实目标，与键盘请求共享取消和几何发布 |
+| 原生访问离屏列 | 上游 [PR #160](https://github.com/scoop-lang/scoop/pull/160) 提供按行列 key 的 Realize／Reveal／Focus 与 `bindGridColumns`，共享真实焦点、取消和退休路径 |
+| 冻结区域内显露与首次几何 | 上游 [PR #162](https://github.com/scoop-lang/scoop/pull/162) 用 `withScrollReveal` 限制真实视口的区域和轴；[PR #163](https://github.com/scoop-lang/scoop/pull/163) 在捕获前合并测量中新挂载的标签，使首次 Accepted 几何匹配当前内容 |
 
 尚未通过的能力继续按上表验证，不因基础接口已交付而自动视为完成。不得通过全部单元格常驻、先聚焦错误列再跳转、隐藏文本框或第二套焦点树绕过。实际可用公共合同记录在 SPEC.md，只有一条生产组件路径。
 
@@ -441,7 +442,7 @@ Grid 样式包括表头／组头、正文／交替行、边线、hover、行选�
 
 编辑时由真实 TextEditHost 发布文字、选择与 composition，表格外层只表达该格编辑状态。分组和树的展开、行选择、冻结／调宽菜单操作复用同一业务入口；无效或已删除目标返回正确的不可用结果。
 
-macOS AX、Windows UIA、Linux AT-SPI 的进程内方法、外部客户端和 VoiceOver／Narrator／Orca 分别验收。现有基础 provider 通过不能自动证明新网格的虚拟列、固定区或层级组合通过；实际支持范围按测试结果记录。
+本阶段只做本机 macOS 验证，分别记录公开 AX 协议、外部客户端和 VoiceOver 的实际结果；不安排 Windows UIA、Linux AT-SPI 或其他平台验收。现有基础 provider 通过不能自动证明新网格的虚拟列、固定区或层级组合通过；实际支持范围按测试结果记录。
 
 ## 14. 关键组合合同
 

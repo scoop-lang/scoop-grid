@@ -27,7 +27,7 @@ internal class GridRows<Row>(
     fun semantics(): ItemSemantics =
         ItemSemantics(
             this,
-            { _ -> Some(SemanticItemProperties(focusable = true)) },
+            { _ -> Some(SemanticItemProperties(enabled = session.enabled, focusable = true)) },
             grid =
                 Some(
                     SemanticGrid(
@@ -51,6 +51,7 @@ internal class GridRows<Row>(
                                 case Some(val at) -> Some(
                                     SemanticItemProperties(
                                         value = columns.columns[column].text(source.rowAt(at)),
+                                        enabled = session.enabled,
                                         focusable = true
                                     )
                                 )
@@ -70,6 +71,7 @@ internal class GridBody<Row>(
 ): LazyElement<Rect>(scope) {
     private val semantics = scope.semantics(SemanticRole.Table)
     public override fun onMount() {
+        props.value.session.tableSemantics = Some(semantics)
         props.value.session.bodyFocus =
             Some(
                 scope.lazyFocus(
@@ -84,6 +86,7 @@ internal class GridBody<Row>(
         semantics.update(
             SemanticProperties(
                 name = Some("Data grid"),
+                enabled = props.value.session.enabled,
                 table = Some(SemanticTableSize(rows.count, rows.columns.columns.size))
             )
         )
@@ -151,6 +154,9 @@ internal class GridRow<Row>(
     scope: ComponentScope
 ): LazyElement<Unit>(scope) {
     private val semantics = scope.semantics(SemanticRole.Row)
+    public override fun onMount() {
+        scope.bindGridColumns(props.value.session.tableSemantics!!, props.value.key)
+    }
     public override fun update(): UiInvalidation {
         scope.routeSemanticsChildren(Some(semantics))
         return UiInvalidation.Layout
@@ -188,7 +194,17 @@ internal class GridRow<Row>(
             context.measureItem(
                 index,
                 Constraints.tight(Size(box.width, plan.rowHeight)),
-                LayoutInput(GridCellClip(box.clip))
+                LayoutInput(
+                    GridCellClip(
+                        box.clip,
+                        plan.columns.region(index, plan.headerHeight, plan.bodyHeight),
+                        if (plan.columns.frozen(index))
+                            ScrollAxes.Vertical
+                        else
+                            ScrollAxes.Both,
+                        plan.viewport
+                    )
+                )
             )
             context.placeItem(index, Point(box.x - plan.scroll.snapshot.offset.x, 0.0))
         }
@@ -219,7 +235,17 @@ internal class GridHeader(scope: ComponentScope): LazyElement<Unit>(scope) {
             context.measureItem(
                 index,
                 Constraints.tight(Size(box.width, plan.headerHeight)),
-                LayoutInput(GridCellClip(box.clip))
+                LayoutInput(
+                    GridCellClip(
+                        box.clip,
+                        plan.columns.region(index, 0.0, plan.headerHeight),
+                        if (plan.columns.frozen(index))
+                            ScrollAxes.Vertical
+                        else
+                            ScrollAxes.Horizontal,
+                        plan.viewport
+                    )
+                )
             )
             context.placeItem(index, Point(box.x - plan.scroll.snapshot.offset.x, 0.0))
         }

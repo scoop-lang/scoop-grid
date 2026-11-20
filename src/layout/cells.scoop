@@ -8,7 +8,12 @@ import scoop.ui.*
 import scoop.window.*
 import scoop.window.accessibility.*
 
-internal class GridCellClip(val bounds: Rect)
+internal class GridCellClip(
+    val bounds: Rect,
+    val region: Rect,
+    val axes: ScrollAxes,
+    val viewport: ScrollViewport
+)
 
 internal class GridRowCells<Row>(
     private val row: Row,
@@ -100,7 +105,7 @@ internal class GridCellProps<Row>(
 internal class GridCell<Row>(
     private val props: Props<GridCellProps<Row>>,
     scope: ComponentScope
-): Element<Rect>(scope) {
+): Element<GridCellClip>(scope) {
     private val handle = FocusHandle()
     private val area = scope.createArea(focusable = true)
     private val focus = scope.focusTarget(area, FocusOptions(Some(handle), props.value.tabStop))
@@ -288,9 +293,9 @@ internal class GridCell<Row>(
             context.consume()
     }
     public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
-        Rect
+        GridCellClip
     > {
-        val clip = context.input<GridCellClip>().bounds
+        val clip = context.input<GridCellClip>()
         val size = constraints.constrain(Size(0.0, 0.0))
         val inset = min(props.value.appearance.padding, min(size.width, size.height) / 2.0)
         val child =
@@ -313,7 +318,12 @@ internal class GridCell<Row>(
         )
         return LayoutResult(LayoutMetrics(size), clip)
     }
-    public override fun scene(context: SceneContext, clip: Rect) {
+    public override fun scene(context: SceneContext, clip: GridCellClip) {
+        context.withScrollReveal(clip.viewport, clip.region, clip.axes) {
+            cell -> present(cell, clip.bounds)
+        }
+    }
+    private fun present(context: SceneContext, clip: Rect) {
         val input = props.value
         val bounds = Rect(0.0, 0.0, context.size.width, context.size.height)
         val palette = input.appearance.theme.tokens.palette

@@ -23,7 +23,8 @@ internal class GridMeasurePlan(
     val headerHeight: Double,
     val bodyHeight: Double,
     val overscan: Double,
-    val visibleColumns: Array<Long>
+    val visibleColumns: Array<Long>,
+    val viewport: ScrollViewport
 )
 
 internal class GridRoot<Row>(private val props: Props<GridRootProps<Row>>, scope: ComponentScope):
@@ -75,8 +76,8 @@ Element<GridMeasurePlan>(scope) {
         val content = Size(columns.total, bodyExtent + headerHeight)
         val bodyHeight = max(0.0, size.height - headerHeight)
         var scroll = viewport.layout(size, content)
-        when (input.session.bodyFocus?.pendingItem ?: None) {
-            case Some(val key) -> when (input.rows.indexOfKey(key)) {
+        when (input.session.requested) {
+            case Some(val target) -> when (input.rows.indexOfKey(target.row)) {
                 case Some(val index) -> {
                     val old = scroll.snapshot.offset
                     val top = index.toDouble() * rowHeight
@@ -88,12 +89,7 @@ Element<GridMeasurePlan>(scope) {
                                 top + rowHeight - bodyHeight
                             else
                                 old.y
-                    val target = input.session.requested
-                    val column =
-                        if (target?.row == Some(key))
-                            input.columns.indexOf(target!!.column)
-                        else
-                            None
+                    val column = input.columns.indexOf(target.column)
                     val x =
                         when (column) {
                             case Some(val at) -> columns.reveal(at, old.x)
@@ -118,7 +114,8 @@ Element<GridMeasurePlan>(scope) {
                 headerHeight,
                 bodyHeight,
                 input.input.overscan * density,
-                columns.visible(scroll.presentationOffset.x)
+                columns.visible(scroll.presentationOffset.x),
+                viewport
             )
         val shared = LayoutInput(plan)
         context.measureChild(0L, Constraints.tight(Size(columns.total, headerHeight)), shared)

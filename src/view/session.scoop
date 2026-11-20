@@ -22,6 +22,7 @@ internal class GridCellFocus(
 internal class GridSession<Row>: GridMount {
     var viewport: ScrollViewport? = None
     var bodyFocus: LazyFocus? = None
+    var tableSemantics: SemanticsHandle? = None
     var theme: ThemeSource? = None
     var entry: FocusHandle? = None
     val editing = GridEditCoordinator<Row>(this)
@@ -84,12 +85,18 @@ internal class GridSession<Row>: GridMount {
         return true
     }
     public override val active: Boolean get() = owner?.isMounted ?: false
-    public override val pending: Boolean get() = active && (bodyFocus?.isPending ?: false)
-    public override val requested: GridCellAddress? get() =
-        if (pending)
+    public override val pending: Boolean get() = requested != None
+    public override val requested: GridCellAddress? get() {
+        if (!active)
+            return None
+        for ((address, cell) in cells)
+            if (cell.handle.isPending)
+                return Some(address)
+        return if (bodyFocus?.isPending ?: false)
             intent
         else
             None
+    }
     public override val focused: GridCellAddress? get() {
         for ((address, cell) in cells)
             if (cell.scope.input.activity.hasFocus)
@@ -161,6 +168,7 @@ internal class GridSession<Row>: GridMount {
         owner = None
         viewport = None
         bodyFocus = None
+        tableSemantics = None
         intent = None
         model = None
         theme = None
@@ -252,6 +260,9 @@ internal class GridSession<Row>: GridMount {
     }
     public override fun cancel() {
         bodyFocus?.cancelRequest()
+        for ((_, cell) in cells)
+            if (cell.handle.isPending)
+                cell.handle.clearFocus()
         intent = None
     }
     fun register(address: GridCellAddress, cell: GridCellFocus) {

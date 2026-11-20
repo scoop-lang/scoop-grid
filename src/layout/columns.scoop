@@ -103,6 +103,39 @@ internal class GridColumnLayout(
     val endWidth = prefix[widths.size] - prefix[endStart]
     val startVisible = min(startWidth, viewport)
     val endVisible = min(endWidth, viewport - startVisible)
+    fun frozen(index: Long): Boolean = index < startCount || index >= endStart
+    fun region(index: Long, top: Double, height: Double): Rect {
+        val rtl = direction == LayoutDirection.Rtl
+        if (index < startCount)
+            return Rect(
+                if (rtl)
+                    viewport - startVisible
+                else
+                    0.0,
+                top,
+                startVisible,
+                height
+            )
+        if (index >= endStart)
+            return Rect(
+                if (rtl)
+                    0.0
+                else
+                    viewport - endVisible,
+                top,
+                endVisible,
+                height
+            )
+        return Rect(
+            if (rtl)
+                endVisible
+            else
+                startVisible,
+            top,
+            viewport - startVisible - endVisible,
+            height
+        )
+    }
     fun visible(offset: Double): Array<Long> {
         val result = ArrayList<Long>()
         append(result, 0L, startCount, 0.0, startVisible)
