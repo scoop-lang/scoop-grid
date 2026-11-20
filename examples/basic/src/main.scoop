@@ -137,9 +137,10 @@ private class GridExample(scope: ComponentScope): Component(scope) {
         val content =
             column {
                 label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
+                add(gridQuickFilter(model) { this.handle = Some(handle) })
                 add(
                     dataGrid(model) {
-                        height = 560.0
+                        height = 480.0
                         rowHeight = 64.0
                         this.handle = Some(handle)
                         onEditEnd =
@@ -164,6 +165,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                             }
                     }
                 )
+                add(gridPager(model) { this.handle = Some(handle) })
                 label(handle.editError ?: lastEdit.value)
             }
         return styled(content) {

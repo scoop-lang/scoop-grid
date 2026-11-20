@@ -1,0 +1,8 @@
+package scoop.grid
+
+internal fun gridQueryReady(handle: DataGridHandle?): Boolean =
+    when (handle?.commitEdit() ?: GridEditAttempt.NoEdit) {
+        case NoEdit -> true
+        case Committed -> true
+        else -> false
+    }
