@@ -1,0 +1,20 @@
+package scoop.grid
+
+internal enum GridColumnResizeStart<Row> {
+    Ready(GridColumnResizeGesture<Row>), Rejected(String)
+}
+
+/** Restore only the column state still owned by this one pointer gesture. */
+internal class GridColumnResizeGesture<Row>(
+    val model: DataGridState<Row>,
+    val definitions: Array<GridColumn<Row>>,
+    val initial: Array<GridColumnState>,
+    val id: GridColumnId
+) {
+    var expected = initial
+    fun current(): Boolean = model.columns === definitions && model.columnState === expected
+    fun restore() {
+        if (current())
+            model.setColumnStates(initial)
+    }
+}

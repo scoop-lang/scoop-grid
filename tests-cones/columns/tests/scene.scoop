@@ -10,23 +10,27 @@ internal class ColumnsScene(private val probe: ColumnsProbe, scope: ComponentSco
 ) {
     public override fun render(): View {
         val probe = this.probe
-        return element(
-            { mount -> ColumnsLayout(probe, mount) },
-            [
-                gridColumnsPanel(probe.model, probe.handle) {
-                    height = 260.0
-                    enabled = probe.enabled.value
-                },
-                dataGrid(probe.model) {
-                    handle = Some(probe.handle)
-                    width = Some(probe.width.value)
-                    height = 340.0
-                    rowHeight = 32.0
-                    headerHeight = 32.0
-                    minimumCenterWidth = 100.0
-                    enabled = probe.enabled.value
-                }
-            ]
+        return direction(
+            element(
+                { mount -> ColumnsLayout(probe, mount) },
+                [
+                    gridColumnsPanel(probe.model, probe.handle) {
+                        height = 260.0
+                        enabled = probe.enabled.value
+                    },
+                    dataGrid(probe.model) {
+                        handle = Some(probe.handle)
+                        width = Some(probe.width.value)
+                        height = 340.0
+                        rowHeight = 32.0
+                        headerHeight = 32.0
+                        minimumCenterWidth = 100.0
+                        enabled = probe.enabled.value
+                        scroll = Some(probe.scroll)
+                    }
+                ]
+            ),
+            probe.direction.value
         )
     }
 }

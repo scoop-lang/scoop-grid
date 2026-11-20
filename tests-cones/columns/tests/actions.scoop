@@ -64,6 +64,12 @@ internal fun ColumnsProbe.completed(tag: Int, result: Int) {
         return
     }
     phase += 1
+    if (phase >= 76) {
+        advanceResize()
+        if (!finished && phase != 126)
+            frame!!.requestFrame()
+        return
+    }
     when (phase) {
         case 29 -> assertTrue(view!!.preedit())
         case 31 -> key(53, "\u001b")
@@ -100,12 +106,6 @@ internal fun ColumnsProbe.completed(tag: Int, result: Int) {
                     )
                 }
             )
-        }
-        case 76 -> {
-            finished = true;
-            ui!!.close();
-            active!!.requestExit();
-            return
         }
         else -> {}
     }

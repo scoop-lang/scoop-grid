@@ -26,7 +26,7 @@ internal class GridSession<Row>: GridMount {
     var theme: ThemeSource? = None
     var entry: FocusHandle? = None
     val editing = GridEditCoordinator<Row>(this)
-    private val columnActions = GridColumnActions<Row>(this)
+    val columnActions = GridColumnActions<Row>(this)
     private var owner: ComponentScope? = None
     private var model: DataGridState<Row>? = None
     private val rows: TableSource<Row>? get() = model?.result?.rows

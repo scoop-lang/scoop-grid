@@ -5,6 +5,7 @@ import scoop.math.max
 import scoop.math.min
 import scoop.surface.*
 import scoop.ui.*
+import scoop.ui.style.ThemeSource
 import scoop.window.*
 import scoop.window.accessibility.*
 
@@ -45,7 +46,9 @@ internal class GridHeaderCells<Row>(
     private val columns: GridColumnsPlan<Row>,
     private val model: DataGridState<Row>,
     private val session: GridSession<Row>,
-    private val modifier: GridMultiSortModifier
+    private val modifier: GridMultiSortModifier,
+    private val enabled: Boolean,
+    private val theme: ThemeSource
 ): ItemSource {
     public override val count: Long get() = columns.columns.size
     public override fun keyAt(index: Long): ViewKey = ViewKey.Text(columns.columns[index].id.value)
@@ -72,28 +75,33 @@ internal class GridHeaderCells<Row>(
                     title += f"${priority + 1L}"
             }
         }
-        return element(
-            GridCellProps<Row>(
-                None,
-                0L,
-                index,
-                column.id,
-                Some(title),
-                columns.appearance,
-                None,
-                column.sortable,
-                if (column.sortable)
-                    Some {
-                        additive ->
-                        session.editing.leave { model.toggleSort(column.id, additive) };
-                        Unit
-                    }
-                else
+        val content =
+            element(
+                GridCellProps<Row>(
                     None,
-                multiSortModifier = modifier
-            ),
-            { props, scope -> GridCell(props, scope) },
-            [columns.appearance.label(title)]
+                    0L,
+                    index,
+                    column.id,
+                    Some(title),
+                    columns.appearance,
+                    None,
+                    column.sortable,
+                    if (column.sortable)
+                        Some {
+                            additive ->
+                            session.editing.leave { model.toggleSort(column.id, additive) };
+                            Unit
+                        }
+                    else
+                        None,
+                    multiSortModifier = modifier
+                ),
+                { props, scope -> GridCell(props, scope) },
+                [columns.appearance.label(title)]
+            )
+        return component(
+            GridHeaderResizeProps(model, column, session, content, enabled, theme),
+            { props, scope -> GridHeaderResize(props, scope) }
         )
     }
 }

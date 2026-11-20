@@ -1,0 +1,91 @@
+package scoop.grid.tests.columns
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.math.min
+import scoop.test.*
+import scoop.tests.surface.moveSurfacePointer
+import scoop.tests.ui.accessibility.native.NativeNode
+import scoop.ui.*
+import scoop.window.native.*
+
+internal fun ColumnsProbe.resizeBegin(id: String) {
+    val density = theme.current.value.tokens.typography.body.fontSize / 14.0
+    val viewport = min(500.0, width.value * density)
+    val start = (entry("c0").width ?: 100.0) * density
+    val center = (entry("c1").width ?: 100.0) * density
+    val rtl = direction.value == LayoutDirection.Rtl
+    val edge =
+        when (id) {
+            case "c0" -> start
+            case "c1" -> start + center
+            else -> viewport
+        }
+    dragX =
+        448.0 +
+            if (rtl)
+                viewport - edge + 4.0 * density
+            else
+                edge - 4.0 * density
+    dragY = 12.0 + 16.0 * density
+    dragDelta = 0.0
+    assertTrue(moveSurfacePointer(window!!, dragX, dragY))
+    assertTrue(view!!.button(dragX, dragY, true))
+}
+
+internal fun ColumnsProbe.resizeMove(delta: Double) {
+    dragDelta = delta
+    assertTrue(moveSurfacePointer(window!!, dragX + delta, dragY))
+}
+
+internal fun ColumnsProbe.resizeRelease() {
+    assertTrue(view!!.button(dragX + dragDelta, dragY, false))
+}
+
+internal fun ColumnsProbe.resizeFrame(node: NativeNode, bounds: Rect): Boolean {
+    @Unsafe
+    {
+        return window!!.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                return@use when (lease.handle) {
+                    case AppKit(_, val pointer) -> node.frame(
+                        pointer,
+                        bounds.x,
+                        bounds.y,
+                        bounds.width,
+                        bounds.height
+                    )
+                }
+            }
+        }
+    }
+}
+
+internal fun ColumnsProbe.resizeHit(node: NativeNode, x: Double, y: Double): Boolean {
+    @Unsafe
+    {
+        return window!!.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                return@use when (lease.handle) {
+                    case AppKit(_, val pointer) -> root!!.hit(pointer, x, y, Some(node))
+                }
+            }
+        }
+    }
+}
+
+internal fun ColumnsProbe.resizeControls() {
+    resizeStart = Some(identified("grid-resize-c0"))
+    resizeCenter = Some(identified("grid-resize-c1"))
+    resizeEnd = Some(identified("grid-resize-c299"))
+}
+
+internal fun ColumnsProbe.resizeWidth(id: String, expected: Double?) {
+    assertEquals(
+        expected,
+        entry(id).width,
+        Some(f"resize ${id} at ${phase}: ${entry(id).width ?: -1.0}")
+    )
+}

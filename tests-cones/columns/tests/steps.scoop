@@ -8,6 +8,10 @@ internal fun ColumnsProbe.inspect(tag: Int) {
     assertEquals(phase, tag)
     assertEquals(columnQuery(), model.query)
     assertEquals(0, queryEvents)
+    if (phase >= 76) {
+        inspectResize()
+        return
+    }
     if (phase < 61)
         assertTrue(originalResult === model.result, Some(f"query result replaced at ${phase}"))
     when (phase) {

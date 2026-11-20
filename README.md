@@ -49,7 +49,9 @@ scoop test --release .
 
 `gridColumnsPanel(model, handle) { ... }` 提供虚拟列列表、显隐、前移／后移、逻辑 Start／End 冻结、明确列宽、恢复列定义宽度和“适应视口”。列表同时标明列上仍在生效的排序和筛选。列宽输入按 Enter 或点击应用才发布，空值恢复 Fixed／Auto／Fraction；改变列状态保留查询结果。“适应视口”先满足最小宽度，再按当前宽度为权重分配余量，最大宽度受限时允许余白，最小宽度总和过大时保留横向滚动。
 
-用户列操作经 `handle.setColumnState`、`handle.moveColumn` 和 `handle.fitColumns` 检查当前编辑及实际视口，返回 `GridColumnActionResult`。DataGrid 的 `minimumCenterWidth` 默认保留 80 个逻辑单位；冻结宽度增长侵入该空间时拒绝，窄窗口仍可解除或缩小冻结。程序主动更新模型可用 `setColumnStates` 一次安装完整列状态，任何一项无效时保留原状态。表头拖动、拖动调宽和内容自动测宽继续实施。
+用户列操作经 `handle.setColumnState`、`handle.moveColumn` 和 `handle.fitColumns` 检查当前编辑及实际视口，返回 `GridColumnActionResult`。DataGrid 的 `minimumCenterWidth` 默认保留 80 个逻辑单位；冻结宽度增长侵入该空间时拒绝，窄窗口仍可解除或缩小冻结。程序主动更新模型可用 `setColumnStates` 一次安装完整列状态，任何一项无效时保留原状态。
+
+拖动表头逻辑 End 边界可以调宽，RTL 下手柄位于左侧。手柄可通过 Tab 聚焦，左右方向键每次调整 10 个逻辑单位，Home 恢复列定义宽度；原生无障碍客户端也可读取和设置数值。冻结列到达中心保留空间的上限后停止增长。Escape、失焦、禁用或卸载取消拖动并恢复原宽度；期间应用已改列状态时保留应用结果。非法编辑、组合输入和等待保存会阻止新调宽，保存后需重新操作。表头主体仍用于排序，拖列、内容自动测宽和多级列分组继续实施。
 
 浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。双击或 Enter／F2 进入可编辑列的编辑器；Enter／F2 也可进入自定义单元格的真实控件。编辑中的 Enter／Tab、点击其他格和失焦会先尝试提交，校验失败保留草稿。Escape 先交给输入法，再取消草稿；内部控件先处理自己的键盘与文本输入。
 
@@ -80,7 +82,7 @@ scoop check --tests --release tests-cones/columns
 scoop test --release tests-cones/columns
 ```
 
-原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、调宽／显隐／顺序／冻结、窄窗口与编辑提交。
+原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、取消恢复、RTL／密度、窄窗口和编辑提交。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

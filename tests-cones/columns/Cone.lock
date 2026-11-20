@@ -42,6 +42,7 @@ test-dependencies = [
     "scoop.tests:window-native:0.1.0",
     "scoop:scoop.graphics:0.1.0",
     "scoop:scoop.grid:0.1.0",
+    "scoop:scoop.math:0.1.0",
     "scoop:scoop.platform:0.1.0",
     "scoop:scoop.std:0.1.0",
     "scoop:scoop.surface:0.1.0",

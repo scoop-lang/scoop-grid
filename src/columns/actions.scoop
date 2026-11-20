@@ -2,6 +2,7 @@ package scoop.grid
 
 import scoop.collections.HashMap
 import scoop.math.max
+import scoop.math.min
 import scoop.ui.*
 import scoop.ui.component.*
 
@@ -14,24 +15,36 @@ internal class GridAcceptedColumns<Row>(
 /** Column actions use the last displayed viewport and publish one model update. */
 internal class GridColumnActions<Row>(private val session: GridSession<Row>): Closeable {
     private var input: GridRootProps<Row>? = None
-    private var accepted: GridAcceptedColumns<Row>? = None
+    private val accepted = state<GridAcceptedColumns<Row>?>(None)
     val states: Array<GridColumnState>? get() =
         when (input) {
             case Some(val current) -> Some(current.input.state.columnState)
             case None -> None
         }
     fun update(value: GridRootProps<Row>) {
-        when (accepted) {
+        when (accepted.value) {
             case Some(val old) -> if (old.model !== value.input.state)
-                accepted = None
+                accepted.value = None
             case None -> {}
         }
         input = Some(value)
     }
     fun accept(plan: GridMeasurePlan, value: GridRootProps<Row>) {
         val current = input ?: return
-        if (current.columns === value.columns && current.input.state === value.input.state)
-            accepted =
+        if (current.columns === value.columns && current.input.state === value.input.state) {
+            when (accepted.value) {
+                case Some(val old) -> if (
+                    old.model ===
+                        value.input.state &&
+                        old.width ==
+                        plan.columns.viewport &&
+                        old.appearance ===
+                        value.columns.appearance
+                )
+                    return
+                case None -> {}
+            }
+            accepted.value =
                 Some(
                     GridAcceptedColumns(
                         value.input.state,
@@ -39,6 +52,7 @@ internal class GridColumnActions<Row>(private val session: GridSession<Row>): Cl
                         value.columns.appearance
                     )
                 )
+        }
     }
     private fun current(): GridRootProps<Row>? =
         if (session.active && session.enabled)
@@ -89,7 +103,7 @@ internal class GridColumnActions<Row>(private val session: GridSession<Row>): Cl
     }
     fun fit(): GridColumnActionResult {
         val current = current() ?: return GridColumnActionResult.Rejected("网格未挂载或已禁用")
-        val viewport = accepted ?: return GridColumnActionResult.Rejected("请等待网格完成布局")
+        val viewport = accepted.value ?: return GridColumnActionResult.Rejected("请等待网格完成布局")
         val model = current.input.state
         val before = model.columnState
         val plan = GridColumnsPlan(model.columns, before, viewport.appearance)
@@ -114,6 +128,68 @@ internal class GridColumnActions<Row>(private val session: GridSession<Row>): Cl
             }
         return publish(current, before, next)
     }
+    fun beginResize(model: DataGridState<Row>, id: GridColumnId): GridColumnResizeStart<Row> {
+        val current = current() ?: return GridColumnResizeStart.Rejected("网格未挂载或已禁用")
+        if (current.input.state !== model)
+            return GridColumnResizeStart.Rejected("请等待当前网格完成布局")
+        when (accepted.value) {
+            case None -> return GridColumnResizeStart.Rejected("请等待当前网格完成布局")
+            case Some(_) -> {}
+        }
+        val definitions = model.columns
+        val before = model.columnState
+        val at = gridColumnStateIndex(before, id) ?: return GridColumnResizeStart.Rejected("列已移除")
+        if (!before[at].visible)
+            return GridColumnResizeStart.Rejected("列已隐藏")
+        when (val error = editError(current, before, definitions)) {
+            case Some(val message) -> return GridColumnResizeStart.Rejected(message)
+            case None -> {}
+        }
+        return GridColumnResizeStart.Ready(GridColumnResizeGesture(model, definitions, before, id))
+    }
+    fun resize(gesture: GridColumnResizeGesture<Row>, width: Double?): GridColumnActionResult {
+        val input = current() ?: return GridColumnActionResult.Rejected("网格未挂载或已禁用")
+        if (input.input.state !== gesture.model || !gesture.current())
+            return GridColumnActionResult.Rejected("列配置已更新，请重新开始调宽")
+        val at = gridColumnStateIndex(gesture.expected, gesture.id)!!
+        val entry = gesture.expected[at]
+        val result = change(GridColumnState(entry.id, entry.visible, width, entry.pin))
+        when (result) {
+            case Applied -> gesture.expected = gesture.model.columnState
+            case Rejected(_) -> {}
+        }
+        return result
+    }
+    fun resizeSize(model: DataGridState<Row>, id: GridColumnId): TableColumnSize? {
+        val current = input ?: return None
+        if (current.input.state !== model)
+            return None
+        val definition = model.findColumn(id) ?: return None
+        val viewport = accepted.value ?: return Some(definition.size)
+        val index = current.columns.indexOf(id) ?: return Some(definition.size)
+        val layout = current.columns.resolve(viewport.width)
+        if (!layout.frozen(index))
+            return Some(definition.size)
+        val density = viewport.appearance.density
+        val width = layout.widths[index] / density
+        val others = (layout.startWidth + layout.endWidth) / density - width
+        val maximum =
+            max(
+                width,
+                max(
+                    definition.size.minimum,
+                    viewport.width / density - current.input.minimumCenterWidth - others
+                )
+            )
+        return Some(
+            TableColumnSize(
+                definition.size.track,
+                definition.size.minimum,
+                Some(min(maximum, definition.size.maximum ?: maximum)),
+                definition.size.samples
+            )
+        )
+    }
     private fun publish(
         current: GridRootProps<Row>,
         before: Array<GridColumnState>,
@@ -123,7 +199,7 @@ internal class GridColumnActions<Row>(private val session: GridSession<Row>): Cl
             return GridColumnActionResult.Applied
         val model = current.input.state
         val definitions = model.columns
-        when (accepted) {
+        when (accepted.value) {
             case Some(val viewport) -> {
                 val oldLayout =
                     GridColumnsPlan(definitions, before, viewport.appearance).resolve(
@@ -184,7 +260,7 @@ internal class GridColumnActions<Row>(private val session: GridSession<Row>): Cl
     }
     public override fun close() {
         input = None;
-        accepted = None
+        accepted.value = None
     }
 }
 

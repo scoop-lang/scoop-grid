@@ -48,7 +48,15 @@ public class DataGrid<Row> public constructor(
         }
         val layout = plan!!
         val rows = GridRows(input.state.result.rows, layout, session)
-        val header = GridHeaderCells(layout, input.state, session, input.multiSortModifier)
+        val header =
+            GridHeaderCells(
+                layout,
+                input.state,
+                session,
+                input.multiSortModifier,
+                input.enabled,
+                source
+            )
         return element(
             GridRootProps(input, layout, rows, input.scroll ?: ownScroll, session, source),
             { props, scope -> GridRoot(props, scope) },

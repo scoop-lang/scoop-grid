@@ -19,23 +19,40 @@ private class GridColumnsWindowTest {
     fun `native column tools preserve identities queries and edit transactions`() {
         val probe = ColumnsProbe()
         try {
-            context(ThemeSource(shadcnTheme())) {
+            context(probe.theme) {
                 UiHost { host, active, event -> probe.event(host, active, event) }.use {
                     host -> Application().run(host)
                 }
             }
             assertTrue(probe.finished)
             assertFalse(probe.handle.isAttached)
-            assertEquals(1, probe.submissions)
+            assertEquals(2, probe.submissions)
             assertEquals(0, probe.queryEvents)
         } catch (error: Throwable) {
             println(probe.diagnostic);
+            reportColumnsFailure(error)
             throw error
         }
         finally {
             probe.close()
         }
     }
+}
+
+private fun reportColumnsFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        reportColumnsFailure(error.primaryFailure)
+        reportColumnsFailure(error.cleanupFailure)
+    } else
+        if (error is AssertionFailure) {
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        } else
+            if (error is Exception) {
+                println(error.message ?: "column window failure")
+                error.printStackTrace()
+            }
 }
 
 internal class ColumnsProbe: Closeable {
@@ -47,6 +64,9 @@ internal class ColumnsProbe: Closeable {
     val selected = state(original)
     val model: DataGridState<Long> get() = selected.value
     val handle = DataGridHandle()
+    val theme = ThemeSource(shadcnTheme())
+    val direction = state(LayoutDirection.Ltr)
+    val scroll = ScrollState()
     val enabled = state(true)
     val width = state(500.0)
     var frame: ComponentScope? = None
@@ -79,6 +99,15 @@ internal class ColumnsProbe: Closeable {
     var control: NativeNode? = None
     var option: NativeNode? = None
     var last: NativeNode? = None
+    var resizeStart: NativeNode? = None
+    var resizeCenter: NativeNode? = None
+    var resizeEnd: NativeNode? = None
+    var resizeResult: GridResult<Long>? = None
+    var resizeExternal: Array<GridColumnState>? = None
+    var resizePrevious: DataGridState<Long>? = None
+    var dragX = 0.0
+    var dragY = 0.0
+    var dragDelta = 0.0
     private val held = ArrayList<NativeNode>()
     init {
         original.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))

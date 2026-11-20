@@ -112,4 +112,49 @@ private class GridColumnStateTest {
             assertFalse(gridFrozenGrowthAllowed(smaller, narrow, 100.0))
         }
     }
+
+    @Test
+    fun `resize cancellation restores only its own column snapshot and preserves new data`() {
+        val id = GridColumnId("amount")
+        val other = GridColumnId("other")
+        val columns =
+            [
+                gridColumn<Long, Long>(id, "Amount", { row -> row }, gridLongValues()),
+                gridColumn<Long, Long>(other, "Other", { row -> row }, gridLongValues())
+            ]
+        val model = DataGridState(TableRows([TableRecord(ViewKey.Number(0L), 1L)]), columns)
+        val gesture = GridColumnResizeGesture(model, model.columns, model.columnState, id)
+        model.setColumnState(GridColumnState(id, width = Some(150.0)))
+        gesture.expected = model.columnState
+        model.replaceData(TableRows([TableRecord(ViewKey.Number(0L), 9L)]))
+        val result = model.result
+        gesture.restore()
+        assertEquals(None, model.columnState[0L].width)
+        assertEquals(9L, model.result.rows.rowAt(0L))
+        assertTrue(result === model.result)
+        val restored = model.columnState
+        gesture.restore()
+        assertTrue(restored === model.columnState)
+
+        val external = GridColumnResizeGesture(model, model.columns, model.columnState, id)
+        model.setColumnState(GridColumnState(id, width = Some(160.0)))
+        external.expected = model.columnState
+        model.setColumnState(GridColumnState(other, visible = false))
+        val changed = model.columnState
+        external.restore()
+        assertTrue(changed === model.columnState)
+        assertEquals(Some(160.0), model.columnState[0L].width)
+        assertFalse(model.columnState[1L].visible)
+
+        val definitions = GridColumnResizeGesture(model, model.columns, model.columnState, id)
+        model.setColumnState(GridColumnState(id, width = Some(170.0)))
+        definitions.expected = model.columnState
+        model.replaceColumns(
+            [gridColumn<Long, Long>(id, "Renamed", { row -> row }, gridLongValues()), columns[1L]]
+        )
+        val replaced = model.columnState
+        definitions.restore()
+        assertTrue(replaced === model.columnState)
+        assertEquals(Some(170.0), model.columnState[0L].width)
+    }
 }
