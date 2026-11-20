@@ -55,8 +55,19 @@ internal class GridSession<Row>: GridMount {
             pageRows =
                 max(
                     1L,
-                    plan.rows.index.indexAt(min(plan.rows.index.total, offset + plan.bodyHeight)) -
-                        plan.rows.index.indexAt(offset)
+                    min(
+                        plan.bands.bodyEnd,
+                        plan.rows.index.indexAt(
+                            min(
+                                plan.bands.bottomStart,
+                                plan.bands.topExtent + offset + plan.bodyHeight
+                            )
+                        )
+                    ) -
+                        max(
+                            plan.bands.topCount,
+                            plan.rows.index.indexAt(plan.bands.topExtent + offset)
+                        )
                 )
             rowHeights.accept(reading)
             columnActions.accept(plan, input)
@@ -83,6 +94,36 @@ internal class GridSession<Row>: GridMount {
     ): GridColumnActionResult = columnActions.moveGroup(id, index)
     public override fun fitColumns(): GridColumnActionResult = columnActions.fit()
     public override fun fitColumnToContent(id: GridColumnId): GridColumnFit = columnSizing.begin(id)
+    public override fun pinRow(key: ViewKey, pin: GridRowPin): GridRowActionResult {
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        if (!active || !enabled)
+            return GridRowActionResult.Rejected("网格未挂载或已禁用")
+        if (key == ViewKey.Position || current.source.indexOfKey(key) == None)
+            return GridRowActionResult.Rejected("记录已移除")
+        val before = current.pinnedRows
+        val next = before.moved(key, pin)
+        if (before.same(next))
+            return GridRowActionResult.Applied
+        when (commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return GridRowActionResult.Rejected("请先完成当前单元格的编辑或保存，再固定行")
+        }
+        val latest = model ?: return GridRowActionResult.Rejected("网格已关闭")
+        if (
+            !active ||
+                !enabled ||
+                latest !==
+                current ||
+                current.pinnedRows !==
+                before ||
+                current.source.indexOfKey(key) ==
+                None
+        )
+            return GridRowActionResult.Rejected("记录或固定配置已更新，请重试")
+        current.setPinnedRows(next)
+        return GridRowActionResult.Applied
+    }
     fun navigate(address: GridCellAddress, key: KeyEvent): Boolean {
         if (!active || !enabled)
             return false

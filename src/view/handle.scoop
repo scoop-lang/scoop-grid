@@ -7,6 +7,10 @@ public enum GridColumnActionResult {
     Applied, Rejected(String)
 }
 
+public enum GridRowActionResult {
+    Applied, Rejected(String)
+}
+
 public struct GridCellAddress(val row: ViewKey, val column: GridColumnId): Equals<
     GridCellAddress
 >, Hash {
@@ -83,6 +87,10 @@ public class DataGridHandle public constructor() {
         guard.checkMutation()
         target?.cancel()
     }
+    public fun pinRow(key: ViewKey, pin: GridRowPin): GridRowActionResult {
+        guard.checkMutation()
+        return target?.pinRow(key, pin) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
     public fun setColumnState(value: GridColumnState): GridColumnActionResult {
         guard.checkMutation()
         return target?.setColumnState(value) ?: GridColumnActionResult.Rejected("网格未挂载")
@@ -151,4 +159,5 @@ internal interface GridMount {
     fun moveColumnGroup(id: GridColumnGroupId, index: Long): GridColumnActionResult
     fun fitColumns(): GridColumnActionResult
     fun fitColumnToContent(id: GridColumnId): GridColumnFit
+    fun pinRow(key: ViewKey, pin: GridRowPin): GridRowActionResult
 }

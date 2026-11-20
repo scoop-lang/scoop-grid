@@ -42,7 +42,7 @@
 
 状态通过 `setQuery`、`setPage`、`setPagination`、`toggleSort`、`replaceData` 和 `replaceColumns` 更新。模型在动作入口计算并发布一个完整结果，属性读取不执行查询。查询失败保持旧快照。来源、列集合和查询条件未变时复用已有顺序，页码与列外观动作不使查询失效。
 
-`GridResult<Row>` 暴露本页 `rows`、全部筛选结果 `ordered`、`totalRows` 和 `pageCount`。`columns` 返回当前列定义，`columnState` 数组记录用户顺序；实际呈现按 Start、普通、End 区域排列，各区域内保留该顺序。宽度受已有 `TableColumnSize` 限制；列可以显示／隐藏、移动、设置逻辑 Start／End 冻结。设置宽度、移动和显隐不会访问行数据。
+`GridResult<Row>` 暴露按 Top／Body／Bottom 排列的当前呈现 `rows`、原始查询分页 `pageRows`、全部筛选结果 `ordered`、`totalRows` 和 `pageCount`。没有固定行时 `rows` 与 `pageRows` 相同；`topCount`、`bodyCount`、`bottomCount` 描述呈现序列的三个连续区域。`columns` 返回当前列定义，`columnState` 数组记录用户顺序；实际呈现按 Start、普通、End 区域排列，各区域内保留该顺序。宽度受已有 `TableColumnSize` 限制；列可以显示／隐藏、移动、设置逻辑 Start／End 冻结。设置宽度、移动和显隐不会访问行数据。
 
 `setColumnState` 更新一列，`setColumnStates` 一次安装完整列状态数组；后者必须恰好包含当前所有列，每列一次，数组顺序即新的用户顺序。全部引用与宽度成功解析后才发布，失败保留原数组；内容完全相同的更新复用原数组。两者均保留查询和查询结果。直接模型操作可设置超出当前窗口的冻结宽度，布局仍按既有窄窗口规则裁剪。
 
@@ -88,7 +88,7 @@
 
 ## 文本导出与单格粘贴解析
 
-`gridCsv(rows, columns, includeHeaders = true)` 输出 CSV 字符串，使用逗号、CRLF、标准双引号转义，每条记录以 CRLF 结束。`gridTsv(rows, columns)` 输出适合矩形复制的制表符分隔文本，行间使用 LF，不额外增加末行换行。调用者明确提供数据范围及列顺序；例如本页使用 `model.result.rows`，全部筛选结果使用 `model.result.ordered`。函数不取数、不持有文件或剪贴板、不创建 View，也不建立额外的单元格矩阵。
+`gridCsv(rows, columns, includeHeaders = true)` 输出 CSV 字符串，使用逗号、CRLF、标准双引号转义，每条记录以 CRLF 结束。`gridTsv(rows, columns)` 输出适合矩形复制的制表符分隔文本，行间使用 LF，不额外增加末行换行。调用者明确提供数据范围及列顺序；当前呈现含固定行使用 `model.result.rows`，原始查询本页使用 `model.result.pageRows`，全部筛选结果使用 `model.result.ordered`。函数不取数、不持有文件或剪贴板、不创建 View，也不建立额外的单元格矩阵。
 
 不允许导出的列被省略；全部列均不可导出时报告错误。可导出列必须提供数据文字，缺值由该列正常格式化。逗号／制表符、双引号、CR 和 LF 按对应格式加引号。不存在公式解析或导出为 Excel 公式的特殊分支。
 
@@ -100,7 +100,7 @@
 
 ## 原生网格与定位
 
-`dataGrid(state) { ... }` 创建 `DataGrid<Row>`，消费同一模型的当前页。`DataGridProps<Row>` 与 `DataGridBuilder<Row>` 提供外框宽高、行高模式／表头高、像素 overscan、可借用的 `ScrollState`／`DataGridHandle`、字体、主题及启用状态。尺寸按主题密度缩放；明确宽高受父约束限制。默认行高 48、表头高 40、外框高度 320。模型可以被多个挂载消费，但每个挂载有自己的滚动与焦点会话；一个 handle 或 ScrollState 同时只绑定一个挂载。
+`dataGrid(state) { ... }` 创建 `DataGrid<Row>`，消费同一模型的当前呈现结果。`DataGridProps<Row>` 与 `DataGridBuilder<Row>` 提供外框宽高、行高模式／表头高、像素 overscan、可借用的 `ScrollState`／`DataGridHandle`、字体、主题及启用状态。尺寸按主题密度缩放；明确宽高受父约束限制。默认行高 48、表头高 40、外框高度 320。模型可以被多个挂载消费，但每个挂载有自己的滚动与焦点会话；一个 handle 或 ScrollState 同时只绑定一个挂载。
 
 普通父 Element 拥有唯一滚动视口，表头与正文分别按列、按行虚拟化，每个正文行再按列虚拟化。所有条目使用本次 `LayoutInput` 中的相同列宽和滚动结果；scene 只消费自己的完整 LayoutResult。列宽复用 `TableTracks`，Auto 只测表头及声明的文字样本，不创建业务行。横向滚动只挂载可见列、冻结区、自动行高贡献列和实际活动项；不为每个行列组合预建 View 或 FocusHandle。
 
@@ -113,6 +113,18 @@ Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一
 表头点击按未排序、升序、降序、未排序循环。`multiSortModifier` 默认 `GridMultiSortModifier.Shift`，可配置为平台 `Primary`；按住配置的修饰键追加或调整该列排序，其余排序维度与既有优先级保留。普通点击只保留当前列。表头显示方向，多列排序时同时显示从 1 开始的优先级，语义名称与可见标题一致。表头取得真实焦点后，普通 Enter／Space 使用单列排序，配置的修饰键加 Enter／Space 使用多列排序；自动重复不连续切换方向。所有入口先经过当前编辑会话的提交规则，非法草稿、组合输入与等待保存不会执行新的排序。不可排序列不执行排序动作。
 
 原生表格按稳定的行 key 与列 ID 描述完整当前结果，读取离屏单元格值不创建 View、焦点目标或执行 I/O。明确的 Realize 动作只准备目标行和列，不滚动或抢焦点；Reveal 显露该格并保留已有焦点；Focus 使用同一个真实单元格焦点与 Accepted 布局路径。`pendingCell`、`isPending` 与 `cancelFocus()` 同样覆盖原生 Focus 请求。取消某格原生焦点只影响该格的真实子树。隐藏列、删除行、禁用或卸载使相应动作失效；已退役的原生代理不会因复用业务 key 而复活。
+
+## 顶部与底部固定行
+
+`GridPinnedRows(top = [], bottom = [])` 用有序的显式业务 key 定义固定状态；两个区域内及区域之间都不能重复，不能使用 `ViewKey.Position`。模型构造可传 `pinnedRows`，之后使用 `setPinnedRows(value)` 一次替换完整配置，或 `pinRow(key, GridRowPin.Top／Bottom／None)` 将单行追加到指定区域／解除固定。同区域重复固定保持原次序。引用必须存在于原始来源，非法更新不发布部分状态。
+
+固定行从全部筛选后 `ordered` 结果中按配置顺序取得，可独立于当前页显示；当前页中相同 key 从正文移除，不补入下一页记录。排序不改变固定次序，筛选不匹配时暂不显示但保留配置，来源删除 key 时清理配置。固定不重跑查询，也不改变 `ordered`、`totalRows`、`pageCount` 或聚合输入。配置与呈现映射只处理固定 key，不扫描全部业务行或预建 View。
+
+`DataGridHandle.pinRow(key, pin)` 是用户操作入口，返回 `GridRowActionResult.Applied` 或 `Rejected(message)`。非法草稿、组合输入、等待保存、禁用或未挂载时不执行，也不延迟重放；同步提交后重新检查当前来源与固定状态，保留期间应用替换的配置。直接模型操作仍遵循正常外部更新与编辑生命周期。
+
+顶部、正文、底部共用一个按 key 的 LazyElement、一个原生 Table 和同一列布局。同一行固定／解除固定时保持真实单元格身份，导航按三个区域的逻辑次序继续。固定行不随正文纵向滚动，中心列仍横向滚动，冻结列遵守同一区域裁剪。按 key 或原生 Focus／Reveal 到固定行只调整需要的横轴，不改变正文纵向阅读位置。正文显露避开表头及上下固定区。
+
+固定行使用相同的固定／显式／内容行高。可用高度先给 Top、再给 Bottom，剩余给正文；固定区超高时按配置从起点裁剪，正文可退化为零高，不暗中解除固定。只准备当前可见固定行及实际活动项；解除固定可由外部控件调用 handle，Tab 仍可离开网格。自动内容测宽包含三个区域的实际可见行，排除其余保留行；最近 Accepted 的阅读锚点只描述正文，固定区域的高度变化通过同一布局调整保持正文 key 与项内偏移。
 
 ## 行高与阅读位置
 

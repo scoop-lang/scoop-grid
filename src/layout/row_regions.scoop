@@ -1,0 +1,95 @@
+package scoop.grid
+
+import scoop.math.max
+import scoop.math.min
+import scoop.ui.component.ItemExtentIndex
+
+internal class GridRowBox(
+    val y: Double,
+    val clipTop: Double,
+    val clipHeight: Double,
+    val regionTop: Double,
+    val regionHeight: Double,
+    val fixed: Boolean
+)
+
+/** One accepted extent index supplies all three vertical regions. */
+internal class GridRowLayout(
+    val index: ItemExtentIndex,
+    val topCount: Long,
+    val bottomCount: Long,
+    val available: Double
+) {
+    val bodyEnd = index.count - bottomCount
+    val topExtent = index.prefix(topCount)
+    val bottomStart = index.prefix(bodyEnd)
+    val bodyExtent = bottomStart - topExtent
+    val bottomExtent = index.total - bottomStart
+    val topVisible = min(topExtent, available)
+    val bottomVisible = min(bottomExtent, available - topVisible)
+    val bodyHeight = max(0.0, available - topVisible - bottomVisible)
+    fun fixed(at: Long): Boolean = at < topCount || at >= bodyEnd
+    fun bodyPosition(at: Long): Double = index.prefix(at) - topExtent
+    fun box(at: Long, offset: Double, height: Double): GridRowBox {
+        val fixed = fixed(at)
+        val regionTop =
+            if (at < topCount)
+                0.0
+            else
+                if (at >= bodyEnd)
+                    available - bottomVisible
+                else
+                    topVisible
+        val regionHeight =
+            if (at < topCount)
+                topVisible
+            else
+                if (at >= bodyEnd)
+                    bottomVisible
+                else
+                    bodyHeight
+        val y =
+            if (at < topCount)
+                index.prefix(at)
+            else
+                if (at >= bodyEnd)
+                    regionTop + index.prefix(at) - bottomStart
+                else
+                    topVisible + bodyPosition(at) - offset
+        val clipTop = max(0.0, regionTop - y)
+        val clipEnd = min(height, regionTop + regionHeight - y)
+        return GridRowBox(y, clipTop, max(0.0, clipEnd - clipTop), regionTop, regionHeight, fixed)
+    }
+    fun visible(offset: Double, overscan: Double, width: Double): Array<Long> {
+        val result = ArrayList<Long>()
+        if (width <= 0.0)
+            return result.toArray()
+        if (topVisible > 0.0)
+            append(result, 0L, topCount, 0.0, topVisible + overscan)
+        if (bodyHeight > 0.0)
+            append(
+                result,
+                topCount,
+                bodyEnd,
+                topExtent + max(0.0, offset - overscan),
+                topExtent + offset + bodyHeight + overscan
+            )
+        if (bottomVisible > 0.0)
+            append(
+                result,
+                bodyEnd,
+                index.count,
+                bottomStart,
+                bottomStart + bottomVisible + overscan
+            )
+        return result.toArray()
+    }
+    private fun append(result: ArrayList<Long>, from: Long, end: Long, low: Double, high: Double) {
+        if (end <= from || high <= low)
+            return
+        val first = max(from, min(end, index.indexAt(low)))
+        val until = min(end, index.endBefore(high))
+        for (at in first ..< until)
+            result.add(at)
+    }
+}

@@ -3,6 +3,7 @@ package scoop.grid
 import scoop.collections.HashSet
 import scoop.collections.HashMap
 import scoop.ui.state
+import scoop.ui.ViewKey
 import scoop.ui.component.TableSource
 
 public class DataGridState<Row> public constructor(
@@ -10,9 +11,19 @@ public class DataGridState<Row> public constructor(
     columns: Array<GridColumn<Row>>,
     query: GridQuery = GridQuery(),
     public val onQueryChange: ((GridQuery) -> Unit)? = None,
-    headers: Array<GridHeaderNode>? = None
+    headers: Array<GridHeaderNode>? = None,
+    pinnedRows: GridPinnedRows = GridPinnedRows()
 ) {
-    private val computed = state(gridCompute(source, GridColumns(columns), query, None))
+    private val computed =
+        state(
+            gridCompute(
+                source,
+                GridColumns(columns),
+                query,
+                None,
+                gridCheckPinnedRows(source, pinnedRows)
+            )
+        )
     private val headerState =
         state(
             GridHeaders(Array<GridColumnId>(columns.size) { index -> columns[index].id }, headers)
@@ -27,6 +38,7 @@ public class DataGridState<Row> public constructor(
     private val filterCandidates = HashMap<GridColumnId, GridFilterValues>()
     public val query: GridQuery get() = computed.value.query
     public val result: GridResult<Row> get() = computed.value.result
+    public val pinnedRows: GridPinnedRows get() = computed.value.pins
     public val columns: Array<GridColumn<Row>> get() = computed.value.columns.values
     public val columnState: Array<GridColumnState> get() = presentation.value
     public val headers: Array<GridHeaderNode> get() = headerState.value.values
@@ -87,7 +99,7 @@ public class DataGridState<Row> public constructor(
                 value.withPagination(gridFirstPage(value.pagination))
         if (old.query == requested)
             return
-        val next = gridCompute(old.source, old.columns, requested, Some(old))
+        val next = gridCompute(old.source, old.columns, requested, Some(old), old.pins)
         computed.value = next
         notify(old.query, next.query)
     }
@@ -124,7 +136,8 @@ public class DataGridState<Row> public constructor(
         val old = computed.value
         if (source === old.source)
             return
-        val next = gridCompute(source, old.columns, old.query, Some(old))
+        val next =
+            gridCompute(source, old.columns, old.query, Some(old), old.pins.surviving(source))
         filterCandidates.clear()
         computed.value = next
         notify(old.query, next.query)
@@ -145,7 +158,7 @@ public class DataGridState<Row> public constructor(
         val filter = gridSurvivingFilter(old.query.filter, nextColumns) ?: GridFilter.All
         val requested =
             GridQuery(sorting.toArray(), filter, old.query.quickFilter, old.query.pagination)
-        val next = gridCompute(old.source, nextColumns, requested, None)
+        val next = gridCompute(old.source, nextColumns, requested, None, old.pins)
         val states = ArrayList<GridColumnState>()
         val retained = HashSet<GridColumnId>()
         for (entry in presentation.value)
@@ -193,6 +206,32 @@ public class DataGridState<Row> public constructor(
                     old
             }
         )
+    }
+    public fun setPinnedRows(value: GridPinnedRows) {
+        computed.checkMutation()
+        val old = computed.value
+        if (old.pins.same(value))
+            return
+        gridCheckPinnedRows(old.source, value)
+        val before = old.result
+        val result =
+            gridPinResult(
+                before.pageRows,
+                before.ordered,
+                before.totalRows,
+                before.pageCount,
+                value
+            )
+        computed.value = GridComputed(old.source, old.columns, old.query, result, value)
+        changed()
+    }
+    public fun pinRow(key: ViewKey, pin: GridRowPin) {
+        computed.checkMutation()
+        gridRequire(
+            key != ViewKey.Position && source.indexOfKey(key) != None,
+            "unknown fixed row key"
+        )
+        setPinnedRows(pinnedRows.moved(key, pin))
     }
     public fun setColumnStates(values: Array<GridColumnState>) {
         presentation.checkMutation()

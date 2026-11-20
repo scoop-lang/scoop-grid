@@ -176,22 +176,28 @@ internal class GridRowMeasurements<Row> {
         )
             return None
         val anchor = previous.anchor ?: return None
-        if (input.rows.count == 0L)
+        val first = input.rows.topCount
+        val end = input.rows.count - input.rows.bottomCount
+        if (first == end)
             return None
-        val at = input.rows.indexOfKey(anchor.key) ?: min(anchor.index, input.rows.count - 1L)
+        val at = max(first, min(input.rows.indexOfKey(anchor.key) ?: anchor.index, end - 1L))
         return Some(GridReadingAnchor(input.rows.keyAt(at), at, anchor.inside))
     }
     fun capture(input: GridRootProps<Row>, plan: GridMeasurePlan): GridRowReading<Row> {
         val index = plan.rows.index
         val offset = max(0.0, plan.scroll.snapshot.offset.y)
-        val first = index.indexAt(offset)
+        val first =
+            max(
+                plan.bands.topCount,
+                min(index.indexAt(plan.bands.topExtent + offset), plan.bands.bodyEnd - 1L)
+            )
         val anchor =
-            if (first < index.count)
+            if (plan.bands.topCount < plan.bands.bodyEnd)
                 Some(
                     GridReadingAnchor(
                         input.rows.keyAt(first),
                         first,
-                        max(0.0, offset - index.prefix(first))
+                        max(0.0, offset - plan.bands.bodyPosition(first))
                     )
                 )
             else

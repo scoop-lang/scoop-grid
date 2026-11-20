@@ -21,7 +21,7 @@ internal class GridMeasurePlan(
     val scroll: ScrollLayout,
     val rows: GridRowExtents,
     val headerHeight: Double,
-    val bodyHeight: Double,
+    val bands: GridRowLayout,
     val overscan: Double,
     val visibleColumns: Array<Long>,
     val viewport: ScrollViewport,
@@ -29,13 +29,14 @@ internal class GridMeasurePlan(
     val headerRowHeight: Double,
     val probe: GridColumnProbe? = None
 ) {
+    val bodyHeight: Double get() = bands.bodyHeight
     fun probing(value: GridColumnProbe): GridMeasurePlan =
         GridMeasurePlan(
             columns,
             scroll,
             rows,
             headerHeight,
-            bodyHeight,
+            bands,
             overscan,
             visibleColumns,
             viewport,

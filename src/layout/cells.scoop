@@ -18,7 +18,8 @@ internal class GridCellClip(
     val region: Rect,
     val axes: ScrollAxes,
     val viewport: ScrollViewport,
-    val measure: GridCellMeasure = GridCellMeasure.Normal
+    val measure: GridCellMeasure = GridCellMeasure.Normal,
+    val fixedRow: Boolean = false
 )
 
 internal class GridRowCells<Row>(
@@ -522,7 +523,12 @@ internal class GridCell<Row>(
     }
     public override fun scene(context: SceneContext, clip: GridCellClip) {
         context.withScrollReveal(clip.viewport, clip.region, clip.axes) {
-            cell -> present(cell, clip.bounds)
+            cell -> if (clip.fixedRow)
+                cell.withScrollReveal(clip.viewport, clip.region, ScrollAxes.Horizontal) {
+                    fixed -> present(fixed, clip.bounds)
+                }
+            else
+                present(cell, clip.bounds)
         }
     }
     private fun present(context: SceneContext, clip: Rect) {

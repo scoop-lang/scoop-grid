@@ -1,0 +1,172 @@
+package scoop.grid.tests.pinned
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class PinRow(val key: Long, val text: String)
+
+internal class PinReads {
+    var count = 0L
+}
+
+internal class PinRows(
+    val reads: PinReads,
+    val total: Long = 100000000L,
+    val removed: Long? = None,
+    val edited: Long? = None,
+    val text: String = ""
+): TableSource<PinRow> {
+    public override val count: Long get() =
+        total -
+            if (removed == None)
+                0L
+            else
+                1L
+    private fun number(index: Long): Long =
+        if (removed != None && index >= removed!!)
+            index + 1L
+        else
+            index
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(number(index))
+    public override fun rowAt(index: Long): PinRow {
+        reads.count += 1L
+        val key = number(index)
+        return PinRow(
+            key,
+            if (edited == Some(key))
+                text
+            else
+                f"record${key}"
+        )
+    }
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value < 0L || value >= total || removed == Some(value))
+                None
+            else
+                Some(
+                    if (removed != None && value > removed!!)
+                        value - 1L
+                    else
+                        value
+                )
+            else -> None
+        }
+}
+
+internal fun pinAddress(row: Long, column: Long): GridCellAddress =
+    GridCellAddress(ViewKey.Number(row), GridColumnId(f"c${column}"))
+
+internal fun pinHeight(row: PinRow): Double =
+    when (row.key % 4L) {
+        case 0L -> 32.0
+        case 1L -> 64.0
+        case 2L -> 48.0
+        else -> 96.0
+    }
+
+internal fun pinColumns(probe: PinProbe): Array<GridColumn<PinRow>> =
+    Array<GridColumn<PinRow>>(30L) {
+        column ->
+        val id = GridColumnId(f"c${column}")
+        val size = TableColumnSize(GridTrack.Fixed(100.0), minimum = 40.0)
+        if (column == 1L)
+            gridColumn<PinRow, String>(
+                id,
+                "Name",
+                { row -> row.text },
+                gridTextValues(),
+                size,
+                edit =
+                    Some(
+                        gridEdit<PinRow, String>(
+                            {
+                                value ->
+                                val editor = gridTextEditor(value);
+                                probe.editor = Some(editor);
+                                editor
+                            },
+                            { change, completion -> probe.save(change, completion) },
+                            validate =
+                                {
+                                    _,
+                                    value -> if (value == "bad")
+                                        Some("Invalid test value")
+                                    else
+                                        None
+                                }
+                        )
+                    )
+            )
+        else
+            gridColumn<PinRow, Long>(
+                id,
+                f"Column ${column}",
+                { row -> row.key },
+                gridLongValues(),
+                size,
+                cell =
+                    Some {
+                        row -> element(
+                            PinBoxProps(
+                                probe,
+                                row,
+                                column,
+                                probe.theme.current.value.tokens.typography.body.fontSize / 14.0
+                            ),
+                            { props, scope -> PinBox(props, scope) }
+                        )
+                    }
+            )
+    }
+
+private class PinBoxProps(
+    val probe: PinProbe,
+    val row: PinRow,
+    val column: Long,
+    val density: Double
+)
+
+private class PinBox(private val props: Props<PinBoxProps>, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    private val address = pinAddress(props.value.row.key, props.value.column)
+    public override fun onMount() {
+        assertTrue(props.value.probe.live.add(address), Some("duplicate fixed cell"))
+        props.value.probe.created += 1L
+    }
+    public override fun onUnmount() {
+        assertTrue(props.value.probe.live.remove(address))
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val input = props.value
+        if (constraints.maxWidth == None)
+            input.probe.widthSamples.add(address)
+        val short = (constraints.maxWidth ?: 1000.0) >= 120.0 * input.density
+        val height =
+            if (short)
+                20.0 + (input.row.key % 3L).toDouble() * 10.0
+            else
+                40.0 + (input.row.key % 3L).toDouble() * 20.0
+        return LayoutResult(
+            LayoutMetrics(
+                constraints.constrain(
+                    Size(
+                        (120.0 + (input.row.key % 3L).toDouble() * 20.0) * input.density,
+                        height * input.density
+                    )
+                )
+            ),
+            Unit
+        )
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val bounds = Rect(0.0, 0.0, context.size.width, context.size.height)
+        context.draw { paint -> paint.canvas.drawRect(bounds, Paint(Color(0.3, 0.55, 0.75, 1.0))) }
+    }
+}

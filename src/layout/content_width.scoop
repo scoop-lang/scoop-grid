@@ -37,7 +37,7 @@ internal fun gridMeasureContentRows(
     probe: GridColumnProbe
 ): LayoutResult<Rect> {
     var width = 0.0
-    for (index in probe.firstRow ..< probe.endRow) {
+    for (index in probe.rows) {
         val height = plan.rows.index.extent(index)
         val row =
             context.measureItem(index, Constraints(minHeight = height, maxHeight = Some(height)))
@@ -50,7 +50,7 @@ internal fun gridMeasureContentRows(
             offset.x - plan.scroll.snapshot.offset.x,
             offset.y - plan.scroll.snapshot.offset.y,
             plan.columns.viewport,
-            plan.bodyHeight
+            plan.bands.available
         )
     )
 }

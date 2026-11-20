@@ -17,27 +17,37 @@ internal fun <Row> gridMeasureRows(
 ): GridRootLayout<Row> {
     val rows = input.session.rowHeights.prepare(input, columns)
     val anchor = input.session.rowHeights.anchor(input)
-    val bodyHeight = max(0.0, size.height - headerHeight)
+    val available = max(0.0, size.height - headerHeight)
     val revision = input.scroll.requestRevision
     val density = input.columns.appearance.density
     fun layout(): GridMeasurePlan {
-        val content = Size(columns.total, rows.index.total + headerHeight)
+        val bands =
+            GridRowLayout(rows.index, input.rows.topCount, input.rows.bottomCount, available)
+        val bodyHeight = bands.bodyHeight
+        val content =
+            Size(
+                columns.total,
+                bands.bodyExtent + headerHeight + bands.topVisible + bands.bottomVisible
+            )
         var scroll = viewport.layout(size, content)
         val old = scroll.snapshot.offset
         var adjusted: Point? = None
         when (input.session.requested) {
             case Some(val target) -> when (input.rows.indexOfKey(target.row)) {
                 case Some(val index) -> {
-                    val top = rows.index.prefix(index)
+                    val top = bands.bodyPosition(index)
                     val height = rows.index.extent(index)
                     val y =
-                        if (top < old.y || height > bodyHeight)
-                            top
+                        if (bands.fixed(index))
+                            old.y
                         else
-                            if (top + height > old.y + bodyHeight)
-                                top + height - bodyHeight
+                            if (top < old.y || height > bodyHeight)
+                                top
                             else
-                                old.y
+                                if (top + height > old.y + bodyHeight)
+                                    top + height - bodyHeight
+                                else
+                                    old.y
                     val x =
                         when (input.columns.indexOf(target.column)) {
                             case Some(val at) -> columns.reveal(at, old.x)
@@ -52,7 +62,7 @@ internal fun <Row> gridMeasureRows(
                     Some(
                         Point(
                             old.x,
-                            rows.index.prefix(value.index) +
+                            bands.bodyPosition(value.index) +
                                 min(value.inside, rows.index.extent(value.index))
                         )
                     )
@@ -69,7 +79,7 @@ internal fun <Row> gridMeasureRows(
             scroll,
             rows,
             headerHeight,
-            bodyHeight,
+            bands,
             input.input.overscan * density,
             columns.visible(scroll.presentationOffset.x),
             viewport,
@@ -87,7 +97,7 @@ internal fun <Row> gridMeasureRows(
         )
         context.measureChild(
             1L,
-            Constraints.tight(Size(columns.total, rows.index.total)),
+            Constraints.tight(Size(columns.total, max(rows.index.total, available))),
             LayoutInput(plan)
         )
         if (rows.revision == before)
@@ -103,7 +113,7 @@ internal fun <Row> gridMeasureRows(
                     value,
                     input.columns.appearance.sampleWidth(input.columns.columns[value.column].size),
                     density,
-                    rows.index.total
+                    max(rows.index.total, available)
                 )
             )
             case None -> None
@@ -117,7 +127,7 @@ internal fun <Row> gridMeasureRows(
     when (measured) {
         case Some(_) -> context.measureChild(
             1L,
-            Constraints.tight(Size(columns.total, rows.index.total)),
+            Constraints.tight(Size(columns.total, max(rows.index.total, available))),
             shared
         )
         case None -> {}

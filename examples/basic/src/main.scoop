@@ -1,6 +1,7 @@
 package scoop.grid.examples.basic
 
 import scoop.collections.HashMap
+import scoop.collections.contains
 import scoop.graphics.Paint
 import scoop.grid.*
 import scoop.ui.*
@@ -8,6 +9,7 @@ import scoop.ui.component.*
 import scoop.ui.style.*
 import scoop.ui.style.shadcn.shadcnTheme
 import scoop.window.*
+import scoop.ui.component.button as gridPinButton
 import scoop.ui.component.tabs as gridToolsTabs
 
 private class SampleRow(val id: Long, val name: String, val amount: Long)
@@ -47,10 +49,40 @@ private class SampleRows(private val changes: HashMap<Long, SampleRow> = HashMap
 
 private class GridExample(scope: ComponentScope): Component(scope) {
     private var rows = SampleRows()
-    private val model = DataGridState(rows, columns(), headers = Some(headers()))
+    private val model =
+        DataGridState(
+            rows,
+            columns(),
+            headers = Some(headers()),
+            pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(99999L)])
+        )
     private val handle = DataGridHandle()
     private val lastEdit = state("名称与金额可编辑")
     private val tool = state<String?>(Some("filters"))
+    private fun toggleFixed(key: ViewKey, placement: GridRowPin) {
+        val pinned =
+            when (placement) {
+                case Top -> model.pinnedRows.top.contains(key)
+                case Bottom -> model.pinnedRows.bottom.contains(key)
+                case None -> false
+            }
+        when (
+            handle.pinRow(
+                key,
+                if (pinned)
+                    GridRowPin.None
+                else
+                    placement
+            )
+        ) {
+            case Applied -> lastEdit.value =
+                if (pinned)
+                    "已解除固定"
+                else
+                    "已固定记录"
+            case Rejected(val message) -> lastEdit.value = message
+        }
+    }
     private fun save(row: SampleRow, completion: GridCommit<SampleRow>) {
         val next = rows.replacing(row)
         if (completion.accept(next))
@@ -173,15 +205,40 @@ private class GridExample(scope: ComponentScope): Component(scope) {
         model.setColumnState(GridColumnState(GridColumnId("metric-39"), pin = GridPin.End))
     }
     public override fun render(): View {
+        val example = this
         val model = this.model
         val handle = this.handle
         val lastEdit = this.lastEdit
         val selectedTool = tool
+        val firstFixed = model.pinnedRows.top.contains(ViewKey.Number(0L))
+        val lastFixed = model.pinnedRows.bottom.contains(ViewKey.Number(99999L))
         val theme = currentThemeSource().read(scope)
         val table =
             column {
                 label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
                 add(gridQuickFilter(model) { this.handle = Some(handle) })
+                row {
+                    add(
+                        gridPinButton(
+                            if (firstFixed)
+                                "取消首条固定"
+                            else
+                                "固定首条到顶部",
+                            onClick = { example.toggleFixed(ViewKey.Number(0L), GridRowPin.Top) }
+                        )
+                    )
+                    add(
+                        gridPinButton(
+                            if (lastFixed)
+                                "取消末条固定"
+                            else
+                                "固定末条到底部",
+                            onClick =
+                                { example.toggleFixed(ViewKey.Number(99999L), GridRowPin.Bottom) }
+                        )
+                    )
+                    spacing = 8.0
+                }
                 add(
                     dataGrid(model) {
                         height = 480.0

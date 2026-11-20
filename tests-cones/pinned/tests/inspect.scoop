@@ -1,0 +1,229 @@
+package scoop.grid.tests.pinned
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+
+internal fun PinProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            table = Some(findTable(root!!) ?: fail(Some("missing fixed table")))
+            assertEquals(100000000L, model.result.rows.count)
+            bounds(cell(7L, 0L), Rect(0.0, 32.0, 80.0, 32.0))
+            bounds(cell(0L, 0L), Rect(0.0, 64.0, 80.0, 32.0))
+            bounds(cell(90L, 29L), Rect(440.0, 192.0, 60.0, 32.0))
+            oldTop = Some(cell(7L, 0L))
+            assertTrue(reads.count < 100L)
+        }
+        case 1 -> {
+            bounds(cell(7L, 0L), Rect(0.0, 32.0, 80.0, 32.0))
+            bounds(cell(2L, 0L), Rect(0.0, 64.0, 80.0, 32.0))
+            bounds(cell(90L, 29L), Rect(440.0, 192.0, 60.0, 32.0))
+        }
+        case 2 -> if (focused(90L, 24L)) {
+            assertEquals(64.0, scroll.offset.y)
+            bounds(cell(90L, 24L), Rect(340.0, 192.0, 100.0, 32.0))
+        }
+        case 3 -> if (focused(50000000L, 24L))
+            bounds(cell(50000000L, 24L), Rect(340.0, 160.0, 100.0, 32.0))
+        case 4 -> if (focused(7L, 0L)) {
+            assertEquals(previousY, scroll.offset.y);
+            assertTrue(oldTop!!.same(cell(7L, 0L)))
+        }
+        case 5 -> {
+            assertEquals(0L, model.result.topCount)
+            bounds(cell(90L, 0L), Rect(0.0, 160.0, 80.0, 32.0))
+            bounds(cell(7L, 0L), Rect(0.0, 192.0, 80.0, 32.0))
+            assertTrue(oldTop!!.same(cell(7L, 0L)))
+            assertEquals(Some(pinAddress(7L, 0L)), handle.focusedCell)
+        }
+        case 6 -> {
+            bounds(cell(10L, 0L), Rect(0.0, 32.0, 80.0, 32.0));
+            bounds(cell(7L, 0L), Rect(0.0, 64.0, 80.0, 32.0))
+        }
+        case 7 -> {
+            assertEquals(1L, model.result.topCount);
+            assertTrue(oldTop!!.same(cell(7L, 0L)))
+        }
+        case 8 -> {
+            assertEquals(7L, model.result.rows.count)
+            assertEquals(ViewKey.Number(10L), model.result.pageRows.keyAt(0L))
+            assertEquals(20000000L, model.result.pageCount)
+            assertTrue(oldTop!!.same(cell(7L, 0L)))
+        }
+        case 9 -> assertEquals(20L, model.result.pageCount)
+        case 10 -> {
+            assertEquals(ViewKey.Number(99L), model.result.pageRows.keyAt(0L))
+            assertEquals(ViewKey.Number(7L), model.result.rows.keyAt(0L))
+            assertEquals(ViewKey.Number(90L), model.result.rows.keyAt(6L))
+        }
+        case 11 -> {
+            assertEquals(1L, model.result.totalRows)
+            assertEquals(0L, model.result.topCount)
+            assertEquals(1L, model.pinnedRows.top.size)
+            bounds(cell(90L, 0L), Rect(0.0, 192.0, 80.0, 32.0))
+            assertFalse(oldTop!!.flag(0))
+        }
+        case 12 -> {
+            assertEquals(1L, model.result.topCount);
+            assertFalse(oldTop!!.same(cell(7L, 0L)))
+        }
+        case 13 -> {
+            assertEquals(0L, model.pinnedRows.top.size);
+            rejected(handle.pinRow(ViewKey.Number(7L), GridRowPin.Top))
+        }
+        case 14 -> {
+            bounds(cell(1L, 0L), Rect(0.0, 32.0, 80.0, 32.0));
+            bounds(cell(10L, 0L), Rect(0.0, 192.0, 80.0, 32.0))
+        }
+        case 15 -> {
+            bounds(cell(1L, 0L), Rect(0.0, 32.0, 80.0, 64.0))
+            bounds(cell(0L, 0L), Rect(0.0, 96.0, 80.0, 32.0))
+            bounds(cell(10L, 0L), Rect(0.0, 176.0, 80.0, 48.0))
+        }
+        case 16 -> {
+            bounds(cell(2L, 0L), Rect(0.0, 88.0, 80.0, 48.0));
+            assertEquals(40.0, scroll.offset.y)
+        }
+        case 17 -> {
+            assertEquals(1, discarded)
+            assertEquals(64.0, scroll.offset.y)
+            bounds(cell(1L, 0L), Rect(0.0, 32.0, 80.0, 76.0))
+            bounds(cell(2L, 0L), Rect(0.0, 100.0, 80.0, 96.0))
+            bounds(cell(10L, 0L), Rect(0.0, 148.0, 80.0, 76.0))
+            assertTrue(live.contains(pinAddress(1L, 24L)))
+            assertTrue(live.contains(pinAddress(10L, 24L)))
+        }
+        case 18 -> {
+            bounds(cell(1L, 0L), Rect(0.0, 32.0, 80.0, 46.0));
+            bounds(cell(10L, 0L), Rect(0.0, 178.0, 80.0, 46.0))
+        }
+        case 19 -> when (fit!!.result) {
+            case Pending -> retry = true
+            case Applied(val width) -> {
+                assertEquals(176.0, width)
+                for (key in [1L, 2L, 3L, 4L, 10L])
+                    assertTrue(widthSamples.contains(pinAddress(key, 24L)))
+                assertFalse(widthSamples.contains(pinAddress(0L, 24L)))
+                assertFalse(widthSamples.contains(pinAddress(6L, 24L)))
+            }
+            else -> fail(Some("fixed content sizing failed"))
+        }
+        case 20 -> {
+            bounds(cell(1L, 0L), Rect(0.0, 32.0, 80.0, 32.0));
+            bounds(cell(10L, 0L), Rect(0.0, 192.0, 80.0, 32.0))
+        }
+        case 21 -> {
+            bounds(cell(1L, 0L), Rect(0.0, 32.0, 80.0, 32.0));
+            bounds(cell(10L, 0L), Rect(0.0, 64.0, 80.0, 32.0))
+        }
+        case 22 -> {
+            retry = handle.isPending;
+            if (!retry)
+                assertTrue(handle.focusedCell != Some(pinAddress(2L, 1L)))
+        }
+        case 23 -> bounds(cell(1L, 0L), Rect(0.0, 32.0, 80.0, 32.0))
+        case 24 -> bounds(cell(10L, 0L), Rect(0.0, 32.0, 80.0, 32.0))
+        case 25 -> {
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 32.0));
+            assertEquals(0L, model.result.bottomCount)
+        }
+        case 26 -> assertTrue(outside.hasFocus)
+        case 27 -> {
+            priorCreated = created
+            offscreen = Some(cell(8L, 24L))
+            assertTrue(offscreen!!.text(1, Some("8")))
+            assertFalse(live.contains(pinAddress(8L, 24L)))
+            assertEquals(priorCreated, created)
+        }
+        case 28 -> {
+            assertTrue(live.contains(pinAddress(8L, 24L)));
+            assertEquals(Point(0.0, 0.0), scroll.offset);
+            assertTrue(outside.hasFocus)
+        }
+        case 29 -> assertTrue(outside.hasFocus)
+        case 30 -> {
+            revealed = matchesBounds(cell(8L, 24L), Rect(340.0, 160.0, 100.0, 32.0));
+            assertTrue(outside.hasFocus);
+            retained = Some(cell(1L, 1L))
+        }
+        case 31 -> if (focused(1L, 1L))
+            assertEquals(Some(pinAddress(1L, 1L)), handle.editingCell)
+        case 32 -> assertTrue(editor!!.composing)
+        case 33 -> {
+            assertTrue(editor!!.composing);
+            assertEquals(0, submissions);
+            assertEquals(1L, model.result.topCount)
+        }
+        case 34 -> {
+            assertFalse(editor!!.composing);
+            assertEquals(Some(pinAddress(1L, 1L)), handle.editingCell)
+        }
+        case 35 -> assertTrue(handle.editError != None)
+        case 36 -> {
+            assertEquals(0, submissions);
+            assertEquals(1L, model.result.topCount)
+        }
+        case 37 -> {
+            assertTrue(handle.isSubmitting);
+            assertEquals(1, submissions);
+            assertEquals(1L, model.result.topCount)
+        }
+        case 38 -> assertEquals(1L, model.result.topCount)
+        case 39 -> {
+            retry = handle.isPending
+            if (!retry) {
+                assertEquals(None, handle.editingCell);
+                assertTrue(retained!!.same(cell(1L, 1L)));
+                assertTrue(cell(1L, 1L).text(1, Some("updated")))
+            }
+        }
+        case 40 -> {
+            assertEquals(0L, model.result.topCount);
+            assertEquals(2L, model.result.bottomCount);
+            assertTrue(retained!!.same(cell(1L, 1L)))
+        }
+        case 41 -> {
+            assertEquals(1L, model.result.topCount);
+            assertTrue(retained!!.same(cell(1L, 1L)))
+        }
+        case 42 -> if (focused(1L, 1L))
+            assertEquals(Some(pinAddress(1L, 1L)), handle.editingCell)
+        case 43 -> {
+            assertEquals(Some(pinAddress(1L, 1L)), handle.editingCell);
+            assertTrue(retained!!.same(cell(1L, 1L)));
+            assertEquals("draft", editor!!.state.text)
+        }
+        case 44 -> {
+            bounds(cell(1L, 0L), Rect(380.0, 48.0, 120.0, 48.0));
+            bounds(cell(10L, 0L), Rect(380.0, 176.0, 120.0, 48.0))
+        }
+        case 45 -> {
+            assertFalse(cell(1L, 0L).flag(1));
+            rejected(handle.pinRow(ViewKey.Number(1L), GridRowPin.None))
+        }
+        case 46 -> assertTrue(cell(1L, 0L).flag(1))
+        case 47 -> {
+            assertEquals(0L, model.result.rows.count);
+            assertEquals(0L, model.pinnedRows.top.size);
+            assertEquals(0L, live.size)
+        }
+        case 48 -> {
+            assertEquals(100000000L, model.result.rows.count);
+            bounds(cell(50000000L, 0L), Rect(0.0, 32.0, 80.0, 32.0))
+        }
+        case 49 -> if (focused(99999999L, 24L)) {
+            assertEquals(0.0, scroll.offset.y);
+            bounds(cell(99999999L, 24L), Rect(340.0, 192.0, 100.0, 32.0))
+        }
+        case 50 -> {
+            assertFalse(handle.isAttached);
+            assertFalse(handle.isPending);
+            assertEquals(0L, live.size);
+            assertFalse(offscreen!!.flag(0))
+        }
+        else -> fail(Some("unknown fixed inspection phase"))
+    }
+}

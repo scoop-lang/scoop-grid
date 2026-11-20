@@ -37,11 +37,6 @@ public class GridColumnFit internal constructor(
 internal fun gridRejectedColumnFit(message: String): GridColumnFit =
     GridColumnFit(GridColumnFitResult.Rejected(message))
 
-internal class GridColumnProbe(
-    val fit: GridColumnFit,
-    val column: Long,
-    val firstRow: Long,
-    val endRow: Long
-)
+internal class GridColumnProbe(val fit: GridColumnFit, val column: Long, val rows: Array<Long>)
 
 internal class GridColumnMeasured(val fit: GridColumnFit, val width: Double)

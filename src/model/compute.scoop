@@ -10,14 +10,16 @@ internal class GridComputed<Row>(
     val source: TableSource<Row>,
     val columns: GridColumns<Row>,
     val query: GridQuery,
-    val result: GridResult<Row>
+    val result: GridResult<Row>,
+    val pins: GridPinnedRows
 )
 
 internal fun <Row> gridCompute(
     source: TableSource<Row>,
     columns: GridColumns<Row>,
     query: GridQuery,
-    previous: GridComputed<Row>?
+    previous: GridComputed<Row>?,
+    pins: GridPinnedRows
 ): GridComputed<Row> {
     gridRequire(source.count >= 0L, "negative grid source count")
     var cached: TableSource<Row>? = None
@@ -69,7 +71,13 @@ internal fun <Row> gridCompute(
                 resolved = query.withPagination(GridPagination.Page(index, size))
         }
     }
-    return GridComputed(source, columns, resolved, GridResult(rows, ordered, total, pages))
+    return GridComputed(
+        source,
+        columns,
+        resolved,
+        gridPinResult(rows, ordered, total, pages, pins),
+        pins
+    )
 }
 
 private fun <Row> gridFilterPredicate(columns: GridColumns<Row>, filter: GridFilter): (

@@ -15,7 +15,9 @@ internal class GridRows<Row>(
     val columns: GridColumnsPlan<Row>,
     val session: GridSession<Row>,
     val policy: GridRowPolicy<Row>,
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val topCount: Long = 0L,
+    val bottomCount: Long = 0L
 ): ItemSource {
     public override val count: Long get() = source.count
     public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
@@ -111,11 +113,8 @@ internal class GridBody<Row>(
         val offset = plan.scroll.presentationOffset
         val selected = HashSet<Long>()
         val extents = plan.rows.index
-        val first = extents.indexAt(max(0.0, offset.y - plan.overscan))
-        val end = extents.endBefore(max(0.0, offset.y + plan.bodyHeight + plan.overscan))
-        if (plan.bodyHeight > 0.0 && plan.columns.viewport > 0.0)
-            for (index in first ..< end)
-                selected.add(index)
+        for (index in plan.bands.visible(offset.y, plan.overscan, plan.columns.viewport))
+            selected.add(index)
         for (index in context.pinnedItems)
             selected.add(index)
         when (props.value.session.requested) {
@@ -147,10 +146,8 @@ internal class GridBody<Row>(
             plan.rows.record(index, props.value.rows.keyAt(index), metrics.size.height)
         }
         for (index in selected) {
-            context.placeItem(
-                index,
-                Point(0.0, extents.prefix(index) - plan.scroll.snapshot.offset.y)
-            )
+            val row = plan.bands.box(index, offset.y, extents.extent(index))
+            context.placeItem(index, Point(0.0, row.y + offset.y - plan.scroll.snapshot.offset.y))
         }
         return LayoutResult(
             LayoutMetrics(constraints.constrain(Size(plan.columns.total, 0.0))),
@@ -158,7 +155,7 @@ internal class GridBody<Row>(
                 offset.x - plan.scroll.snapshot.offset.x,
                 offset.y - plan.scroll.snapshot.offset.y,
                 plan.columns.viewport,
-                plan.bodyHeight
+                plan.bands.available
             )
         )
     }
@@ -253,18 +250,24 @@ internal class GridRow<Row>(
         }
         for (index in selected) {
             val box = plan.columns.box(index, plan.scroll.presentationOffset.x, height)
+            val row = plan.bands.box(props.value.index, plan.scroll.presentationOffset.y, height)
             context.measureItem(
                 index,
                 Constraints.tight(Size(box.width, height)),
                 LayoutInput(
                     GridCellClip(
-                        box.clip,
-                        plan.columns.region(index, plan.headerHeight, plan.bodyHeight),
+                        Rect(box.clip.x, row.clipTop, box.clip.width, row.clipHeight),
+                        plan.columns.region(
+                            index,
+                            plan.headerHeight + row.regionTop,
+                            row.regionHeight
+                        ),
                         if (plan.columns.frozen(index))
                             ScrollAxes.Vertical
                         else
                             ScrollAxes.Both,
-                        plan.viewport
+                        plan.viewport,
+                        fixedRow = row.fixed
                     )
                 )
             )
@@ -342,7 +345,8 @@ internal class GridHeader(scope: ComponentScope): LazyElement<Unit>(scope) {
                             ScrollAxes.Vertical
                         else
                             ScrollAxes.Horizontal,
-                        plan.viewport
+                        plan.viewport,
+                        fixedRow = true
                     )
                 )
             )

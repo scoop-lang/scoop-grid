@@ -1,0 +1,138 @@
+package scoop.grid.tests.pinned
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.style.shadcn.shadcnTheme
+
+internal fun PinProbe.advance() {
+    when (phase) {
+        case 1 -> scroll.scrollTo(Point(1700.0, 64.0))
+        case 2 -> focus(90L, 24L)
+        case 3 -> focus(50000000L, 24L)
+        case 4 -> {
+            previousY = scroll.offset.y;
+            focus(7L, 0L)
+        }
+        case 5 -> model.pinRow(ViewKey.Number(7L), GridRowPin.Bottom)
+        case 6 -> pin([10L, 7L], [90L])
+        case 7 -> applied(handle.pinRow(ViewKey.Number(10L), GridRowPin.None))
+        case 8 -> model.setPagination(GridPagination.Page(2L, 5L))
+        case 9 -> replace(100L)
+        case 10 -> model.setQuery(
+            GridQuery(
+                [GridSort(GridColumnId("c0"), GridSortDirection.Descending)],
+                pagination = model.query.pagination
+            )
+        )
+        case 11 -> model.setQuery(
+            GridQuery(
+                model.query.sorting,
+                quickFilter = "record90",
+                pagination = model.query.pagination
+            )
+        )
+        case 12 -> model.setQuery(
+            GridQuery(model.query.sorting, pagination = model.query.pagination)
+        )
+        case 13 -> replace(100L, Some(7L))
+        case 14 -> {
+            model.setQuery(GridQuery());
+            replace(12L);
+            pin([1L], [10L]);
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 15 -> mode.value = GridRowSizing.Explicit(::pinHeight)
+        case 16 -> scroll.scrollTo(Point(0.0, 40.0))
+        case 17 -> {
+            beforeDiscard = scroll.offset;
+            discardNext = true;
+            mode.value = GridRowSizing.Content([GridColumnId("c24")])
+        }
+        case 18 -> model.setColumnState(GridColumnState(GridColumnId("c24"), width = Some(180.0)))
+        case 19 -> {
+            widthSamples.clear();
+            fit = Some(handle.fitColumnToContent(GridColumnId("c24")))
+        }
+        case 20 -> model.setColumnState(GridColumnState(GridColumnId("c24"), visible = false))
+        case 21 -> {
+            model.setColumnState(GridColumnState(GridColumnId("c24")))
+            mode.value = GridRowSizing.Fixed;
+            height.value = 96.0;
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 22 -> focus(2L, 1L)
+        case 23 -> height.value = 64.0
+        case 24 -> applied(handle.pinRow(ViewKey.Number(1L), GridRowPin.None))
+        case 25 -> {
+            applied(handle.pinRow(ViewKey.Number(10L), GridRowPin.None));
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 26 -> {
+            height.value = 224.0;
+            pin([1L], [10L]);
+            scroll.scrollTo(Point(0.0, 0.0));
+            assertTrue(outside.requestFocus())
+        }
+        case 27 -> {}
+        case 28 -> {}
+        case 29 -> {}
+        case 30 -> {}
+        case 31 -> assertTrue(handle.beginEdit(pinAddress(1L, 1L)))
+        case 32 -> assertTrue(view!!.preedit())
+        case 33 -> rejected(handle.pinRow(ViewKey.Number(1L), GridRowPin.Bottom))
+        case 34 -> key(53, "\u001b")
+        case 35 -> {
+            editor!!.state.replaceAll("bad");
+            assertEquals(GridEditAttempt.Rejected, handle.commitEdit())
+        }
+        case 36 -> rejected(handle.pinRow(ViewKey.Number(1L), GridRowPin.Bottom))
+        case 37 -> {
+            editor!!.state.replaceAll("updated");
+            asynchronous = true;
+            rejected(handle.pinRow(ViewKey.Number(1L), GridRowPin.Bottom))
+        }
+        case 38 -> {
+            rows = PinRows(reads, 12L, edited = Some(pendingRow), text = pendingText);
+            assertTrue(pending!!.accept(rows))
+        }
+        case 39 -> {}
+        case 40 -> applied(handle.pinRow(ViewKey.Number(1L), GridRowPin.Bottom))
+        case 41 -> applied(handle.pinRow(ViewKey.Number(1L), GridRowPin.Top))
+        case 42 -> {
+            assertTrue(handle.beginEdit(pinAddress(1L, 1L)));
+            editor!!.state.replaceAll("draft")
+        }
+        case 43 -> model.pinRow(ViewKey.Number(1L), GridRowPin.Bottom)
+        case 44 -> {
+            assertTrue(handle.cancelEdit());
+            pin([1L], [10L])
+            theme.current.value =
+                shadcnTheme() { tokens { typography { body { fontSize = 21.0 } } } }
+            direction.value = LayoutDirection.Rtl;
+            scroll.scrollTo(Point(10000000.0, 32.0))
+        }
+        case 45 -> enabled.value = false
+        case 46 -> enabled.value = true
+        case 47 -> replace(0L)
+        case 48 -> {
+            theme.current.value = shadcnTheme();
+            direction.value = LayoutDirection.Ltr
+            replace(100000000L);
+            pin([50000000L], [99999999L]);
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 49 -> focus(99999999L, 24L)
+        case 50 -> {
+            ui!!.close();
+            waiting = true;
+            calls!!.post(root!!, phase, 20)
+        }
+        case 51 -> {
+            finished = true;
+            active!!.requestExit()
+        }
+        else -> fail(Some("unknown fixed action phase"))
+    }
+}

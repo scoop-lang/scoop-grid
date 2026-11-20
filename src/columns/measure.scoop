@@ -1,9 +1,6 @@
 package scoop.grid
 
-import scoop.math.max
-import scoop.math.min
 import scoop.ui.*
-import scoop.ui.component.ItemExtentIndex
 
 private class GridColumnContent<Row>(
     val fit: GridColumnFit,
@@ -45,7 +42,7 @@ internal class GridColumnSizing<Row>(private val session: GridSession<Row>): Clo
         if (!session.active || !current.input.enabled)
             return gridRejectedColumnFit("网格未挂载或已禁用")
         val plan = accepted ?: return gridRejectedColumnFit("请等待网格完成布局")
-        if (plan.columns.viewport <= 0.0 || plan.headerHeight + plan.bodyHeight <= 0.0)
+        if (plan.columns.viewport <= 0.0 || plan.headerHeight + plan.bands.available <= 0.0)
             return gridRejectedColumnFit("网格没有可见区域")
         val model = current.input.state
         if (
@@ -108,19 +105,13 @@ internal class GridColumnSizing<Row>(private val session: GridSession<Row>): Clo
                 plan.columns.viewport <=
                 0.0 ||
                 plan.headerHeight +
-                plan.bodyHeight <=
+                plan.bands.available <=
                 0.0
         )
             return None
         val column = value.columns.indexOf(pending.id) ?: return None
-        val rows =
-            gridContentRows(
-                plan.scroll.presentationOffset.y,
-                plan.bodyHeight,
-                plan.rows.index,
-                plan.columns.viewport
-            )
-        return Some(GridColumnProbe(pending.fit, column, rows.first, rows.end))
+        val rows = plan.bands.visible(plan.scroll.presentationOffset.y, 0.0, plan.columns.viewport)
+        return Some(GridColumnProbe(pending.fit, column, rows))
     }
 
     fun accept(plan: GridMeasurePlan, value: GridRootProps<Row>, measured: GridColumnMeasured?) {
@@ -145,7 +136,7 @@ internal class GridColumnSizing<Row>(private val session: GridSession<Row>): Clo
                 plan.columns.viewport <=
                 0.0 ||
                 plan.headerHeight +
-                plan.bodyHeight <=
+                plan.bands.available <=
                 0.0
         )
             return cancelCurrent()
@@ -184,20 +175,4 @@ internal class GridColumnSizing<Row>(private val session: GridSession<Row>): Clo
         input = None
         accepted = None
     }
-}
-
-internal struct GridContentRows(val first: Long, val end: Long)
-
-/** Includes partial rows, but never the overscan or an offscreen focused row. */
-internal fun gridContentRows(
-    offset: Double,
-    height: Double,
-    rows: ItemExtentIndex,
-    width: Double
-): GridContentRows {
-    if (height <= 0.0 || width <= 0.0 || rows.count == 0L)
-        return GridContentRows(0L, 0L)
-    val first = rows.indexAt(max(0.0, offset))
-    val end = rows.endBefore(max(0.0, offset + height))
-    return GridContentRows(first, end)
 }

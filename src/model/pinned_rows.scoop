@@ -1,0 +1,71 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.collections.contains
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+public enum GridRowPin {
+    None, Top, Bottom
+}
+
+public class GridPinnedRows public constructor(
+    public val top: Array<ViewKey> = [],
+    public val bottom: Array<ViewKey> = []
+) {
+    init {
+        val seen = HashSet<ViewKey>()
+        for (keys in [top, bottom])
+            for (key in keys) {
+                gridRequire(key != ViewKey.Position, "fixed rows require explicit keys")
+                gridRequire(seen.add(key), "duplicate fixed row key")
+            }
+    }
+    internal fun same(other: GridPinnedRows): Boolean =
+        gridArrayEqual(top, other.top) && gridArrayEqual(bottom, other.bottom)
+    internal fun moved(key: ViewKey, pin: GridRowPin): GridPinnedRows {
+        if (
+            (pin == GridRowPin.Top && top.contains(key)) ||
+                (pin == GridRowPin.Bottom && bottom.contains(key))
+        )
+            return this
+        val nextTop = ArrayList<ViewKey>()
+        val nextBottom = ArrayList<ViewKey>()
+        for (value in top)
+            if (value != key)
+                nextTop.add(value)
+        for (value in bottom)
+            if (value != key)
+                nextBottom.add(value)
+        when (pin) {
+            case Top -> nextTop.add(key)
+            case Bottom -> nextBottom.add(key)
+            case None -> {}
+        }
+        return GridPinnedRows(nextTop.toArray(), nextBottom.toArray())
+    }
+    internal fun <Row> surviving(source: TableSource<Row>): GridPinnedRows {
+        val nextTop = ArrayList<ViewKey>()
+        val nextBottom = ArrayList<ViewKey>()
+        for (key in top)
+            if (source.indexOfKey(key) != None)
+                nextTop.add(key)
+        for (key in bottom)
+            if (source.indexOfKey(key) != None)
+                nextBottom.add(key)
+        return if (nextTop.size == top.size && nextBottom.size == bottom.size)
+            this
+        else
+            GridPinnedRows(nextTop.toArray(), nextBottom.toArray())
+    }
+}
+
+internal fun <Row> gridCheckPinnedRows(
+    source: TableSource<Row>,
+    pins: GridPinnedRows
+): GridPinnedRows {
+    for (keys in [pins.top, pins.bottom])
+        for (key in keys)
+            gridRequire(source.indexOfKey(key) != None, "unknown fixed row key")
+    return pins
+}

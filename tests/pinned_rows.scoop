@@ -1,0 +1,202 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class PinRows(public override val count: Long): TableSource<Long> {
+    var reads = 0L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(value)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long {
+        reads += 1L
+        return index
+    }
+}
+
+private fun pinKeys(values: Array<Long>): Array<ViewKey> =
+    Array<ViewKey>(values.size) { at -> ViewKey.Number(values[at]) }
+
+private fun pinModel(source: PinRows, query: GridQuery = GridQuery()): DataGridState<Long> =
+    DataGridState(
+        source,
+        [gridColumn<Long, Long>(GridColumnId("id"), "ID", { value -> value }, gridLongValues())],
+        query
+    )
+
+private fun expectPinRows(expected: Array<Long>, source: TableSource<Long>) {
+    assertEquals(expected.size, source.count)
+    for (at in 0L ..< expected.size) {
+        val key = ViewKey.Number(expected[at])
+        assertEquals(key, source.keyAt(at))
+        assertEquals(Some(at), source.indexOfKey(key))
+        assertEquals(expected[at], source.rowAt(at))
+    }
+}
+
+@Test
+private class GridPinnedRowsTest {
+    @Test
+    fun `fixed identities remap a huge page without scanning business rows`() {
+        val source = PinRows(100000000L)
+        val model = pinModel(source)
+        val order = model.result.ordered
+        val query = model.query
+        model.setPinnedRows(
+            GridPinnedRows(pinKeys([50000000L, 0L, 99999999L]), pinKeys([17L, 19L]))
+        )
+        assertTrue(order === model.result.ordered)
+        assertTrue(source === model.result.pageRows)
+        assertTrue(query === model.query)
+        assertEquals(100000000L, model.result.rows.count)
+        assertEquals(99999995L, model.result.bodyCount)
+        assertEquals(0L, source.reads)
+        val rows = model.result.rows
+        for (
+            key in [
+                0L,
+                1L,
+                16L,
+                17L,
+                18L,
+                19L,
+                20L,
+                49999999L,
+                50000000L,
+                50000001L,
+                99999998L,
+                99999999L
+            ]
+        ) {
+            val at = rows.indexOfKey(ViewKey.Number(key))!!
+            assertEquals(ViewKey.Number(key), rows.keyAt(at))
+            assertEquals(key, rows.rowAt(at))
+        }
+        assertEquals(ViewKey.Number(1L), rows.keyAt(3L))
+        assertEquals(ViewKey.Number(16L), rows.keyAt(18L))
+        assertEquals(ViewKey.Number(18L), rows.keyAt(19L))
+        assertEquals(ViewKey.Number(20L), rows.keyAt(20L))
+        assertEquals(ViewKey.Number(99999998L), rows.keyAt(99999997L))
+        assertEquals(ViewKey.Number(17L), rows.keyAt(99999998L))
+        assertEquals(ViewKey.Number(19L), rows.keyAt(99999999L))
+    }
+
+    @Test
+    fun `paging sorting and filters preserve fixed order and exact query counts`() {
+        val source = PinRows(12L)
+        val model = pinModel(source, GridQuery(pagination = GridPagination.Page(1L, 4L)))
+        val page = model.result.pageRows
+        val ordered = model.result.ordered
+        model.setPinnedRows(GridPinnedRows(pinKeys([10L, 5L]), pinKeys([0L, 7L])))
+        assertTrue(page === model.result.pageRows)
+        assertTrue(ordered === model.result.ordered)
+        assertEquals(0L, source.reads)
+        expectPinRows([10L, 5L, 4L, 6L, 0L, 7L], model.result.rows)
+        expectPinRows([4L, 5L, 6L, 7L], model.result.pageRows)
+        assertEquals(12L, model.result.totalRows)
+        assertEquals(3L, model.result.pageCount)
+        assertEquals(2L, model.result.topCount)
+        assertEquals(2L, model.result.bodyCount)
+        assertEquals(2L, model.result.bottomCount)
+        val before = model.result
+        model.pinRow(ViewKey.Number(5L), GridRowPin.Top)
+        assertTrue(before === model.result)
+        model.pinRow(ViewKey.Number(5L), GridRowPin.Bottom)
+        expectPinRows([10L, 4L, 6L, 0L, 7L, 5L], model.result.rows)
+        model.toggleSort(GridColumnId("id"))
+        model.toggleSort(GridColumnId("id"))
+        expectPinRows([10L, 11L, 9L, 8L, 0L, 7L, 5L], model.result.rows)
+        val pins = model.pinnedRows
+        model.setQuery(GridQuery(quickFilter = "1", pagination = model.query.pagination))
+        assertTrue(pins === model.pinnedRows)
+        expectPinRows([10L, 1L, 11L], model.result.rows)
+        assertEquals(3L, model.result.totalRows)
+        assertEquals(0L, model.result.bottomCount)
+        model.setQuery(GridQuery(pagination = GridPagination.Page(0L, 4L)))
+        model.replaceData(PinRows(6L))
+        assertEquals(0L, model.pinnedRows.top.size)
+        assertTrue(gridArrayEqual(pinKeys([0L, 5L]), model.pinnedRows.bottom))
+        expectPinRows([1L, 2L, 3L, 0L, 5L], model.result.rows)
+        assertEquals(6L, model.result.totalRows)
+        assertEquals(2L, model.result.pageCount)
+        model.replaceData(PinRows(0L))
+        assertEquals(0L, model.result.rows.count)
+        assertEquals(0L, model.pinnedRows.bottom.size)
+    }
+
+    @Test
+    fun `fixed row updates reject malformed references without publishing partial state`() {
+        val model = pinModel(PinRows(10L))
+        model.setPinnedRows(GridPinnedRows(pinKeys([3L]), pinKeys([7L])))
+        val before = model.result
+        val pins = model.pinnedRows
+        assertFailsWith<IllegalArgumentException> { GridPinnedRows([ViewKey.Position]) }
+        assertFailsWith<IllegalArgumentException> { GridPinnedRows(pinKeys([3L, 3L])) }
+        assertFailsWith<IllegalArgumentException> { GridPinnedRows(pinKeys([3L]), pinKeys([3L])) }
+        assertFailsWith<IllegalArgumentException> {
+            model.setPinnedRows(GridPinnedRows(pinKeys([11L])))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.pinRow(ViewKey.Number(-1L), GridRowPin.None)
+        }
+        assertTrue(before === model.result)
+        assertTrue(pins === model.pinnedRows)
+        model.setPinnedRows(GridPinnedRows(pinKeys([3L]), pinKeys([7L])))
+        assertTrue(before === model.result)
+        model.pinRow(ViewKey.Number(3L), GridRowPin.None)
+        assertEquals(0L, model.result.topCount)
+        assertEquals(1L, model.result.bottomCount)
+        when (DataGridHandle().pinRow(ViewKey.Number(3L), GridRowPin.Top)) {
+            case Rejected(_) -> {}
+            else -> fail(Some("unattached row action must be rejected"))
+        }
+    }
+
+    @Test
+    fun `three regions sample only visible rows and clip body geometry at fixed boundaries`() {
+        val index = ItemExtentIndex(6L, ItemExtent.Variable(32.0))
+        index.record(0L, 64.0)
+        index.record(1L, 48.0)
+        index.record(2L, 96.0)
+        index.record(5L, 40.0)
+        val regions = GridRowLayout(index, 1L, 1L, 192.0)
+        assertEquals(208.0, regions.bodyExtent)
+        assertEquals(88.0, regions.bodyHeight)
+        assertTrue(gridArrayEqual([0L, 1L, 2L, 5L], regions.visible(20.0, 0.0, 500.0)))
+        val body = regions.box(1L, 20.0, 48.0)
+        assertEquals(44.0, body.y)
+        assertEquals(20.0, body.clipTop)
+        assertEquals(28.0, body.clipHeight)
+        assertEquals(64.0, body.regionTop)
+        assertEquals(88.0, body.regionHeight)
+        assertFalse(body.fixed)
+        assertEquals(0.0, regions.box(0L, 150.0, 64.0).y)
+        assertEquals(152.0, regions.box(5L, 150.0, 40.0).y)
+        assertTrue(regions.box(5L, 150.0, 40.0).fixed)
+        val exact = GridRowLayout(index, 1L, 1L, 200.0)
+        assertTrue(gridArrayEqual([0L, 2L, 5L], exact.visible(48.0, 0.0, 500.0)))
+        assertEquals(0L, exact.visible(0.0, 0.0, 0.0).size)
+    }
+
+    @Test
+    fun `oversized fixed regions give top precedence and preserve sparse windows`() {
+        val rows = ItemExtentIndex(100000000L, ItemExtent.Fixed(32.0))
+        val small = GridRowLayout(rows, 3L, 2L, 48.0)
+        assertEquals(48.0, small.topVisible)
+        assertEquals(0.0, small.bottomVisible)
+        assertEquals(0.0, small.bodyHeight)
+        assertTrue(gridArrayEqual([0L, 1L], small.visible(1000000.0, 0.0, 500.0)))
+        assertEquals(0.0, small.box(99999999L, 1000000.0, 32.0).clipHeight)
+        val window = GridRowLayout(rows, 2L, 2L, 320.0)
+        assertEquals(10L, window.visible(3200.0, 0.0, 500.0).size)
+        val zero = GridRowLayout(rows, 2L, 2L, 0.0)
+        assertEquals(0L, zero.visible(0.0, 0.0, 500.0).size)
+    }
+}

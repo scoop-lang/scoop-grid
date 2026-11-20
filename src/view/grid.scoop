@@ -70,7 +70,17 @@ public class DataGrid<Row> public constructor(
                 case None -> GridRowPolicy(input.rowSizing, layout)
             }
         rowPolicy = Some(policy)
-        val rows = GridRows(input.state.result.rows, layout, session, policy, input.enabled)
+        val result = input.state.result
+        val rows =
+            GridRows(
+                result.rows,
+                layout,
+                session,
+                policy,
+                input.enabled,
+                result.topCount,
+                result.bottomCount
+            )
         val header =
             GridHeaderCells(
                 layout,
