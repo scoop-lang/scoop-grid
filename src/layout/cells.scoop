@@ -13,7 +13,8 @@ internal class GridCellClip(
     val bounds: Rect,
     val region: Rect,
     val axes: ScrollAxes,
-    val viewport: ScrollViewport
+    val viewport: ScrollViewport,
+    val intrinsic: Boolean = false
 )
 
 internal class GridRowCells<Row>(
@@ -377,6 +378,28 @@ internal class GridCell<Row>(
         GridCellClip
     > {
         val clip = context.input<GridCellClip>()
+        if (clip.intrinsic) {
+            val padding =
+                min(
+                    props.value.appearance.padding,
+                    (constraints.maxHeight ?: props.value.appearance.padding * 2.0) / 2.0
+                )
+            val height =
+                when (constraints.maxHeight) {
+                    case Some(val value) -> Some(max(0.0, value - padding * 2.0))
+                    case None -> None
+                }
+            val child = context.measureChild(0L, Constraints(maxHeight = height))
+            val size =
+                constraints.constrain(
+                    Size(child.size.width + padding * 2.0, child.size.height + padding * 2.0)
+                )
+            context.placeChild(
+                0L,
+                Point(padding, max(0.0, (size.height - child.size.height) / 2.0))
+            )
+            return LayoutResult(LayoutMetrics(size), clip)
+        }
         val size = constraints.constrain(Size(0.0, 0.0))
         val inset = min(props.value.appearance.padding, min(size.width, size.height) / 2.0)
         val child =

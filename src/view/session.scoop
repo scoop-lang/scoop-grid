@@ -29,6 +29,7 @@ internal class GridSession<Row>: GridMount {
     val editing = GridEditCoordinator<Row>(this)
     val columnActions = GridColumnActions<Row>(this)
     val columnReorder = GridColumnReorder<Row>(this)
+    val columnSizing = GridColumnSizing<Row>(this)
     private var owner: ComponentScope? = None
     private var model: DataGridState<Row>? = None
     private val rows: TableSource<Row>? get() = model?.result?.rows
@@ -40,16 +41,26 @@ internal class GridSession<Row>: GridMount {
     private val cells = HashMap<GridCellAddress, GridCellFocus>()
     private var pageRows = 1L
     private var onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit }
-    fun accept(plan: GridMeasurePlan, input: GridRootProps<Row>, time: MonotonicInstant?) {
+    fun accept(
+        plan: GridMeasurePlan,
+        input: GridRootProps<Row>,
+        time: MonotonicInstant?,
+        measured: GridColumnMeasured?
+    ) {
         if (active) {
             pageRows = max(1L, (plan.bodyHeight / plan.rowHeight).toLong())
             columnActions.accept(plan, input)
             columnReorder.accept(plan, input, time)
+            columnSizing.accept(plan, input, measured)
         }
     }
     fun requestFrame() {
         if (active)
             owner?.requestFrame()
+    }
+    fun requestLayout() {
+        if (active)
+            owner?.requestLayout()
     }
     public override val columnStates: Array<GridColumnState>? get() = columnActions.states
     public override fun setColumnState(value: GridColumnState): GridColumnActionResult =
@@ -57,6 +68,7 @@ internal class GridSession<Row>: GridMount {
     public override fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult =
         columnActions.move(id, index)
     public override fun fitColumns(): GridColumnActionResult = columnActions.fit()
+    public override fun fitColumnToContent(id: GridColumnId): GridColumnFit = columnSizing.begin(id)
     fun navigate(address: GridCellAddress, key: KeyEvent): Boolean {
         if (!active || !enabled)
             return false
@@ -162,6 +174,7 @@ internal class GridSession<Row>: GridMount {
         onPasteResult = input.input.onPasteResult
         editing.update(input.input)
         columnReorder.update(input)
+        columnSizing.update(input)
         val sameHandle =
             when ((reference, input.input.handle)) {
                 case(Some(val old), Some(val next)) -> old === next
@@ -180,6 +193,7 @@ internal class GridSession<Row>: GridMount {
         }
     }
     fun unmount() {
+        columnSizing.close()
         columnReorder.close()
         columnActions.close()
         editing.close()

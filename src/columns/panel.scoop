@@ -35,6 +35,9 @@ public class GridColumnsPanel<Row> public constructor(
     private var draft = TextEditorState(gridColumnWidthText(appliedWidth))
     private val revision = state(0L)
     private var message: String? = None
+    private var contentFit: GridColumnFit? = None
+    private var fittedColumn: GridColumnId? = None
+    private var fittingModel: DataGridState<Row>? = None
     private var ambient: ThemeSource? = None
     public override fun onMount() {
         when (props.value.theme) {
@@ -51,6 +54,7 @@ public class GridColumnsPanel<Row> public constructor(
     private fun report(value: GridColumnActionResult) {
         if (!scope.isMounted)
             return
+        clearContentFit()
         message =
             when (value) {
                 case Applied -> None
@@ -62,6 +66,7 @@ public class GridColumnsPanel<Row> public constructor(
         if (!available() || gridColumnStateIndex(props.value.state.columnState, id) == None)
             return false
         selected = id
+        clearContentFit()
         message = None
         revision.value += 1L
         return true
@@ -160,6 +165,25 @@ public class GridColumnsPanel<Row> public constructor(
         if (available())
             report(props.value.handle.fitColumns())
     }
+    private fun clearContentFit() {
+        contentFit?.cancel()
+        contentFit = None
+        fittedColumn = None
+        fittingModel = None
+    }
+    private fun fitContent() {
+        if (!available() || !(entry(selected)?.visible ?: false))
+            return
+        clearContentFit()
+        contentFit = Some(props.value.handle.fitColumnToContent(selected))
+        fittedColumn = Some(selected)
+        fittingModel = Some(props.value.state)
+        message = None
+        revision.value += 1L
+    }
+    public override fun onUnmount() {
+        clearContentFit()
+    }
     public override fun render(): View {
         revision.value
         val input = props.value
@@ -185,6 +209,26 @@ public class GridColumnsPanel<Row> public constructor(
         val definition = input.state.column(selected)
         val title = definition.title
         val widthDraft = draft
+        val fitting =
+            when (fittingModel) {
+                case Some(val model) -> if (model === input.state && fittedColumn == Some(selected))
+                    contentFit
+                else
+                    None
+                case None -> None
+            }
+        val fitMessage =
+            when (fitting) {
+                case Some(val request) -> Some(
+                    when (request.result) {
+                        case Pending -> "正在测量可见内容…"
+                        case Applied(_) -> "已适应可见内容"
+                        case Rejected(val text) -> text
+                        case Cancelled -> "内容测宽已取消，请重试"
+                    }
+                )
+                case None -> None
+            }
         val source =
             GridColumnChoices(
                 input,
@@ -316,6 +360,19 @@ public class GridColumnsPanel<Row> public constructor(
                     }
                 )
                 spacing = 6.0 * appearance.density
+            }
+            add(
+                columnsButton("适应可见内容", { this @GridColumnsPanel.fitContent() }) {
+                    enabled = active && current.visible && !(fitting?.isPending ?: false)
+                    fonts = input.fonts
+                    theme = input.theme
+                    variant = ButtonVariant.Outline
+                    semantics = gridColumnControl(current.id, "content", f"${title} 列适应可见内容")
+                }
+            )
+            when (fitMessage) {
+                case Some(val text) -> add(gridColumnsLabel(text, appearance))
+                case None -> {}
             }
             spacing = 8.0 * appearance.density
             alignment = CrossAlignment.Stretch

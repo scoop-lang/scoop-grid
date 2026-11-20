@@ -129,23 +129,28 @@ internal class GridColumnActions<Row>(private val session: GridSession<Row>): Cl
         return publish(current, before, next)
     }
     fun beginGesture(model: DataGridState<Row>, id: GridColumnId): GridColumnGestureStart<Row> {
-        val current = current() ?: return GridColumnGestureStart.Rejected("网格未挂载或已禁用")
+        when (val error = prepare(model, id)) {
+            case Some(val message) -> return GridColumnGestureStart.Rejected(message)
+            case None -> {}
+        }
+        return GridColumnGestureStart.Ready(
+            GridColumnGesture(model, model.columns, model.columnState, id)
+        )
+    }
+    fun prepare(model: DataGridState<Row>, id: GridColumnId): String? {
+        val current = current() ?: return Some("网格未挂载或已禁用")
         if (current.input.state !== model)
-            return GridColumnGestureStart.Rejected("请等待当前网格完成布局")
+            return Some("请等待当前网格完成布局")
         when (accepted.value) {
-            case None -> return GridColumnGestureStart.Rejected("请等待当前网格完成布局")
+            case None -> return Some("请等待当前网格完成布局")
             case Some(_) -> {}
         }
         val definitions = model.columns
         val before = model.columnState
-        val at = gridColumnStateIndex(before, id) ?: return GridColumnGestureStart.Rejected("列已移除")
+        val at = gridColumnStateIndex(before, id) ?: return Some("列已移除")
         if (!before[at].visible)
-            return GridColumnGestureStart.Rejected("列已隐藏")
-        when (val error = editError(current, before, definitions)) {
-            case Some(val message) -> return GridColumnGestureStart.Rejected(message)
-            case None -> {}
-        }
-        return GridColumnGestureStart.Ready(GridColumnGesture(model, definitions, before, id))
+            return Some("列已隐藏")
+        return editError(current, before, definitions)
     }
     fun resize(gesture: GridColumnGesture<Row>, width: Double?): GridColumnActionResult {
         val input = current() ?: return GridColumnActionResult.Rejected("网格未挂载或已禁用")

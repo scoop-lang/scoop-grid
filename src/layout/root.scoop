@@ -24,11 +24,27 @@ internal class GridMeasurePlan(
     val bodyHeight: Double,
     val overscan: Double,
     val visibleColumns: Array<Long>,
-    val viewport: ScrollViewport
-)
+    val viewport: ScrollViewport,
+    val probe: GridColumnProbe? = None
+) {
+    fun probing(value: GridColumnProbe): GridMeasurePlan =
+        GridMeasurePlan(
+            columns,
+            scroll,
+            rowHeight,
+            headerHeight,
+            bodyHeight,
+            overscan,
+            visibleColumns,
+            viewport,
+            Some(value)
+        )
+}
+
+internal class GridRootLayout(val plan: GridMeasurePlan, val measured: GridColumnMeasured?)
 
 internal class GridRoot<Row>(private val props: Props<GridRootProps<Row>>, scope: ComponentScope):
-Element<GridMeasurePlan>(scope) {
+Element<GridRootLayout>(scope) {
     private val viewport = scope.scrollViewport(props.value.scroll)
     private val entry = FocusHandle()
     private val area =
@@ -57,7 +73,7 @@ Element<GridMeasurePlan>(scope) {
         props.value.session.unmount()
     }
     public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
-        GridMeasurePlan
+        GridRootLayout
     > {
         val input = props.value
         val density = input.columns.appearance.density
@@ -117,14 +133,31 @@ Element<GridMeasurePlan>(scope) {
                 columns.visible(scroll.presentationOffset.x),
                 viewport
             )
+        val measured =
+            when (val probe = input.session.columnSizing.probe(input, plan)) {
+                case Some(val value) -> Some(
+                    gridMeasureColumnContent(
+                        context,
+                        plan,
+                        value,
+                        input.columns.appearance.sampleWidth(
+                            input.columns.columns[value.column].size
+                        ),
+                        density,
+                        bodyExtent
+                    )
+                )
+                case None -> None
+            }
         val shared = LayoutInput(plan)
         context.measureChild(0L, Constraints.tight(Size(columns.total, headerHeight)), shared)
         context.placeChild(0L, Point(0.0, scroll.presentationOffset.y - scroll.snapshot.offset.y))
         context.measureChild(1L, Constraints.tight(Size(columns.total, bodyExtent)), shared)
         context.placeChild(1L, Point(0.0, headerHeight))
-        return LayoutResult(LayoutMetrics(size), plan)
+        return LayoutResult(LayoutMetrics(size), GridRootLayout(plan, measured))
     }
-    public override fun scene(context: SceneContext, plan: GridMeasurePlan) {
+    public override fun scene(context: SceneContext, value: GridRootLayout) {
+        val plan = value.plan
         val bounds = Rect(0.0, 0.0, context.size.width, context.size.height)
         val color = props.value.columns.appearance.theme.tokens.palette.background.background
         context.draw { paint -> paint.canvas.drawRect(bounds, Paint(color)) }
@@ -144,7 +177,7 @@ Element<GridMeasurePlan>(scope) {
                 None
         context.onFrameComplete {
             frame -> if (frame.submission == FrameSubmission.Accepted)
-                session.accept(plan, input, time)
+                session.accept(plan, input, time, value.measured)
         }
         val line = props.value.columns.appearance.density
         val border = props.value.columns.appearance.theme.tokens.palette.border

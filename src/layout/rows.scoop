@@ -98,6 +98,10 @@ internal class GridBody<Row>(
         constraints: Constraints
     ): LayoutResult<Rect> {
         val plan = context.input<GridMeasurePlan>()
+        when (plan.probe) {
+            case Some(val probe) -> return gridMeasureContentRows(context, constraints, plan, probe)
+            case None -> {}
+        }
         val offset = plan.scroll.presentationOffset
         val selected = HashSet<Long>()
         val first = max(0L, ((offset.y - plan.overscan) / plan.rowHeight).toLong())
@@ -166,6 +170,16 @@ internal class GridRow<Row>(
         constraints: Constraints
     ): LayoutResult<Unit> {
         val plan = context.input<GridMeasurePlan>()
+        when (plan.probe) {
+            case Some(val probe) -> return gridMeasureContentCell(
+                context,
+                constraints,
+                plan,
+                probe,
+                false
+            )
+            case None -> {}
+        }
         val selected = HashSet<Long>()
         for (index in plan.visibleColumns)
             selected.add(index)
@@ -225,6 +239,16 @@ internal class GridHeader(scope: ComponentScope): LazyElement<Unit>(scope) {
         constraints: Constraints
     ): LayoutResult<Unit> {
         val plan = context.input<GridMeasurePlan>()
+        when (plan.probe) {
+            case Some(val probe) -> return gridMeasureContentCell(
+                context,
+                constraints,
+                plan,
+                probe,
+                true
+            )
+            case None -> {}
+        }
         val selected = HashSet<Long>()
         for (index in plan.visibleColumns)
             selected.add(index)

@@ -95,6 +95,10 @@ public class DataGridHandle public constructor() {
         guard.checkMutation()
         return target?.fitColumns() ?: GridColumnActionResult.Rejected("网格未挂载")
     }
+    public fun fitColumnToContent(id: GridColumnId): GridColumnFit {
+        guard.checkMutation()
+        return target?.fitColumnToContent(id) ?: gridRejectedColumnFit("网格未挂载")
+    }
     internal fun usesColumns(values: Array<GridColumnState>): Boolean {
         checkThread()
         return when (val current = target?.columnStates ?: None) {
@@ -141,4 +145,5 @@ internal interface GridMount {
     fun setColumnState(value: GridColumnState): GridColumnActionResult
     fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult
     fun fitColumns(): GridColumnActionResult
+    fun fitColumnToContent(id: GridColumnId): GridColumnFit
 }

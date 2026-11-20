@@ -55,6 +55,12 @@ internal class GridAppearance(
             else -> return column.minimum
         }
     }
+    fun sampleWidth(column: TableColumnSize): Double {
+        var width = 0.0
+        for (sample in column.samples)
+            width = max(width, measure(sample))
+        return width + padding * 2.0 / density
+    }
     private fun measure(text: String): Double =
         Paragraph(fonts, text, head, paragraph).use {
             value -> value.layoutUnwrapped().use { layout -> layout.size.width / density }

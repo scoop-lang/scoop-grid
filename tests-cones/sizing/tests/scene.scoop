@@ -1,0 +1,62 @@
+package scoop.grid.tests.sizing
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+
+internal class SizingScene(private val probe: SizingProbe, scope: ComponentScope): Component(
+    scope
+) {
+    public override fun render(): View {
+        val probe = this.probe
+        return direction(
+            element(
+                { mount -> SizingLayout(probe, mount) },
+                [
+                    gridColumnsPanel(probe.model, probe.handle) {
+                        height = 180.0;
+                        enabled = probe.enabled.value
+                    },
+                    dataGrid(probe.model) {
+                        handle = Some(probe.handle)
+                        width = Some(500.0)
+                        height = probe.height.value
+                        rowHeight = 32.0
+                        headerHeight = 32.0
+                        minimumCenterWidth = 100.0
+                        overscan = 96.0
+                        enabled = probe.enabled.value
+                        scroll = Some(probe.scroll.value)
+                    }
+                ]
+            ),
+            probe.direction.value
+        )
+    }
+}
+
+private class SizingLayout(private val probe: SizingProbe, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    init {
+        probe.frame = Some(scope)
+        probe.fonts = Some(scope.defaultFonts)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(420.0, 620.0)))
+        context.placeChild(0L, Point(12.0, 12.0))
+        context.measureChild(1L, Constraints(maxWidth = Some(500.0), maxHeight = Some(400.0)))
+        context.placeChild(1L, Point(448.0, 12.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(960.0, 660.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted)
+                probe.accepted()
+        }
+    }
+}

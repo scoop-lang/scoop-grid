@@ -1,0 +1,302 @@
+package scoop.grid.tests.sizing
+
+import scoop.collections.HashSet
+import scoop.graphics.*
+import scoop.graphics.text.FontCollection
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.ViewProbe
+import scoop.tests.ui.accessibility.native.*
+import scoop.tests.window.nativeEditorKey
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridContentSizingWindowTest {
+    @Test
+    fun `native content sizing samples displayed rows and publishes only current accepted results`() {
+        val probe = SizingProbe()
+        try {
+            context(probe.theme) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertEquals(2, probe.submissions)
+            assertEquals(0L, probe.live.size)
+            assertTrue(
+                probe.created < 1000L,
+                Some(f"unexpected cell construction: ${probe.created}")
+            )
+        } catch (error: Throwable) {
+            println(
+                f"sizing phase=${probe.phase}, retry=${probe.retry}, created=${
+                    probe.created
+                }, natural=${probe.natural.size}"
+            )
+            if (error is Exception)
+                error.printStackTrace()
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+internal class SizingProbe: Closeable {
+    var rows = SizingRows()
+    val theme = ThemeSource(shadcnTheme())
+    val selected = state(sizingModel(this))
+    val model: DataGridState<SizingRow> get() = selected.value
+    val handle = DataGridHandle()
+    val scroll = state(ScrollState())
+    val height = state(160.0)
+    val direction = state(LayoutDirection.Ltr)
+    val enabled = state(true)
+    val live = HashSet<GridCellAddress>()
+    val natural = HashSet<GridCellAddress>()
+    var created = 0L
+    var readBase = 0L
+    var frame: ComponentScope? = None
+    var fonts: FontCollection? = None
+    var editor: GridTextEditor<Long>? = None
+    var submissions = 0
+    var synchronous = false
+    var pending: GridCommit<SizingRow>? = None
+    var pendingValue = 0L
+    val address = GridCellAddress(ViewKey.Number(0L), GridColumnId("value"))
+    var fit: GridColumnFit? = None
+    var previousFit: GridColumnFit? = None
+    var previousModel: DataGridState<SizingRow>? = None
+    var before: GridResult<SizingRow>? = None
+    var beforeStates: Array<GridColumnState>? = None
+    var fitSettled = false
+    var phase = 0
+    var waiting = false
+    var retry = false
+    var finished = false
+    var active: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var calls: NativeCalls? = None
+    var root: NativeNode? = None
+    var grid: NativeNode? = None
+    var cell: NativeNode? = None
+    var panelControl: NativeNode? = None
+    var view: ViewProbe? = None
+    private val held = ArrayList<NativeNode>()
+
+    fun save(value: Long, completion: GridCommit<SizingRow>) {
+        submissions += 1
+        if (synchronous) {
+            rows = SizingRows(rows.count, Some(value))
+            assertTrue(completion.accept(rows))
+        } else {
+            pending = Some(completion)
+            pendingValue = value
+        }
+    }
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                active = Some(application)
+                application.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
+                )
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid content sizing";
+                            size = LogicalSize(960.0, 660.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> SizingScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> {
+                                    root = Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                                    view = Some(ViewProbe(pointer))
+                                }
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(
+                            application.proxy(),
+                            { tag -> inspect(tag) },
+                            { tag, result -> completed(tag, result) }
+                        )
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(
+                Some(f"sizing timeout at ${phase}, focused=${window?.isFocused ?: false}")
+            )
+            else -> {}
+        }
+    }
+    fun accepted() {
+        if (finished || waiting || !(window?.isFocused ?: false))
+            return
+        waiting = true
+        retry = false
+        when (phase) {
+            case 48 -> calls!!.post(panelControl!!, phase, 16)
+            case 50 -> calls!!.post(panelControl!!, phase)
+            else -> calls!!.post(root!!, phase, 20)
+        }
+    }
+    fun completed(tag: Int, result: Int) {
+        assertEquals(phase, tag)
+        assertEquals(1, result, Some(f"native action at ${phase}"))
+        waiting = false
+        if (retry) {
+            frame!!.requestFrame();
+            return
+        }
+        phase += 1
+        advance()
+        if (!finished && !waiting)
+            frame!!.requestFrame()
+    }
+    fun keep(node: NativeNode): NativeNode {
+        held.add(node);
+        return node
+    }
+    fun identified(id: String): NativeNode =
+        keep(root!!.find(id) ?: fail(Some(f"missing ${id} at ${phase}")))
+    fun named(node: NativeNode, name: String): NativeNode? {
+        if (node.flag(0) && (node.text(0, Some(name)) || node.text(1, Some(name))))
+            return Some(node)
+        if (node.text(2, Some("AXTable")))
+            return None
+        for (index in 0L ..< node.count) {
+            val found = named(keep(node.child(index)), name)
+            when (found) {
+                case Some(_) -> return found;
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun entry(id: String): GridColumnState {
+        for (entry in model.columnState)
+            if (entry.id.value == id)
+                return entry
+        return fail(Some(f"missing ${id}"))
+    }
+    fun capture() {
+        natural.clear()
+        readBase = rows.reads
+        before = Some(model.result)
+        beforeStates = Some(model.columnState)
+        fitSettled = false
+    }
+    fun begin(id: String = "value") {
+        capture()
+        fit = Some(handle.fitColumnToContent(GridColumnId(id)))
+        assertTrue(fit!!.isPending, Some(f"expected pending fit at ${phase}"))
+        assertTrue(
+            beforeStates!! === model.columnState,
+            Some("measurement must not publish before layout")
+        )
+    }
+    fun applied(
+        id: String,
+        width: Double?,
+        first: Long = 0L,
+        end: Long = 4L,
+        custom: Boolean = true
+    ) {
+        if (fit!!.isPending) {
+            retry = true;
+            return
+        }
+        val actual =
+            when (fit!!.result) {
+                case Applied(val value) -> value
+                else -> fail(Some(f"expected applied fit at ${phase}"))
+            }
+        when (width) {
+            case Some(val value) -> assertEquals(value, actual)
+            case None -> {
+                assertTrue(actual > 40.0);
+                assertTrue(actual < 100.0)
+            }
+        }
+        assertEquals(Some(actual), entry(id).width)
+        assertTrue(before!! === model.result)
+        assertFalse(fit!!.cancel())
+        assertEquals(
+            if (custom)
+                end - first
+            else
+                0L,
+            natural.size
+        )
+        if (custom)
+            for (row in first ..< end)
+                assertTrue(natural.contains(GridCellAddress(ViewKey.Number(row), GridColumnId(id))))
+        assertTrue(
+            rows.reads - readBase < 100L,
+            Some("content sizing must not read the full source")
+        )
+        if (!fitSettled) {
+            fitSettled = true;
+            retry = true
+        }
+    }
+    fun rejected(request: GridColumnFit) {
+        when (request.result) {
+            case Rejected(val message) -> assertTrue(message != "")
+            else -> fail(Some(f"expected rejected fit at ${phase}"))
+        }
+    }
+    fun cancelled(request: GridColumnFit) {
+        when (request.result) {
+            case Cancelled -> {}
+            else -> fail(Some(f"expected cancelled fit at ${phase}"))
+        }
+        assertFalse(request.isPending)
+    }
+    fun escape() {
+        @Unsafe
+        {
+            window!!.acquireNativeWindow().use {
+                lease -> @Unsafe
+                {
+                    when (lease.handle) {
+                        case AppKit(_, val pointer) -> "\u001b".withUtf8Bytes {
+                            bytes,
+                            length -> @Unsafe
+                            {
+                                assertEquals(0, nativeEditorKey(pointer, 53, bytes, length, 0))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in held)
+            node.close()
+        view?.close()
+        ui?.close()
+    }
+}

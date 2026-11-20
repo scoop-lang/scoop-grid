@@ -1,0 +1,309 @@
+package scoop.grid.tests.sizing
+
+import scoop.compiler.includeBytes
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.style.shadcn.shadcnTheme
+
+internal fun SizingProbe.advance() {
+    when (phase) {
+        case 1 -> begin()
+        case 2 -> frame!!.requestLayout()
+        case 3 -> begin("remote")
+        case 4 -> begin("small")
+        case 5 -> begin("max")
+        case 6 -> begin("samples")
+        case 7 -> begin("start")
+        case 8 -> model.setColumnState(
+            GridColumnState(GridColumnId("start"), width = Some(80.0), pin = GridPin.Start)
+        )
+        case 9 -> scroll.value.scrollTo(Point(0.0, 1.0))
+        case 10 -> begin()
+        case 11 -> scroll.value.scrollTo(Point(0.0, 0.0))
+        case 12 -> begin()
+        case 13 -> {
+            begin();
+            model.setColumnState(GridColumnState(GridColumnId("value"), width = Some(123.0)))
+        }
+        case 14 -> {
+            begin();
+            rows = SizingRows();
+            model.replaceData(rows)
+        }
+        case 15 -> {
+            begin();
+            model.replaceColumns(sizingColumns(this))
+        }
+        case 16 -> {
+            begin();
+            assertTrue(fit!!.cancel());
+            assertFalse(fit!!.cancel())
+        }
+        case 17 -> {
+            begin();
+            previousFit = fit;
+            begin("remote")
+        }
+        case 18 -> model.setColumnState(
+            GridColumnState(GridColumnId("remote"), visible = false, width = entry("remote").width)
+        )
+        case 19 -> {
+            capture();
+            fit = Some(handle.fitColumnToContent(GridColumnId("remote")))
+        }
+        case 20 -> model.setColumnState(
+            GridColumnState(GridColumnId("remote"), width = entry("remote").width)
+        )
+        case 21 -> enabled.value = false
+        case 22 -> {
+            capture();
+            fit = Some(handle.fitColumnToContent(GridColumnId("value")))
+        }
+        case 23 -> enabled.value = true
+        case 24 -> {
+            begin();
+            enabled.value = false
+        }
+        case 25 -> enabled.value = true
+        case 26 -> {
+            begin()
+            previousModel = Some(model)
+            selected.value = sizingModel(this)
+            model.setColumnState(GridColumnState(GridColumnId("c5"), width = Some(147.0)))
+        }
+        case 27 -> {
+            begin()
+            theme.current.value =
+                shadcnTheme() { tokens { typography { body { fontSize = 21.0 } } } }
+            direction.value = LayoutDirection.Rtl
+            scroll.value.scrollTo(Point(1000000.0, 0.0))
+        }
+        case 28 -> begin()
+        case 29 -> {
+            theme.current.value = shadcnTheme();
+            direction.value = LayoutDirection.Ltr;
+            scroll.value.scrollTo(Point(0.0, 0.0))
+        }
+        case 30 -> {
+            rows = SizingRows(0L);
+            model.replaceData(rows)
+        }
+        case 31 -> begin()
+        case 32 -> {
+            rows = SizingRows(12L);
+            model.replaceData(rows)
+        }
+        case 33 -> {
+            begin();
+            scroll.value = ScrollState()
+        }
+        case 34 -> {
+            begin();
+            height.value = 0.0
+        }
+        case 35 -> height.value = 160.0
+        case 36 -> {
+            assertTrue(handle.beginEdit(address));
+            editor!!.state.replaceAll("bad")
+        }
+        case 37 -> {
+            capture();
+            fit = Some(handle.fitColumnToContent(GridColumnId("value")))
+        }
+        case 38 -> editor!!.state.replaceAll("5")
+        case 39 -> assertTrue(view!!.preedit())
+        case 40 -> fit = Some(handle.fitColumnToContent(GridColumnId("value")))
+        case 41 -> escape()
+        case 42 -> {
+            editor!!.state.replaceAll("42");
+            fit = Some(handle.fitColumnToContent(GridColumnId("value")))
+        }
+        case 43 -> {
+            rows = SizingRows(12L, Some(pendingValue));
+            assertTrue(pending!!.accept(rows))
+        }
+        case 44 -> begin()
+        case 45 -> {
+            begin();
+            assertTrue(handle.beginEdit(address))
+        }
+        case 46 -> assertTrue(handle.cancelEdit())
+        case 47 -> {
+            synchronous = true
+            assertTrue(handle.beginEdit(address))
+            editor!!.state.replaceAll("7")
+            begin()
+            before = Some(model.result)
+            readBase = rows.reads
+        }
+        case 48 -> {}
+        case 49 -> model.setColumnState(GridColumnState(GridColumnId("value"), width = Some(300.0)))
+        case 50 -> capture()
+        case 51 -> {}
+        case 52 -> {
+            begin()
+            fonts!!.register(includeBytes("data/Roboto-Regular.ttf"), "Grid Content Test")
+        }
+        case 53 -> begin()
+        case 54 -> {
+            begin()
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+        }
+        case 55 -> {
+            finished = true;
+            active!!.requestExit()
+        }
+        else -> fail(Some(f"unknown sizing phase ${phase}"))
+    }
+}
+
+internal fun SizingProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            grid = Some(named(root!!, "Data grid") ?: fail(Some("missing native grid")))
+            cell = Some(keep(grid!!.cell(0L, 1L)!!))
+            assertEquals(0L, natural.size)
+        }
+        case 1 -> {
+            applied("value", Some(166.0))
+            assertTrue(cell!!.same(keep(grid!!.cell(0L, 1L)!!)))
+        }
+        case 2 -> {
+            assertEquals(4L, natural.size);
+            assertEquals(Some(166.0), entry("value").width)
+        }
+        case 3 -> {
+            applied("remote", Some(226.0));
+            assertEquals(0.0, scroll.value.offset.x);
+            assertTrue(cell!!.same(keep(grid!!.cell(0L, 1L)!!)))
+        }
+        case 4 -> applied("small", Some(90.0))
+        case 5 -> applied("max", Some(180.0))
+        case 6 -> applied("samples", Some(260.0), custom = false)
+        case 7 -> applied("start", Some(340.0))
+        case 9 -> assertEquals(1.0, scroll.value.offset.y)
+        case 10 -> applied("value", Some(916.0), end = 5L)
+        case 12 -> applied("value", Some(166.0))
+        case 13 -> {
+            cancelled(fit!!);
+            assertEquals(Some(123.0), entry("value").width);
+            assertEquals(0L, natural.size)
+        }
+        case 14 -> {
+            cancelled(fit!!);
+            assertTrue(beforeStates!! === model.columnState);
+            assertEquals(0L, natural.size)
+        }
+        case 15 -> {
+            cancelled(fit!!);
+            assertEquals(Some(123.0), entry("value").width);
+            assertEquals(0L, natural.size)
+        }
+        case 16 -> {
+            cancelled(fit!!);
+            assertTrue(beforeStates!! === model.columnState);
+            assertEquals(0L, natural.size)
+        }
+        case 17 -> {
+            cancelled(previousFit!!);
+            applied("remote", Some(226.0))
+        }
+        case 19 -> {
+            rejected(fit!!);
+            assertEquals(0L, natural.size);
+            assertTrue(beforeStates!! === model.columnState)
+        }
+        case 22 -> {
+            rejected(fit!!);
+            assertEquals(0L, natural.size)
+        }
+        case 24 -> {
+            cancelled(fit!!);
+            assertEquals(0L, natural.size);
+            assertTrue(beforeStates!! === model.columnState)
+        }
+        case 26 -> {
+            cancelled(fit!!)
+            assertEquals(Some(147.0), entry("c5").width)
+            assertTrue(beforeStates!! === previousModel!!.columnState)
+        }
+        case 27 -> cancelled(fit!!)
+        case 28 -> applied("value", Some(166.0))
+        case 31 -> applied("value", None, end = 0L)
+        case 33 -> cancelled(fit!!)
+        case 34 -> cancelled(fit!!)
+        case 36 -> retry = handle.focusedCell != Some(address) || handle.isPending
+        case 37 -> {
+            rejected(fit!!);
+            assertTrue(handle.editError != None);
+            assertEquals(0, submissions);
+            assertEquals(0L, natural.size)
+        }
+        case 38 -> retry = handle.focusedCell != Some(address) || handle.isPending
+        case 39 -> {
+            assertTrue(editor!!.composing);
+            assertEquals(0, submissions)
+        }
+        case 40 -> {
+            rejected(fit!!);
+            assertTrue(editor!!.composing);
+            assertEquals(0, submissions)
+        }
+        case 41 -> assertFalse(editor!!.composing)
+        case 42 -> {
+            rejected(fit!!);
+            assertTrue(handle.isSubmitting);
+            assertEquals(1, submissions);
+            assertEquals(0L, natural.size)
+        }
+        case 43 -> {
+            rejected(fit!!);
+            assertEquals(None, handle.editingCell);
+            assertEquals(0L, natural.size)
+        }
+        case 44 -> applied("value", Some(556.0))
+        case 45 -> cancelled(fit!!)
+        case 47 -> {
+            applied("value", Some(206.0));
+            assertEquals(2, submissions)
+            if (!retry)
+                panelControl = Some(identified("grid-columns-value-item"))
+        }
+        case 49 -> {
+            panelControl = Some(identified("grid-columns-value-content"));
+            assertEquals(Some(300.0), entry("value").width)
+        }
+        case 51 -> {
+            val shown =
+                when (named(root!!, "已适应可见内容")) {
+                    case Some(_) -> true
+                    case None -> false
+                }
+            retry = entry("value").width != Some(206.0) || !shown
+            if (!retry) {
+                assertTrue(before!! === model.result)
+                assertEquals(4L, natural.size)
+            }
+        }
+        case 52 -> {
+            cancelled(fit!!);
+            assertTrue(beforeStates!! === model.columnState)
+        }
+        case 53 -> {
+            applied("value", Some(206.0))
+            cell = Some(keep(grid!!.cell(0L, 1L)!!))
+        }
+        case 54 -> {
+            cancelled(fit!!);
+            assertFalse(handle.isAttached);
+            assertFalse(cell!!.flag(0));
+            assertTrue(beforeStates!! === model.columnState)
+        }
+        else -> {}
+    }
+}
