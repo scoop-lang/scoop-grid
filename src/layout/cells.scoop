@@ -37,7 +37,16 @@ internal class GridRowCells<Row>(
     public override fun build(index: Long): View {
         val column = columns.columns[index]
         return component(
-            GridDataCellProps(row, rowKey, rowIndex, index, column, columns.appearance, session),
+            GridDataCellProps(
+                row,
+                rowKey,
+                rowIndex,
+                index,
+                column,
+                columns.appearance,
+                columns.headers,
+                session
+            ),
             { props, scope -> GridDataCell(props, scope) }
         )
     }
@@ -51,17 +60,17 @@ internal class GridHeaderCells<Row>(
     private val enabled: Boolean,
     private val theme: ThemeSource
 ): ItemSource {
-    public override val count: Long get() = columns.columns.size
-    public override fun keyAt(index: Long): ViewKey = ViewKey.Text(columns.columns[index].id.value)
-    public override fun indexOfKey(key: ViewKey): Long? =
-        when (key) {
-            case Text(val value) -> if (value == "")
-                None
-            else
-                columns.indexOf(GridColumnId(value))
-            else -> None
-        }
-    public override fun build(index: Long): View {
+    public override val count: Long get() = columns.headers.items.size
+    public override fun keyAt(index: Long): ViewKey = columns.headers.items[index].target.viewKey()
+    public override fun indexOfKey(key: ViewKey): Long? = columns.headers.indexOf(key)
+    public override fun build(index: Long): View =
+        component(
+            GridHeaderRenderProps(this, index),
+            { props, scope -> GridHeaderRender(props, scope) }
+        )
+    fun view(index: Long): View {
+        if (index >= columns.columns.size)
+            return group(index)
         val column = columns.columns[index]
         var title = column.title
         val sorting = model.query.sorting
@@ -96,11 +105,17 @@ internal class GridHeaderCells<Row>(
                     else
                         None,
                     multiSortModifier = modifier,
+                    headerReference =
+                        Some(
+                            session.headerSemantics.reference(columns.headers.items[index].target)
+                        ),
+                    headerCell = Some(position(index)),
+                    headers = session.headerSemantics.headers(columns.headers, index, false),
                     drag =
                         Some(
                             GridHeaderDragInput(
                                 model,
-                                column.id,
+                                columns.headers.items[index].target,
                                 session,
                                 columns.appearance,
                                 enabled
@@ -115,6 +130,57 @@ internal class GridHeaderCells<Row>(
             { props, scope -> GridHeaderResize(props, scope) }
         )
     }
+    private fun group(index: Long): View {
+        val item = columns.headers.items[index]
+        return element(
+            GridCellProps<Row>(
+                None,
+                item.level,
+                item.first,
+                columns.columns[item.first].id,
+                Some(item.title),
+                columns.appearance,
+                None,
+                headerReference = Some(session.headerSemantics.reference(item.target)),
+                headerCell = Some(position(index)),
+                headers = session.headerSemantics.headers(columns.headers, index, false),
+                drag =
+                    Some(
+                        GridHeaderDragInput(
+                            model,
+                            item.target,
+                            session,
+                            columns.appearance,
+                            enabled
+                        )
+                    )
+            ),
+            { props, scope -> GridCell(props, scope) },
+            [columns.appearance.label(item.title)]
+        )
+    }
+    private fun position(index: Long): SemanticTableCell {
+        val item = columns.headers.items[index]
+        return SemanticTableCell(
+            item.level,
+            item.first,
+            rowSpan =
+                when (item.target.key) {
+                    case Column(_) -> columns.headers.levels - item.level
+                    case Group(_) -> 1L
+                },
+            columnSpan = item.end - item.first
+        )
+    }
+}
+
+private class GridHeaderRenderProps<Row>(val source: GridHeaderCells<Row>, val index: Long)
+
+private class GridHeaderRender<Row>(
+    private val props: Props<GridHeaderRenderProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    public override fun render(): View = props.value.source.view(props.value.index)
 }
 
 internal class GridCellProps<Row>(
@@ -132,7 +198,10 @@ internal class GridCellProps<Row>(
     val error: String? = None,
     val submitting: Boolean = false,
     val multiSortModifier: GridMultiSortModifier = GridMultiSortModifier.Shift,
-    val drag: GridHeaderDragInput<Row>? = None
+    val drag: GridHeaderDragInput<Row>? = None,
+    val headerReference: SemanticsReference? = None,
+    val headerCell: SemanticTableCell? = None,
+    val headers: Array<SemanticNodeId> = []
 )
 
 internal class GridCell<Row>(
@@ -242,10 +311,12 @@ internal class GridCell<Row>(
     public override fun update(): UiInvalidation {
         val input = props.value
         headerDrag?.update()
+        semantics.bindReference(input.headerReference)
         area.scope.textCommandAvailability =
             Some(TextCommandAvailability(paste = input.editable && !input.submitting))
         semantics.update(
             SemanticProperties(
+                enabled = input.drag?.enabled ?: (input.session?.enabled ?: true),
                 name =
                     if (input.address == None)
                         input.text
@@ -263,19 +334,19 @@ internal class GridCell<Row>(
                         input.error
                     else
                         when (input.drag) {
-                            case Some(_) -> Some("拖动调整列顺序；也可使用列工具前移或后移")
+                            case Some(val drag) -> Some(drag.target.description())
                             case None -> None
                         },
                 automationId =
                     if (input.address == None)
-                        Some(f"grid-header-${input.id.value}")
+                        Some(input.drag?.target?.automationId() ?: f"grid-header-${input.id.value}")
                     else
                         None,
                 error = input.error,
                 busy = input.submitting,
                 cell =
                     if (input.address == None)
-                        None
+                        input.headerCell
                     else
                         Some(
                             SemanticTableCell(
@@ -284,7 +355,8 @@ internal class GridCell<Row>(
                                 columnKey = Some(SemanticItemKey.Text(input.id.value))
                             )
                         )
-            )
+            ),
+            relations = SemanticRelations(columnHeaders = input.headers)
         )
         if (input.address == None)
             focus.options = FocusOptions(Some(handle), input.tabStop)
@@ -401,23 +473,28 @@ internal class GridCell<Row>(
             return LayoutResult(LayoutMetrics(size), clip)
         }
         val size = constraints.constrain(Size(0.0, 0.0))
-        val inset = min(props.value.appearance.padding, min(size.width, size.height) / 2.0)
+        val content =
+            when (props.value.drag?.target?.key) {
+                case Some(GridHeaderKey.Group(_)) -> clip.bounds
+                else -> Rect(0.0, 0.0, size.width, size.height)
+            }
+        val inset = min(props.value.appearance.padding, min(content.width, content.height) / 2.0)
         val child =
             context.measureChild(
                 0L,
                 Constraints(
-                    maxWidth = Some(max(0.0, size.width - inset * 2.0)),
-                    maxHeight = Some(max(0.0, size.height - inset * 2.0))
+                    maxWidth = Some(max(0.0, content.width - inset * 2.0)),
+                    maxHeight = Some(max(0.0, content.height - inset * 2.0))
                 )
             )
         context.placeChild(
             0L,
             Point(
                 if (context.layoutDirection == LayoutDirection.Rtl)
-                    max(inset, size.width - inset - child.size.width)
+                    content.x + max(inset, content.width - inset - child.size.width)
                 else
-                    inset,
-                max(inset, (size.height - child.size.height) / 2.0)
+                    content.x + inset,
+                max(inset, (content.height - child.size.height) / 2.0)
             )
         )
         return LayoutResult(LayoutMetrics(size), clip)
@@ -451,7 +528,15 @@ internal class GridCell<Row>(
                 Paint(palette.border)
             )
         }
-        context.place(area, bounds)
+        val focusBounds =
+            when (input.drag?.target?.key) {
+                case Some(GridHeaderKey.Group(_)) -> if (clip.width > 0.0 && clip.height > 0.0)
+                    clip
+                else
+                    bounds
+                else -> bounds
+            }
+        context.place(area, focusBounds)
         context.semantics(semantics, bounds)
         context.children()
         if (focused || (headerDrag?.moving ?: false))

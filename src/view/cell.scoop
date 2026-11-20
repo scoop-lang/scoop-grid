@@ -9,6 +9,7 @@ internal class GridDataCellProps<Row>(
     val columnIndex: Long,
     val column: GridColumn<Row>,
     val appearance: GridAppearance,
+    val headers: GridHeadersPlan,
     val session: GridSession<Row>
 )
 
@@ -58,7 +59,9 @@ internal class GridDataCell<Row>(
                 content = Some(content),
                 editable = input.column.editing?.editable(input.row) ?: false,
                 error = edit?.error ?: None,
-                submitting = edit?.submitting ?: false
+                submitting = edit?.submitting ?: false,
+                headers =
+                    input.session.headerSemantics.headers(input.headers, input.columnIndex, true)
             ),
             { props, scope -> GridCell(props, scope) },
             [element(content, { props, scope -> GridContent(props, scope) }, [child])]

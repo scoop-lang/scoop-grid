@@ -1,0 +1,143 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+
+public class GridColumnGroupId public constructor(public val value: String):
+Equals<GridColumnGroupId>, Hash {
+    init {
+        gridRequire(value != "", "grid column group id must not be empty")
+    }
+    public override operator fun equals(other: GridColumnGroupId): Boolean = value == other.value
+    public override fun hash(): Long = value.hash()
+}
+
+public enum GridHeaderNode {
+    Column(GridColumnId), Group(GridColumnGroupId, String, Array<GridHeaderNode>)
+}
+
+internal enum GridHeaderKey: Equals<GridHeaderKey>, Hash {
+    Column(GridColumnId), Group(GridColumnGroupId)
+    public override operator fun equals(other: GridHeaderKey): Boolean =
+        when ((this, other)) {
+            case(Column(val a), Column(val b)) -> a == b
+            case(Group(val a), Group(val b)) -> a == b
+            else -> false
+        }
+    public override fun hash(): Long =
+        when (this) {
+            case Column(val id) -> id.hash()
+            case Group(val id) -> id.hash()
+        }
+}
+
+internal class GridHeaderEntry(
+    val key: GridHeaderKey,
+    val parent: GridHeaderKey?,
+    val level: Long,
+    val title: String,
+    val children: Array<GridHeaderKey>,
+    val leaves: Array<GridColumnId>
+)
+
+/** Validated membership is independent of widths, visibility, pinning and sibling order. */
+internal class GridHeaders(ids: Array<GridColumnId>, requested: Array<GridHeaderNode>? = None) {
+    val values =
+        requested ?: Array<GridHeaderNode>(ids.size) { at -> GridHeaderNode.Column(ids[at]) }
+    private val entries = HashMap<GridHeaderKey, GridHeaderEntry>()
+    private val ordered = collect(ids)
+    val roots: Array<GridHeaderKey> get() = ordered.roots
+    val leaves: Array<GridColumnId> get() = ordered.leaves
+    private fun collect(ids: Array<GridColumnId>): GridHeaderRoots {
+        val allowed = HashSet<GridColumnId>()
+        for (id in ids)
+            allowed.add(id)
+        val seen = HashSet<GridHeaderKey>()
+        val roots = ArrayList<GridHeaderKey>()
+        val leaves = ArrayList<GridColumnId>()
+        for (node in values) {
+            val entry = read(node, None, 0L, allowed, seen)
+            roots.add(entry.key)
+            for (id in entry.leaves)
+                leaves.add(id)
+        }
+        gridRequire(leaves.size == ids.size, "header tree must include every column")
+        return GridHeaderRoots(roots.toArray(), leaves.toArray())
+    }
+    private fun read(
+        value: GridHeaderNode,
+        parent: GridHeaderKey?,
+        level: Long,
+        allowed: HashSet<GridColumnId>,
+        seen: HashSet<GridHeaderKey>
+    ): GridHeaderEntry {
+        val entry =
+            when (value) {
+                case Column(val id) -> {
+                    gridRequire(allowed.contains(id), "header refers to an unknown column")
+                    val key = GridHeaderKey.Column(id)
+                    gridRequire(seen.add(key), "duplicate column in header tree")
+                    GridHeaderEntry(key, parent, level, "", [], [id])
+                }
+                case Group(val id, val title, val nodes) -> {
+                    val key = GridHeaderKey.Group(id)
+                    gridRequire(seen.add(key), "duplicate column group id")
+                    gridRequire(nodes.size > 0L, "column group must contain at least one child")
+                    val children = ArrayList<GridHeaderKey>()
+                    val leaves = ArrayList<GridColumnId>()
+                    for (node in nodes) {
+                        val child = read(node, Some(key), level + 1L, allowed, seen)
+                        children.add(child.key)
+                        for (leaf in child.leaves)
+                            leaves.add(leaf)
+                    }
+                    GridHeaderEntry(key, parent, level, title, children.toArray(), leaves.toArray())
+                }
+            }
+        entries.put(entry.key, entry)
+        return entry
+    }
+    fun find(key: GridHeaderKey): GridHeaderEntry? = entries[key]
+    fun get(key: GridHeaderKey): GridHeaderEntry =
+        find(key) ?: throw IllegalArgumentException(Some("unknown grid header"))
+    fun ancestors(id: GridColumnId): Array<GridHeaderEntry> {
+        val result = ArrayList<GridHeaderEntry>()
+        var parent = get(GridHeaderKey.Column(id)).parent
+        while (true) {
+            val key = parent ?: return result.toArray()
+            val entry = get(key)
+            result.add(entry)
+            parent = entry.parent
+        }
+    }
+    fun surviving(ids: Array<GridColumnId>): Array<GridHeaderNode> {
+        val allowed = HashSet<GridColumnId>()
+        for (id in ids)
+            allowed.add(id)
+        val next = gridSurvivingHeaders(values, allowed)
+        for (id in ids)
+            if (!entries.containsKey(GridHeaderKey.Column(id)))
+                next.add(GridHeaderNode.Column(id))
+        return next.toArray()
+    }
+}
+
+private fun gridSurvivingHeaders(
+    nodes: Array<GridHeaderNode>,
+    allowed: HashSet<GridColumnId>
+): ArrayList<GridHeaderNode> {
+    val result = ArrayList<GridHeaderNode>()
+    for (node in nodes)
+        when (node) {
+            case Column(val id) -> if (allowed.contains(id))
+                result.add(node)
+            case Group(val id, val title, val children) -> {
+                val kept = gridSurvivingHeaders(children, allowed)
+                if (kept.size > 0L)
+                    result.add(GridHeaderNode.Group(id, title, kept.toArray()))
+            }
+        }
+    return result
+}
+
+private class GridHeaderRoots(val roots: Array<GridHeaderKey>, val leaves: Array<GridColumnId>)

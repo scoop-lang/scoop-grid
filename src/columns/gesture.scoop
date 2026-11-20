@@ -11,8 +11,15 @@ internal class GridColumnGesture<Row>(
     val initial: Array<GridColumnState>,
     val id: GridColumnId
 ) {
+    private val headers = model.headerTree
     var expected = initial
-    fun current(): Boolean = model.columns === definitions && model.columnState === expected
+    fun current(): Boolean =
+        model.columns ===
+            definitions &&
+            model.columnState ===
+            expected &&
+            model.headerTree ===
+            headers
     fun restore() {
         if (current())
             model.setColumnStates(initial)

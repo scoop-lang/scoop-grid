@@ -64,9 +64,22 @@ internal fun gridMeasureContentCell(
     probe: GridColumnProbe,
     header: Boolean
 ): LayoutResult<Unit> {
+    val headerBox =
+        if (header)
+            Some(
+                plan.headers.box(
+                    probe.column,
+                    plan.columns,
+                    plan.scroll.presentationOffset.x,
+                    plan.headerRowHeight,
+                    plan.headerHeight
+                )
+            )
+        else
+            None
     val height =
         if (header)
-            plan.headerHeight
+            headerBox!!.height
         else
             plan.rowHeight
     val box = plan.columns.box(probe.column, plan.scroll.presentationOffset.x, height)
@@ -77,17 +90,20 @@ internal fun gridMeasureContentCell(
             LayoutInput(
                 GridCellClip(
                     box.clip,
-                    plan.columns.region(
-                        probe.column,
-                        if (header)
-                            0.0
-                        else
-                            plan.headerHeight,
-                        if (header)
-                            plan.headerHeight
-                        else
-                            plan.bodyHeight
-                    ),
+                    if (header)
+                        headerBox!!.region
+                    else
+                        plan.columns.region(
+                            probe.column,
+                            if (header)
+                                0.0
+                            else
+                                plan.headerHeight,
+                            if (header)
+                                plan.headerHeight
+                            else
+                                plan.bodyHeight
+                        ),
                     ScrollAxes.Both,
                     plan.viewport,
                     intrinsic = true

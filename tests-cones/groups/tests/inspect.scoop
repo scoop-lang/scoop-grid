@@ -1,0 +1,159 @@
+package scoop.grid.tests.groups
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+
+internal fun GroupsProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            grid = Some(named(root!!, "Data grid") ?: fail(Some("missing grid")))
+            leaf = Some(identified("grid-header-c1"))
+            center = Some(identified("grid-group-header-center-g"))
+            start = Some(identified("grid-group-header-start-g"))
+            cell = Some(cell(0L))
+            bounds(start!!, Rect(0.0, 0.0, 80.0, 32.0))
+            bounds(center!!, Rect(80.0, 0.0, 300.0, 32.0))
+            hit(center!!, 350.0, 16.0, center)
+            hit(center!!, 370.0, 16.0, None)
+            hit(root!!, 370.0, 16.0, Some(identified("grid-group-header-end-g")))
+            bounds(identified("grid-group-header-end-g"), Rect(360.0, 0.0, 80.0, 32.0))
+            bounds(identified("grid-group-header-center-s"), Rect(80.0, 32.0, 200.0, 32.0))
+            bounds(leaf!!, Rect(80.0, 64.0, 100.0, 32.0))
+            bounds(cell!!, Rect(0.0, 96.0, 80.0, 32.0))
+            assertTrue(center!!.cellSpan(0L, 1L, columns = 3L))
+            assertTrue(identified("grid-group-header-center-s").cellSpan(1L, 1L, columns = 2L))
+            assertTrue(leaf!!.cellSpan(2L, 1L))
+            assertTrue(identified("grid-header-c0").cellSpan(1L, 0L, rows = 2L))
+            headers(leaf!!, ["grid-group-header-center-g", "grid-group-header-center-s"])
+            headers(
+                cell(1L),
+                ["grid-group-header-center-g", "grid-group-header-center-s", "grid-header-c1"]
+            )
+            headers(cell!!, ["grid-group-header-start-g", "grid-header-c0"])
+            assertTrue(center!!.text(0, Some("主组")))
+            assertTrue(rows.reads < 100L)
+        }
+        case 2 -> unchanged()
+        case 3 -> {
+            order([0L, 2L, 1L, 3L, 4L, 5L, 6L, 7L])
+            assertTrue(leaf!!.same(identified("grid-header-c1")))
+            assertTrue(cell!!.same(cell(0L)))
+        }
+        case 7 -> unchanged()
+        case 10 -> unchanged()
+        case 11 -> {
+            order([5L, 6L, 0L, 2L, 1L, 3L, 4L, 7L])
+            assertTrue(leaf!!.same(identified("grid-header-c1")))
+            assertTrue(start!!.same(identified("grid-group-header-start-g")))
+            assertTrue(cell!!.same(cell(0L)))
+            headers(
+                cell(1L),
+                ["grid-group-header-center-g", "grid-group-header-center-s", "grid-header-c1"]
+            )
+        }
+        case 14 -> unchanged()
+        case 15 -> {
+            order([5L, 6L, 0L, 3L, 2L, 1L, 4L, 7L])
+            assertFalse(entry(2L).visible)
+            assertTrue(leaf!!.same(identified("grid-header-c1")))
+        }
+        case 18 -> {
+            order([0L, 3L, 2L, 1L, 4L, 5L, 6L, 7L])
+            assertFalse(entry(2L).visible)
+            assertTrue(start!!.same(identified("grid-group-header-start-g")))
+        }
+        case 21 -> when (fit!!.result) {
+            case Pending -> retry = true
+            case Applied(val width) -> {
+                assertEquals(136.0, width)
+                assertEquals(Some(136.0), entry(1L).width)
+                bounds(identified("grid-group-header-center-s"), Rect(80.0, 32.0, 236.0, 32.0))
+                assertTrue(result === model.result)
+            }
+            else -> fail(Some("nested header content fit failed"))
+        }
+        case 22 -> center = Some(identified("grid-group-header-center-g"))
+        case 23 -> {
+            assertFalse(center!!.flag(0))
+            bounds(identified("grid-header-c0"), Rect(0.0, 32.0, 80.0, 32.0))
+            bounds(cell(0L), Rect(0.0, 64.0, 80.0, 32.0))
+            assertTrue(cell!!.same(cell(0L)))
+            headers(center!!, [])
+            headers(cell!!, ["grid-group-header-start-g", "grid-header-c0"])
+        }
+        case 24 -> {
+            assertFalse(center!!.flag(0))
+            assertFalse(center!!.same(identified("grid-group-header-center-g")))
+            assertTrue(start!!.same(identified("grid-group-header-start-g")))
+            bounds(cell(0L), Rect(0.0, 96.0, 80.0, 32.0))
+        }
+        case 25 -> assertFalse(identified("grid-group-header-end-g").flag(1))
+        case 26 -> unchanged()
+        case 31 -> unchanged()
+        case 33 -> {
+            bounds(identified("grid-group-header-end-g"), Rect(90.0, 0.0, 120.0, 48.0))
+            bounds(cell(0L), Rect(380.0, 144.0, 120.0, 48.0))
+        }
+        case 36 -> order([5L, 6L, 0L, 1L, 2L, 3L, 4L, 7L])
+        case 38 -> bounds(
+            identified("grid-group-header-center-tail"),
+            Rect(260.0, 0.0, 2200.0, 32.0)
+        )
+        case 39 -> {
+            val tail = identified("grid-group-header-center-tail")
+            bounds(tail, Rect(-620.0, 0.0, 2200.0, 32.0))
+            hit(tail, 100.0, 16.0, Some(tail))
+            hit(tail, 70.0, 16.0, None)
+            hit(tail, 370.0, 16.0, None)
+            assertTrue(tail.text(0, Some("其余指标")))
+            assertTrue(rows.reads < 500L)
+        }
+        case 42 -> {
+            retry = !identified("grid-group-header-center-tail").flag(4)
+            if (!retry)
+                assertEquals(
+                    1200.0,
+                    scroll.offset.x,
+                    Some("visible group focus must not reveal its distant leading edge")
+                )
+        }
+        case 47 -> {
+            unchanged();
+            assertTrue(identified("grid-group-header-end-g").text(0, Some("主组已更新")))
+        }
+        case 49 -> control = Some(identified("grid-columns-c1-item"))
+        case 51 -> {
+            control = Some(identified("grid-column-group-s-next"));
+            assertTrue(control!!.flag(1))
+        }
+        case 53 -> order([0L, 3L, 1L, 2L, 4L, 5L, 6L, 7L])
+        case 56 -> retry = handle.isPending || handle.focusedCell != Some(address)
+        case 59 -> {
+            unchanged();
+            assertTrue(handle.editError != None);
+            assertEquals(0, submissions)
+        }
+        case 63 -> {
+            unchanged();
+            assertTrue(handle.isSubmitting);
+            assertEquals(1, submissions)
+        }
+        case 65 -> {
+            unchanged();
+            assertFalse(handle.isSubmitting);
+            assertEquals(None, handle.editingCell)
+        }
+        case 68 -> order([5L, 6L, 0L, 1L, 2L, 3L, 4L, 7L])
+        case 72 -> {
+            unchanged();
+            assertFalse(handle.isAttached);
+            assertFalse(start!!.flag(0));
+            assertEquals(0L, live)
+            headers(cell!!, [])
+            headers(leaf!!, [])
+        }
+        else -> {}
+    }
+}

@@ -25,6 +25,8 @@ internal class GridMeasurePlan(
     val overscan: Double,
     val visibleColumns: Array<Long>,
     val viewport: ScrollViewport,
+    val headers: GridHeadersPlan,
+    val headerRowHeight: Double,
     val probe: GridColumnProbe? = None
 ) {
     fun probing(value: GridColumnProbe): GridMeasurePlan =
@@ -37,6 +39,8 @@ internal class GridMeasurePlan(
             overscan,
             visibleColumns,
             viewport,
+            headers,
+            headerRowHeight,
             Some(value)
         )
 }
@@ -86,7 +90,9 @@ Element<GridRootLayout>(scope) {
             )
         val columns = input.columns.resolve(size.width)
         val rowHeight = input.input.rowHeight * density
-        val headerHeight = min(size.height, input.input.headerHeight * density)
+        val headerRowHeight = input.input.headerHeight * density
+        val headerHeight =
+            min(size.height, headerRowHeight * input.columns.headers.levels.toDouble())
         val bodyExtent = input.rows.count.toDouble() * rowHeight
         gridRequire(bodyExtent.isFinite(), "grid row extent overflow")
         val content = Size(columns.total, bodyExtent + headerHeight)
@@ -131,7 +137,9 @@ Element<GridRootLayout>(scope) {
                 bodyHeight,
                 input.input.overscan * density,
                 columns.visible(scroll.presentationOffset.x),
-                viewport
+                viewport,
+                input.columns.headers,
+                headerRowHeight
             )
         val measured =
             when (val probe = input.session.columnSizing.probe(input, plan)) {
@@ -217,7 +225,7 @@ Element<GridRootLayout>(scope) {
                         min(drop.x - line, drop.region.x + drop.region.width - width)
                     )
                 paint.canvas.drawRect(
-                    Rect(x, 0.0, width, plan.headerHeight),
+                    Rect(x, drop.region.y, width, drop.region.height),
                     Paint(input.columns.appearance.theme.tokens.palette.ring)
                 )
             }

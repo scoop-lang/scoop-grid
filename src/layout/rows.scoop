@@ -1,6 +1,8 @@
 package scoop.grid
 
 import scoop.collections.HashSet
+import scoop.collections.sortWith
+import scoop.comparisons.comparatorOf
 import scoop.graphics.*
 import scoop.math.max
 import scoop.math.min
@@ -250,20 +252,47 @@ internal class GridHeader(scope: ComponentScope): LazyElement<Unit>(scope) {
             case None -> {}
         }
         val selected = HashSet<Long>()
-        for (index in plan.visibleColumns)
+        for (index in plan.visibleColumns) {
             selected.add(index)
-        for (index in context.pinnedItems)
+            for (ancestor in plan.headers.ancestors[index])
+                selected.add(ancestor)
+        }
+        for (index in context.pinnedItems) {
             selected.add(index)
-        for (index in selected) {
-            val box = plan.columns.box(index, plan.scroll.presentationOffset.x, plan.headerHeight)
+            for (ancestor in plan.headers.ancestors[index])
+                selected.add(ancestor)
+        }
+        val ordered = ArrayList<Long>()
+        for (index in selected)
+            ordered.add(index)
+        ordered.sortWith(
+            comparatorOf<Long> {
+                left, right ->
+                val depth = plan.headers.items[left].level - plan.headers.items[right].level
+                if (depth == 0L)
+                    left - right
+                else
+                    depth
+            }
+        )
+        for (index in ordered) {
+            val item = plan.headers.items[index]
+            val box =
+                plan.headers.box(
+                    index,
+                    plan.columns,
+                    plan.scroll.presentationOffset.x,
+                    plan.headerRowHeight,
+                    plan.headerHeight
+                )
             context.measureItem(
                 index,
-                Constraints.tight(Size(box.width, plan.headerHeight)),
+                Constraints.tight(Size(box.width, box.height)),
                 LayoutInput(
                     GridCellClip(
                         box.clip,
-                        plan.columns.region(index, 0.0, plan.headerHeight),
-                        if (plan.columns.frozen(index))
+                        box.region,
+                        if (plan.columns.frozen(item.first))
                             ScrollAxes.Vertical
                         else
                             ScrollAxes.Horizontal,
@@ -271,7 +300,7 @@ internal class GridHeader(scope: ComponentScope): LazyElement<Unit>(scope) {
                     )
                 )
             )
-            context.placeItem(index, Point(box.x - plan.scroll.snapshot.offset.x, 0.0))
+            context.placeItem(index, Point(box.x - plan.scroll.snapshot.offset.x, box.y))
         }
         return LayoutResult(
             LayoutMetrics(constraints.constrain(Size(plan.columns.total, plan.headerHeight))),

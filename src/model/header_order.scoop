@@ -1,0 +1,146 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+
+internal class GridHeaderSpan(val first: Long, val end: Long) {
+    val size: Long get() = end - first
+}
+
+internal enum GridColumnsMove {
+    Ready(Array<GridColumnState>), Rejected(String)
+}
+
+internal fun GridHeaders.spans(states: Array<GridColumnState>): HashMap<
+    GridHeaderKey,
+    GridHeaderSpan
+> {
+    val result = HashMap<GridHeaderKey, GridHeaderSpan>()
+    for (index in 0L ..< states.size) {
+        var next: GridHeaderKey? = Some(GridHeaderKey.Column(states[index].id))
+        while (true) {
+            val key = next ?: break
+            val first = result[key]?.first ?: index
+            result.put(key, GridHeaderSpan(first, index + 1L))
+            next = get(key).parent
+        }
+    }
+    return result
+}
+
+internal fun GridHeaders.orderError(states: Array<GridColumnState>): String? {
+    val ranges = spans(states)
+    for (entry in ranges)
+        if (entry.value.size != get(entry.key).leaves.size)
+            return Some("列顺序不能拆散列组")
+    return None
+}
+
+internal fun GridHeaders.relocate(
+    states: Array<GridColumnState>,
+    key: GridHeaderKey,
+    index: Long
+): GridColumnsMove {
+    val entry = find(key) ?: return GridColumnsMove.Rejected("列或列组已移除")
+    val ranges = spans(states)
+    val source = ranges[key]!!
+    val parent =
+        when (entry.parent) {
+            case Some(val key) -> ranges[key]!!
+            case None -> GridHeaderSpan(0L, states.size)
+        }
+    if (index < parent.first || index > parent.end - source.size)
+        return GridColumnsMove.Rejected("只能在当前父组内移动")
+    if (index == source.first)
+        return GridColumnsMove.Ready(states)
+    val others = ArrayList<GridColumnState>()
+    for (at in 0L ..< states.size)
+        if (at < source.first || at >= source.end)
+            others.add(states[at])
+    val next =
+        Array<GridColumnState>(states.size) {
+            at -> if (at >= index && at < index + source.size)
+                states[source.first + at - index]
+            else
+                others[
+                    if (at < index)
+                        at
+                    else
+                        at - source.size
+                ]
+        }
+    when (val error = orderError(next)) {
+        case Some(val message) -> return GridColumnsMove.Rejected(message)
+        case None -> {}
+    }
+    return GridColumnsMove.Ready(next)
+}
+
+/** The destination names the first final leaf, never an index inside another sibling. */
+internal fun GridHeaders.moveIndex(
+    states: Array<GridColumnState>,
+    source: GridHeaderKey,
+    anchor: GridHeaderKey,
+    before: Boolean
+): Long? {
+    if (get(source).parent != get(anchor).parent)
+        return None
+    when ((source, anchor)) {
+        case(GridHeaderKey.Column(val a), GridHeaderKey.Column(val b)) ->
+        return gridColumnMoveIndex(states, a, b, before)
+        else -> {}
+    }
+    val ranges = spans(states)
+    val old = ranges[source]!!
+    val target = ranges[anchor]!!
+    if (source == anchor)
+        return Some(old.first)
+    val slot =
+        if (before)
+            target.first
+        else
+            target.end
+    return Some(
+        if (old.first < slot)
+            slot - old.size
+        else
+            slot
+    )
+}
+
+internal fun GridHeaders.adjacentIndex(
+    states: Array<GridColumnState>,
+    key: GridHeaderKey,
+    forward: Boolean,
+    pin: GridPin? = None
+): Long? {
+    val entry = get(key)
+    val children =
+        when (entry.parent) {
+            case Some(val parent) -> get(parent).children
+            case None -> roots
+        }
+    val ranges = spans(states)
+    val current = ranges[key]!!
+    var closest: GridHeaderKey? = None
+    var distance = states.size + 1L
+    for (child in children) {
+        val range = ranges[child]!!
+        val step =
+            if (forward)
+                range.first - current.first
+            else
+                current.first - range.first
+        if (step <= 0L || step >= distance)
+            continue
+        var matches = false
+        for (index in range.first ..< range.end)
+            if (pin == None || pin == Some(states[index].pin))
+                matches = true
+        if (matches) {
+            closest = Some(child);
+            distance = step
+        }
+    }
+    val target = closest ?: return None
+    return moveIndex(states, key, target, !forward)
+}

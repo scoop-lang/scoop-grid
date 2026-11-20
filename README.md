@@ -21,7 +21,12 @@ fun main() {
     val model = DataGridState(products, [
         gridColumn<Product, String>(GridColumnId("name"), "商品", { p -> p.name }, gridTextValues()),
         gridColumn<Product, Long>(GridColumnId("price"), "价格", { p -> p.price }, gridLongValues())
-    ])
+    ], headers = Some([
+        GridHeaderNode.Group(GridColumnGroupId("product"), "商品信息", [
+            GridHeaderNode.Column(GridColumnId("name")),
+            GridHeaderNode.Column(GridColumnId("price"))
+        ])
+    ]))
     model.setQuery(GridQuery([GridSort(GridColumnId("price"))]))
     println(gridCsv(model.result.rows, model.columns))
 }
@@ -57,7 +62,11 @@ scoop test --release .
 
 拖动表头逻辑 End 边界可以调宽，RTL 下手柄位于左侧。手柄可通过 Tab 聚焦，左右方向键每次调整 10 个逻辑单位，Home 恢复列定义宽度；原生无障碍客户端也可读取和设置数值。冻结列到达中心保留空间的上限后停止增长。Escape、失焦、禁用或卸载取消拖动并恢复原宽度；期间应用已改列状态时保留应用结果。非法编辑、组合输入和等待保存会阻止新调宽，保存后需重新操作。
 
-拖动表头主体超过水平阈值后显示插入线，在同一冻结区域内释放即完成重排；目标列的逻辑前／后半边决定插到该列之前／之后。中心区边缘会自动横向滚动，来源列离屏后仍可继续拖动，停止后不持续绘制。跨冻结区、移出表头、Escape 或焦点离开取消拖动；外部列配置更新始终保留。拖列使用相同的编辑门控，保持隐藏列及其他列的相对顺序、查询结果和排序优先级。普通表头点击仍用于排序，键盘和无障碍用户可使用列工具的前移／后移。多级列分组继续实施。
+拖动表头主体超过水平阈值后显示插入线，在同一冻结区域内释放即完成重排；目标列的逻辑前／后半边决定插到该列之前／之后。中心区边缘会自动横向滚动，来源列离屏后仍可继续拖动，停止后不持续绘制。跨冻结区、移出表头、Escape 或焦点离开取消拖动；外部列配置更新始终保留。拖列使用相同的编辑门控，保持隐藏列及其他列的相对顺序、查询结果和排序优先级。普通表头点击仍用于排序，键盘和无障碍用户可使用列工具的前移／后移。
+
+`headers` 可声明多级 `GridHeaderNode` 树，恰好覆盖所有列。组内叶列只在其父组内移动，拖动组标题则移动整个逻辑组，包括隐藏成员及其他冻结片段；也可用 `handle.moveColumnGroup(id, index)` 或列工具中的组移动按钮。`index` 指移动后首叶在完整 `columnState` 中的位置，必须是同级边界；成员关系变化通过 `replaceColumns(values, headers = Some(tree))` 明确发布。
+
+`headerHeight` 是每层高度，浅层叶占满其余层；冻结组可显示为 Start／中心／End 三个片段。横向离屏组不创建视图，宽组标题留在当前可见片段。原生节点发布实际跨度与祖先表头关系，隐藏和卸载后旧关联会撤下。组标题不参与单列内容测宽。[十万行示例](examples/basic/src/main.scoop) 展示三级表头与固定列。
 
 浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。双击或 Enter／F2 进入可编辑列的编辑器；Enter／F2 也可进入自定义单元格的真实控件。编辑中的 Enter／Tab、点击其他格和失焦会先尝试提交，校验失败保留草稿。Escape 先交给输入法，再取消草稿；内部控件先处理自己的键盘与文本输入。
 
@@ -88,9 +97,11 @@ scoop check --tests --release tests-cones/columns
 scoop test --release tests-cones/columns
 scoop check --tests --release tests-cones/sizing
 scoop test --release tests-cones/sizing
+scoop check --tests --release tests-cones/groups
+scoop test --release tests-cones/groups
 ```
 
-原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合。
+原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

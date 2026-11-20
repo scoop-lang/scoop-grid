@@ -91,6 +91,10 @@ public class DataGridHandle public constructor() {
         guard.checkMutation()
         return target?.moveColumn(id, index) ?: GridColumnActionResult.Rejected("网格未挂载")
     }
+    public fun moveColumnGroup(id: GridColumnGroupId, index: Long): GridColumnActionResult {
+        guard.checkMutation()
+        return target?.moveColumnGroup(id, index) ?: GridColumnActionResult.Rejected("网格未挂载")
+    }
     public fun fitColumns(): GridColumnActionResult {
         guard.checkMutation()
         return target?.fitColumns() ?: GridColumnActionResult.Rejected("网格未挂载")
@@ -144,6 +148,7 @@ internal interface GridMount {
     fun pasteCell(address: GridCellAddress, text: String): GridPasteResult
     fun setColumnState(value: GridColumnState): GridColumnActionResult
     fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult
+    fun moveColumnGroup(id: GridColumnGroupId, index: Long): GridColumnActionResult
     fun fitColumns(): GridColumnActionResult
     fun fitColumnToContent(id: GridColumnId): GridColumnFit
 }

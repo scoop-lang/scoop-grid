@@ -39,7 +39,7 @@ private class SampleRows(private val changes: HashMap<Long, SampleRow> = HashMap
 
 private class GridExample(scope: ComponentScope): Component(scope) {
     private var rows = SampleRows()
-    private val model = DataGridState(rows, columns())
+    private val model = DataGridState(rows, columns(), headers = Some(headers()))
     private val handle = DataGridHandle()
     private val lastEdit = state("名称与金额可编辑")
     private val tool = state<String?>(Some("filters"))
@@ -48,6 +48,38 @@ private class GridExample(scope: ComponentScope): Component(scope) {
         if (completion.accept(next))
             rows = next
     }
+    private fun headers(): Array<GridHeaderNode> =
+        [
+            GridHeaderNode.Column(GridColumnId("metric-0")),
+            GridHeaderNode.Group(
+                GridColumnGroupId("details"),
+                "基本信息",
+                [
+                    GridHeaderNode.Column(GridColumnId("name")),
+                    GridHeaderNode.Column(GridColumnId("amount"))
+                ]
+            ),
+            GridHeaderNode.Group(
+                GridColumnGroupId("metrics"),
+                "指标",
+                [
+                    GridHeaderNode.Group(
+                        GridColumnGroupId("first-metrics"),
+                        "指标 3–20",
+                        Array<GridHeaderNode>(18L) {
+                            index -> GridHeaderNode.Column(GridColumnId(f"metric-${index + 3L}"))
+                        }
+                    ),
+                    GridHeaderNode.Group(
+                        GridColumnGroupId("last-metrics"),
+                        "指标 21–39",
+                        Array<GridHeaderNode>(19L) {
+                            index -> GridHeaderNode.Column(GridColumnId(f"metric-${index + 21L}"))
+                        }
+                    )
+                ]
+            )
+        ]
     private fun columns(): Array<GridColumn<SampleRow>> {
         val example = this
         return Array<GridColumn<SampleRow>>(40L) {

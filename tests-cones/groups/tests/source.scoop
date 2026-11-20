@@ -1,0 +1,158 @@
+package scoop.grid.tests.groups
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class GroupRows(private val edited: Long = 0L): TableSource<Long> {
+    var reads = 0L
+    public override val count: Long get() = 100000L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun rowAt(index: Long): Long {
+        reads += 1L
+        return if (index == 0L)
+            edited
+        else
+            index
+    }
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+}
+
+internal fun groupLeaf(index: Long): GridHeaderNode =
+    GridHeaderNode.Column(GridColumnId(f"c${index}"))
+
+internal fun groupTree(title: String = "主组"): Array<GridHeaderNode> =
+    [
+        GridHeaderNode.Group(
+            GridColumnGroupId("g"),
+            title,
+            [
+                groupLeaf(0L),
+                GridHeaderNode.Group(GridColumnGroupId("s"), "子组", [groupLeaf(1L), groupLeaf(2L)]),
+                GridHeaderNode.Group(GridColumnGroupId("r"), "邻组", [groupLeaf(3L)]),
+                groupLeaf(4L)
+            ]
+        ),
+        GridHeaderNode.Group(GridColumnGroupId("h"), "其他组", [groupLeaf(5L), groupLeaf(6L)]),
+        groupLeaf(7L),
+        GridHeaderNode.Group(
+            GridColumnGroupId("tail"),
+            "其余指标",
+            Array<GridHeaderNode>(22L) { at -> groupLeaf(at + 8L) }
+        )
+    ]
+
+internal fun groupColumns(probe: GroupsProbe): Array<GridColumn<Long>> =
+    Array<GridColumn<Long>>(30L) {
+        at -> gridColumn<Long, Long>(
+            GridColumnId(f"c${at}"),
+            f"列 ${at}",
+            { row -> row },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(100.0), minimum = 40.0, maximum = Some(500.0)),
+            cell =
+                Some {
+                    row -> element(
+                        GroupBoxProps(probe, at, row),
+                        { props, scope -> GroupBox(props, scope) }
+                    )
+                },
+            edit =
+                if (at == 1L)
+                    Some(
+                        gridEdit<Long, Long>(
+                            {
+                                value ->
+                                val editor = gridLongEditor(value);
+                                probe.editor = Some(editor);
+                                editor
+                            },
+                            {
+                                change, completion ->
+                                probe.submissions += 1;
+                                probe.pending = Some(completion);
+                                probe.pendingValue = change.value
+                            }
+                        )
+                    )
+                else
+                    None
+        )
+    }
+
+private class GroupBoxProps(val probe: GroupsProbe, val column: Long, val value: Long)
+
+private class GroupBox(private val props: Props<GroupBoxProps>, scope: ComponentScope): Element<
+    Unit
+>(scope) {
+    public override fun onMount() {
+        props.value.probe.created += 1L;
+        props.value.probe.live += 1L
+    }
+    public override fun onUnmount() {
+        props.value.probe.live -= 1L
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val density = props.value.probe.theme.current.value.tokens.typography.body.fontSize / 14.0
+        return LayoutResult(
+            LayoutMetrics(constraints.constrain(Size(120.0 * density, 12.0 * density))),
+            Unit
+        )
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val size = context.size
+        context.draw {
+            paint -> paint.canvas.drawRect(
+                Rect(0.0, 0.0, size.width, size.height),
+                Paint(Color(0.2, 0.4, 0.6, 1.0))
+            )
+        }
+    }
+}
+
+internal fun GroupsProbe.reset(title: String = "主组") {
+    model.replaceColumns(columns, Some(groupTree(title)))
+    model.setColumnStates(
+        Array<GridColumnState>(30L) {
+            at -> GridColumnState(
+                GridColumnId(f"c${at}"),
+                width =
+                    Some(
+                        if (at == 0L || at == 4L)
+                            80.0
+                        else
+                            if (at == 6L)
+                                60.0
+                            else
+                                100.0
+                    ),
+                pin =
+                    if (at == 0L)
+                        GridPin.Start
+                    else
+                        if (at == 4L || at == 6L)
+                            GridPin.End
+                        else
+                            GridPin.None
+            )
+        }
+    )
+    scroll.scrollTo(Point(0.0, 0.0))
+    capture()
+}
+
+internal fun GroupsProbe.show(index: Long, visible: Boolean) {
+    val old = entry(index)
+    model.setColumnState(GridColumnState(old.id, visible, old.width, old.pin))
+}

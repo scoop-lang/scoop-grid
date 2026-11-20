@@ -1,0 +1,145 @@
+package scoop.grid.tests.groups
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.style.shadcn.shadcnTheme
+
+internal fun GroupsProbe.advance() {
+    when (phase) {
+        case 1 -> press(130.0, 80.0)
+        case 2 -> move(250.0, 80.0)
+        case 3 -> release()
+        case 4 -> {
+            scroll.scrollTo(Point(100.0, 0.0));
+            capture()
+        }
+        case 5 -> press(130.0, 80.0)
+        case 6 -> move(330.0, 80.0)
+        case 7 -> release()
+        case 8 -> {
+            scroll.scrollTo(Point(0.0, 0.0));
+            capture()
+        }
+        case 9 -> press(400.0, 16.0)
+        case 10 -> move(485.0, 16.0)
+        case 11 -> release()
+        case 12 -> {
+            show(2L, false);
+            capture()
+        }
+        case 13 -> press(320.0, 48.0)
+        case 14 -> move(190.0, 48.0)
+        case 15 -> release()
+        case 16 -> {
+            capture();
+            press(460.0, 16.0)
+        }
+        case 17 -> move(375.0, 16.0)
+        case 18 -> release()
+        case 19 -> reset()
+        case 20 -> {
+            fit = Some(handle.fitColumnToContent(GridColumnId("c1")));
+            assertTrue(fit!!.isPending)
+        }
+        case 21 -> {}
+        case 22 -> reset()
+        case 23 -> {
+            show(1L, false);
+            show(2L, false);
+            show(3L, false);
+            capture()
+        }
+        case 24 -> {
+            show(1L, true);
+            show(2L, true);
+            show(3L, true);
+            capture()
+        }
+        case 25 -> enabled.value = false
+        case 26 -> when (handle.moveColumnGroup(GridColumnGroupId("g"), 2L)) {
+            case Rejected(_) -> {}
+            case Applied -> fail(Some("disabled grid must reject a group move"))
+        }
+        case 27 -> enabled.value = true
+        case 28 -> press(400.0, 16.0)
+        case 29 -> move(485.0, 16.0)
+        case 30 -> escape()
+        case 31 -> release()
+        case 32 -> {
+            direction.value = LayoutDirection.Rtl
+            theme.current.value =
+                shadcnTheme() { tokens { typography { body { fontSize = 21.0 } } } }
+            scroll.scrollTo(Point(1000000.0, 0.0));
+            capture()
+        }
+        case 33 -> {}
+        case 34 -> press(150.0, 24.0)
+        case 35 -> move(20.0, 24.0)
+        case 36 -> release()
+        case 37 -> {
+            direction.value = LayoutDirection.Ltr;
+            theme.current.value = shadcnTheme();
+            reset()
+        }
+        case 38 -> scroll.scrollTo(Point(320.0, 0.0))
+        case 39 -> scroll.scrollTo(Point(1200.0, 0.0))
+        case 40 -> press(100.0, 16.0)
+        case 41 -> release()
+        case 42 -> {}
+        case 43 -> {
+            scroll.scrollTo(Point(0.0, 0.0));
+            capture()
+        }
+        case 44 -> press(400.0, 16.0)
+        case 45 -> move(485.0, 16.0)
+        case 46 -> {
+            model.replaceColumns(columns, Some(groupTree("主组已更新")));
+            capture()
+        }
+        case 47 -> release()
+        case 48 -> reset()
+        case 49 -> {}
+        case 50 -> {}
+        case 51 -> {}
+        case 52 -> {}
+        case 53 -> {}
+        case 54 -> reset()
+        case 55 -> {
+            assertTrue(handle.beginEdit(address));
+            editor!!.state.replaceAll("bad");
+            capture()
+        }
+        case 56 -> {}
+        case 57 -> press(400.0, 16.0)
+        case 58 -> move(485.0, 16.0)
+        case 59 -> release()
+        case 60 -> editor!!.state.replaceAll("42")
+        case 61 -> press(400.0, 16.0)
+        case 62 -> move(485.0, 16.0)
+        case 63 -> release()
+        case 64 -> {
+            rows = GroupRows(pendingValue);
+            assertTrue(pending!!.accept(rows));
+            capture()
+        }
+        case 65 -> {}
+        case 66 -> press(400.0, 16.0)
+        case 67 -> move(485.0, 16.0)
+        case 68 -> release()
+        case 69 -> reset()
+        case 70 -> press(400.0, 16.0)
+        case 71 -> move(485.0, 16.0)
+        case 72 -> {
+            ui!!.close();
+            waiting = true;
+            calls!!.post(root!!, phase, 20)
+        }
+        case 73 -> {
+            finished = true;
+            active!!.requestExit()
+        }
+        else -> fail(Some(f"unknown groups phase ${phase}"))
+    }
+}

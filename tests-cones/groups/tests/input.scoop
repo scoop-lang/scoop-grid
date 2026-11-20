@@ -1,0 +1,91 @@
+package scoop.grid.tests.groups
+
+import scoop.graphics.*
+import scoop.test.*
+import scoop.tests.surface.moveSurfacePointer
+import scoop.tests.ui.accessibility.native.NativeNode
+import scoop.tests.window.nativeEditorKey
+import scoop.window.native.*
+
+internal fun GroupsProbe.press(x: Double, y: Double) {
+    pointer = Point(448.0 + x, 12.0 + y)
+    assertTrue(moveSurfacePointer(window!!, pointer.x, pointer.y))
+    assertTrue(view!!.button(pointer.x, pointer.y, true))
+}
+
+internal fun GroupsProbe.move(x: Double, y: Double) {
+    pointer = Point(448.0 + x, 12.0 + y)
+    assertTrue(moveSurfacePointer(window!!, pointer.x, pointer.y))
+}
+
+internal fun GroupsProbe.release() {
+    assertTrue(view!!.button(pointer.x, pointer.y, false))
+}
+
+internal fun GroupsProbe.bounds(node: NativeNode, rect: Rect) {
+    @Unsafe
+    {
+        window!!.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                when (lease.handle) {
+                    case AppKit(_, val view) -> assertTrue(
+                        node.frame(view, 448.0 + rect.x, 12.0 + rect.y, rect.width, rect.height),
+                        Some(f"native frame at ${phase}")
+                    )
+                }
+            }
+        }
+    }
+}
+
+internal fun GroupsProbe.headers(node: NativeNode, ids: Array<String>) {
+    for (index in 0L ..< ids.size) {
+        val header = node.columnHeader(index) ?: fail(Some(f"missing header ${index} at ${phase}"))
+        header.use { value -> assertTrue(value.same(identified(ids[index]))) }
+    }
+    when (node.columnHeader(ids.size)) {
+        case Some(val extra) -> {
+            extra.close();
+            fail(Some(f"extra header at ${phase}"))
+        }
+        case None -> {}
+    }
+}
+
+internal fun GroupsProbe.hit(node: NativeNode, x: Double, y: Double, expected: NativeNode?) {
+    @Unsafe
+    {
+        window!!.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                when (lease.handle) {
+                    case AppKit(_, val view) -> assertTrue(
+                        node.hit(view, 448.0 + x, 12.0 + y, expected),
+                        Some(f"header hit at ${phase}")
+                    )
+                }
+            }
+        }
+    }
+}
+
+internal fun GroupsProbe.escape() {
+    @Unsafe
+    {
+        window!!.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                when (lease.handle) {
+                    case AppKit(_, val view) -> "\u001b".withUtf8Bytes {
+                        bytes,
+                        length -> @Unsafe
+                        {
+                            assertEquals(0, nativeEditorKey(view, 53, bytes, length, 0))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

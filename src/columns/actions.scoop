@@ -84,21 +84,26 @@ internal class GridColumnActions<Row>(private val session: GridSession<Row>): Cl
             }
         return publish(current, before, next)
     }
-    fun move(id: GridColumnId, index: Long): GridColumnActionResult {
+    fun move(id: GridColumnId, index: Long): GridColumnActionResult =
+        moveHeader(GridHeaderKey.Column(id), index)
+    fun moveGroup(id: GridColumnGroupId, index: Long): GridColumnActionResult =
+        moveHeader(GridHeaderKey.Group(id), index)
+    fun moveHeader(key: GridHeaderKey, index: Long): GridColumnActionResult {
         val current = current() ?: return GridColumnActionResult.Rejected("网格未挂载或已禁用")
         val model = current.input.state
         val before = model.columnState
-        val oldIndex =
-            gridColumnStateIndex(before, id) ?: return GridColumnActionResult.Rejected("列已移除")
-        if (index < 0L || index >= before.size)
-            return GridColumnActionResult.Rejected("列位置超出范围")
-        if (oldIndex == index)
+        val next =
+            when (val move = model.headerTree.relocate(before, key, index)) {
+                case Ready(val value) -> value
+                case Rejected(val message) -> return GridColumnActionResult.Rejected(message)
+            }
+        if (next === before)
             return GridColumnActionResult.Applied
         when (val error = editError(current, before, model.columns)) {
             case Some(val message) -> return GridColumnActionResult.Rejected(message)
             case None -> {}
         }
-        model.moveColumn(id, index)
+        model.setColumnStates(next)
         return GridColumnActionResult.Applied
     }
     fun fit(): GridColumnActionResult {

@@ -1,0 +1,149 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.test.*
+import scoop.ui.*
+
+private fun groupedHeaders(): GridHeadersPlan {
+    val ids = Array<GridColumnId>(7L) { at -> GridColumnId(f"c${at}") }
+    val tree =
+        GridHeaders(
+            ids,
+            Some(
+                [
+                    GridHeaderNode.Group(
+                        GridColumnGroupId("g"),
+                        "Group",
+                        [
+                            GridHeaderNode.Column(ids[0L]),
+                            GridHeaderNode.Column(ids[1L]),
+                            GridHeaderNode.Group(
+                                GridColumnGroupId("inner"),
+                                "Inner",
+                                [GridHeaderNode.Column(ids[2L]), GridHeaderNode.Column(ids[3L])]
+                            )
+                        ]
+                    ),
+                    GridHeaderNode.Group(
+                        GridColumnGroupId("h"),
+                        "Other",
+                        [GridHeaderNode.Column(ids[4L]), GridHeaderNode.Column(ids[5L])]
+                    ),
+                    GridHeaderNode.Column(ids[6L])
+                ]
+            )
+        )
+    return GridHeadersPlan(
+        tree,
+        [ids[0L], ids[1L], ids[2L], ids[4L], ids[6L], ids[3L], ids[5L]],
+        1L,
+        5L
+    )
+}
+
+private fun groupTarget(id: String, pin: GridPin = GridPin.None): GridHeaderTarget =
+    GridHeaderTarget(GridHeaderKey.Group(GridColumnGroupId(id)), pin)
+
+@Test
+private class GridGroupedHeaderLayoutTest {
+    @Test
+    fun `frozen fragments share logical identity and align nested and shallow leaves`() {
+        val headers = groupedHeaders()
+        assertEquals(3L, headers.levels)
+        assertEquals(14L, headers.items.size)
+        assertEquals(headers.items.size, headers.ancestors.size)
+        for (pin in [GridPin.None, GridPin.End]) {
+            val nested = headers.indexOf(groupTarget("inner", pin))!!
+            assertEquals(1L, headers.ancestors[nested].size)
+            assertEquals(headers.indexOf(groupTarget("g", pin))!!, headers.ancestors[nested][0L])
+        }
+        val start = groupTarget("g", GridPin.Start)
+        val center = groupTarget("g")
+        val end = groupTarget("g", GridPin.End)
+        assertEquals(start.key, center.key)
+        assertEquals(center.key, end.key)
+        assertTrue(start.viewKey() != center.viewKey())
+        assertTrue(center.viewKey() != end.viewKey())
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            val columns =
+                GridColumnLayout(Array<Double>(7L) { _ -> 100.0 }, 1L, 5L, 550.0, direction)
+            val offset =
+                if (direction == LayoutDirection.Ltr)
+                    0.0
+                else
+                    150.0
+            val box = headers.box(headers.indexOf(center)!!, columns, offset, 40.0, 120.0)
+            assertEquals(200.0, box.width)
+            assertEquals(40.0, box.height)
+            assertEquals(250.0, box.region.width)
+            assertEquals(40.0, headers.box(0L, columns, offset, 40.0, 120.0).y)
+            assertEquals(80.0, headers.box(0L, columns, offset, 40.0, 120.0).height)
+            assertEquals(80.0, headers.box(2L, columns, offset, 40.0, 120.0).y)
+            assertEquals(40.0, headers.box(2L, columns, offset, 40.0, 120.0).height)
+            assertEquals(0.0, headers.box(4L, columns, offset, 40.0, 120.0).y)
+            assertEquals(120.0, headers.box(4L, columns, offset, 40.0, 120.0).height)
+            val clipped = headers.box(2L, columns, offset, 40.0, 55.0)
+            assertEquals(55.0, clipped.y)
+            assertEquals(0.0, clipped.height)
+        }
+        val hidden =
+            GridHeadersPlan(
+                headers.tree,
+                [GridColumnId("c4"), GridColumnId("c6"), GridColumnId("c5")],
+                0L,
+                2L
+            )
+        assertEquals(2L, hidden.levels)
+        assertEquals(None, hidden.indexOf(center))
+        assertEquals(headers.items[4L].target.viewKey(), hidden.items[1L].target.viewKey())
+    }
+
+    @Test
+    fun `header drops use whole sibling geometry and reject other parents bands and pins`() {
+        val headers = groupedHeaders()
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            val columns =
+                GridColumnLayout(Array<Double>(7L) { _ -> 100.0 }, 1L, 5L, 550.0, direction)
+            val offset =
+                if (direction == LayoutDirection.Ltr)
+                    0.0
+                else
+                    150.0
+            fun x(value: Double): Double =
+                if (direction == LayoutDirection.Ltr)
+                    value
+                else
+                    550.0 - value
+            fun drop(target: GridHeaderTarget, left: Double, top: Double): GridHeaderDrop? =
+                gridHeaderDrop(headers, columns, target, offset, Point(x(left), top), 40.0, 120.0)
+            val group = drop(groupTarget("g"), 320.0, 20.0) ?: fail()
+            assertEquals(GridHeaderKey.Group(GridColumnGroupId("h")), group.key)
+            assertTrue(group.before)
+            assertEquals(x(300.0), group.x)
+            assertEquals(0.0, group.region.y)
+            assertEquals(40.0, group.region.height)
+            val leaf = headers.items[1L].target
+            val inner = drop(leaf, 250.0, 60.0) ?: fail()
+            assertEquals(GridHeaderKey.Group(GridColumnGroupId("inner")), inner.key)
+            assertFalse(inner.before)
+            assertEquals(x(300.0), inner.x)
+            assertEquals(40.0, inner.region.y)
+            for (
+                invalid in [
+                    drop(leaf, 320.0, 60.0),
+                    drop(groupTarget("g"), 320.0, 70.0),
+                    drop(groupTarget("g", GridPin.End), 220.0, 20.0)
+                ]
+            ) {
+                when (invalid) {
+                    case None -> {};
+                    case Some(_) -> fail(Some("invalid header drop"))
+                }
+            }
+            val fixed = drop(groupTarget("g", GridPin.End), 480.0, 20.0) ?: fail()
+            assertEquals(GridHeaderKey.Group(GridColumnGroupId("h")), fixed.key)
+            assertTrue(fixed.before)
+            assertEquals(x(450.0), fixed.x)
+        }
+    }
+}

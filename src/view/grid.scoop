@@ -25,6 +25,7 @@ public class DataGrid<Row> public constructor(
         val fonts = input.fonts ?: scope.defaultFonts
         val columns = input.state.columns
         val states = input.state.columnState
+        val headers = input.state.headerTree
         val direction = scope.layoutDirection
         val reuse =
             when (plan) {
@@ -32,6 +33,8 @@ public class DataGrid<Row> public constructor(
                     columns &&
                     old.states ===
                     states &&
+                    old.headers.tree ===
+                    headers &&
                     old.appearance.theme ===
                     theme &&
                     old.appearance.fonts ===
@@ -43,7 +46,15 @@ public class DataGrid<Row> public constructor(
                 case None -> false
             }
         if (!reuse) {
-            plan = Some(GridColumnsPlan(columns, states, GridAppearance(theme, fonts, direction)))
+            plan =
+                Some(
+                    GridColumnsPlan(
+                        columns,
+                        states,
+                        GridAppearance(theme, fonts, direction),
+                        Some(headers)
+                    )
+                )
             fontRevision = fonts.revision
         }
         val layout = plan!!

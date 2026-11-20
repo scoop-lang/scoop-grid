@@ -8,7 +8,7 @@ import scoop.ui.*
 
 internal class GridHeaderDragInput<Row>(
     val model: DataGridState<Row>,
-    val id: GridColumnId,
+    val target: GridHeaderTarget,
     val session: GridSession<Row>,
     val appearance: GridAppearance,
     val enabled: Boolean
@@ -16,6 +16,7 @@ internal class GridHeaderDragInput<Row>(
 
 internal class GridColumnMove<Row>(
     val snapshot: GridColumnGesture<Row>,
+    val target: GridHeaderTarget,
     val appearance: GridAppearance,
     val scroll: ScrollState,
     val stop: () -> Unit
@@ -31,9 +32,9 @@ internal class GridColumnReorder<Row>(private val session: GridSession<Row>): Cl
     private val pointer = state<Point?>(None)
     private var accepted: GridColumnMoveLayout<Row>? = None
 
-    fun isMoving(id: GridColumnId): Boolean =
+    fun isMoving(key: GridHeaderKey): Boolean =
         when (active.value) {
-            case Some(val move) -> move.snapshot.id == id
+            case Some(val move) -> move.target.key == key
             case None -> false
         }
 
@@ -73,12 +74,21 @@ internal class GridColumnReorder<Row>(private val session: GridSession<Row>): Cl
                 input.appearance
         )
             return None
+        val index = layout.plan.headers.indexOf(input.target) ?: return None
+        val first = layout.plan.headers.items[index].first
         val snapshot =
-            when (val start = session.columnActions.beginGesture(input.model, input.id)) {
+            when (
+                val start =
+                    session.columnActions.beginGesture(
+                        input.model,
+                        layout.input.columns.columns[first].id
+                    )
+            ) {
                 case Ready(val value) -> value
                 case Rejected(_) -> return None
             }
-        val move = GridColumnMove(snapshot, input.appearance, layout.input.scroll, stop)
+        val move =
+            GridColumnMove(snapshot, input.target, input.appearance, layout.input.scroll, stop)
         active.value = Some(move)
         position(move, point)
         return Some(move)
@@ -90,10 +100,17 @@ internal class GridColumnReorder<Row>(private val session: GridSession<Row>): Cl
         val layout = accepted ?: return cancel(move)
         if (!valid(move, layout.input))
             return cancel(move)
-        val index = layout.input.columns.indexOf(move.snapshot.id) ?: return cancel(move)
+        val index = layout.plan.headers.indexOf(move.target) ?: return cancel(move)
         val offset = layout.plan.scroll.presentationOffset.x
-        val box = layout.plan.columns.box(index, offset, layout.plan.headerHeight)
-        pointer.value = Some(Point(box.x - offset + local.x, local.y))
+        val box =
+            layout.plan.headers.box(
+                index,
+                layout.plan.columns,
+                offset,
+                layout.plan.headerRowHeight,
+                layout.plan.headerHeight
+            )
+        pointer.value = Some(Point(box.x - offset + local.x, box.y + local.y))
     }
 
     fun finish(move: GridColumnMove<Row>, local: Point) {
@@ -102,59 +119,66 @@ internal class GridColumnReorder<Row>(private val session: GridSession<Row>): Cl
             return
         val layout = accepted ?: return cancel(move)
         val point = pointer.value ?: return cancel(move)
-        val index = layout.input.columns.indexOf(move.snapshot.id) ?: return cancel(move)
-        val drop =
-            gridColumnDrop(
-                layout.plan.columns,
-                index,
-                layout.plan.scroll.presentationOffset.x,
-                point,
-                layout.plan.headerHeight
-            )
+        val drop = drop(layout.plan, move.target, point)
         clear()
         when (drop) {
             case Some(val target) -> {
                 val destination =
-                    gridColumnMoveIndex(
+                    layout.plan.headers.tree.moveIndex(
                         move.snapshot.initial,
-                        move.snapshot.id,
-                        layout.input.columns.columns[target.anchor].id,
+                        move.target.key,
+                        target.key,
                         target.before
                     ) ?:
                         return
-                session.columnActions.move(move.snapshot.id, destination)
+                session.columnActions.moveHeader(move.target.key, destination)
             }
             case None -> {}
         }
     }
 
-    fun marker(plan: GridMeasurePlan, input: GridRootProps<Row>): GridColumnDrop? {
+    fun marker(plan: GridMeasurePlan, input: GridRootProps<Row>): GridHeaderDrop? {
         val move = active.value ?: return None
         val point = pointer.value ?: return None
         if (!valid(move, input))
             return None
-        val index = input.columns.indexOf(move.snapshot.id) ?: return None
-        return gridColumnDrop(
+        return drop(plan, move.target, point)
+    }
+    private fun drop(
+        plan: GridMeasurePlan,
+        target: GridHeaderTarget,
+        point: Point
+    ): GridHeaderDrop? =
+        gridHeaderDrop(
+            plan.headers,
             plan.columns,
-            index,
+            target,
             plan.scroll.presentationOffset.x,
             point,
+            plan.headerRowHeight,
             plan.headerHeight
         )
-    }
 
     private fun speed(plan: GridMeasurePlan, input: GridRootProps<Row>): Double {
         val move = active.value ?: return 0.0
         val point = pointer.value ?: return 0.0
         if (!valid(move, input))
             return 0.0
-        val index = input.columns.indexOf(move.snapshot.id) ?: return 0.0
+        val index = plan.headers.indexOf(move.target) ?: return 0.0
+        val box =
+            plan.headers.box(
+                index,
+                plan.columns,
+                plan.scroll.presentationOffset.x,
+                plan.headerRowHeight,
+                plan.headerHeight
+            )
         val speed =
             gridColumnDragSpeed(
                 plan.columns,
-                index,
-                point,
-                plan.headerHeight,
+                plan.headers.items[index].first,
+                Point(point.x, point.y - box.y),
+                box.height,
                 move.appearance.density
             )
         val offset = plan.scroll.snapshot.offset.x

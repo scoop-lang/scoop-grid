@@ -61,7 +61,7 @@ internal class GridHeaderDrag<Row>(
         drag.update(options(), { _ -> enabled() }, { event -> receive(event) })
     }
 
-    val moving: Boolean get() = value().session.columnReorder.isMoving(value().id)
+    val moving: Boolean get() = value().session.columnReorder.isMoving(value().target.key)
 
     private fun receive(event: DragEvent) {
         val reorder = value().session.columnReorder

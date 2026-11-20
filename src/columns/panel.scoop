@@ -142,24 +142,28 @@ public class GridColumnsPanel<Row> public constructor(
         if (!available())
             return
         val states = props.value.state.columnState
-        val ordered = gridOrderedColumnStates(states)
-        val index = gridColumnStateIndex(ordered, selected) ?: return
-        val destination =
-            if (forward)
-                index + 1L
-            else
-                index - 1L
-        if (
-            destination <
-                0L ||
-                destination >=
-                ordered.size ||
-                ordered[destination].pin !=
-                ordered[index].pin
-        )
-            return
-        val target = gridColumnStateIndex(states, ordered[destination].id) ?: return
+        val current = entry(selected) ?: return
+        val target =
+            props.value.state.headerTree.adjacentIndex(
+                states,
+                GridHeaderKey.Column(selected),
+                forward,
+                Some(current.pin)
+            ) ?:
+                return
         report(props.value.handle.moveColumn(selected, target))
+    }
+    private fun moveGroup(id: GridColumnGroupId, forward: Boolean) {
+        if (!available())
+            return
+        val model = props.value.state
+        val key = GridHeaderKey.Group(id)
+        when (model.headerTree.find(key)) {
+            case None -> return
+            case Some(_) -> {}
+        }
+        val target = model.headerTree.adjacentIndex(model.columnState, key, forward) ?: return
+        report(props.value.handle.moveColumnGroup(id, target))
     }
     private fun fit() {
         if (available())
@@ -191,6 +195,11 @@ public class GridColumnsPanel<Row> public constructor(
         val ordered = gridOrderedColumnStates(states)
         val index = gridColumnStateIndex(ordered, selected) ?: 0L
         val current = ordered[index]
+        val tree = input.state.headerTree
+        val previous =
+            tree.adjacentIndex(states, GridHeaderKey.Column(current.id), false, Some(current.pin))
+        val next =
+            tree.adjacentIndex(states, GridHeaderKey.Column(current.id), true, Some(current.pin))
         selected = current.id
         if (model !== input.state || shown != selected || appliedWidth != current.width) {
             model = input.state
@@ -272,6 +281,49 @@ public class GridColumnsPanel<Row> public constructor(
                 }
             )
             add(gridColumnsLabel(f"设置：${title}", appearance))
+            for (ancestor in tree.ancestors(current.id)) {
+                val group =
+                    when (ancestor.key) {
+                        case Group(val id) -> id
+                        case Column(_) -> throw IllegalStateException(
+                            Some("a header parent must be a group")
+                        )
+                    }
+                val before = tree.adjacentIndex(states, ancestor.key, false)
+                val after = tree.adjacentIndex(states, ancestor.key, true)
+                row {
+                    key = ViewKey.Text(f"grid-column-group-${group.value}")
+                    item(gridColumnsLabel(f"列组：${ancestor.title}", appearance)) { grow = 1.0 }
+                    add(
+                        columnsButton("前移组", { this @GridColumnsPanel.moveGroup(group, false) }) {
+                            enabled = active && before != None
+                            fonts = input.fonts;
+                            theme = input.theme;
+                            variant = ButtonVariant.Outline
+                            semantics =
+                                ComponentSemantics(
+                                    name = Some(f"前移 ${ancestor.title} 列组"),
+                                    automationId =
+                                        Some(f"grid-column-group-${group.value}-previous")
+                                )
+                        }
+                    )
+                    add(
+                        columnsButton("后移组", { this @GridColumnsPanel.moveGroup(group, true) }) {
+                            enabled = active && after != None
+                            fonts = input.fonts;
+                            theme = input.theme;
+                            variant = ButtonVariant.Outline
+                            semantics =
+                                ComponentSemantics(
+                                    name = Some(f"后移 ${ancestor.title} 列组"),
+                                    automationId = Some(f"grid-column-group-${group.value}-next")
+                                )
+                        }
+                    )
+                    spacing = 6.0 * appearance.density
+                }
+            }
             row {
                 key = ViewKey.Text(f"grid-columns-placement-${current.id.value}")
                 item(
@@ -303,7 +355,7 @@ public class GridColumnsPanel<Row> public constructor(
                 ) { grow = 1.0 }
                 add(
                     columnsButton("前移", { this @GridColumnsPanel.move(false) }) {
-                        enabled = active && index > 0L && ordered[index - 1L].pin == current.pin
+                        enabled = active && previous != None
                         variant = ButtonVariant.Outline
                         fonts = input.fonts
                         theme = input.theme
@@ -312,13 +364,7 @@ public class GridColumnsPanel<Row> public constructor(
                 )
                 add(
                     columnsButton("后移", { this @GridColumnsPanel.move(true) }) {
-                        enabled =
-                            active &&
-                                index +
-                                1L <
-                                ordered.size &&
-                                ordered[index + 1L].pin ==
-                                current.pin
+                        enabled = active && next != None
                         variant = ButtonVariant.Outline
                         fonts = input.fonts
                         theme = input.theme

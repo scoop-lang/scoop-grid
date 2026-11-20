@@ -10,12 +10,20 @@ import scoop.ui.component.*
 internal class GridColumnsPlan<Row>(
     val definitions: Array<GridColumn<Row>>,
     val states: Array<GridColumnState>,
-    val appearance: GridAppearance
+    val appearance: GridAppearance,
+    tree: GridHeaders? = None
 ) {
     private val assembled = gridColumnSetup(definitions, states, appearance)
     val columns: Array<GridColumn<Row>> get() = assembled.columns
     val startCount: Long get() = assembled.startCount
     val endStart: Long get() = assembled.endStart
+    val headers =
+        GridHeadersPlan(
+            tree ?: GridHeaders(Array<GridColumnId>(definitions.size) { at -> definitions[at].id }),
+            Array<GridColumnId>(columns.size) { at -> columns[at].id },
+            startCount,
+            endStart
+        )
     private val lookup = HashMap<GridColumnId, Long>()
     private var cached: GridColumnLayout? = None
     init {

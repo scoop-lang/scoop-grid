@@ -9,17 +9,28 @@ public class DataGridState<Row> public constructor(
     source: TableSource<Row>,
     columns: Array<GridColumn<Row>>,
     query: GridQuery = GridQuery(),
-    public val onQueryChange: ((GridQuery) -> Unit)? = None
+    public val onQueryChange: ((GridQuery) -> Unit)? = None,
+    headers: Array<GridHeaderNode>? = None
 ) {
     private val computed = state(gridCompute(source, GridColumns(columns), query, None))
+    private val headerState =
+        state(
+            GridHeaders(Array<GridColumnId>(columns.size) { index -> columns[index].id }, headers)
+        )
     private val presentation =
-        state(Array<GridColumnState>(columns.size) { index -> GridColumnState(columns[index].id) })
+        state(
+            Array<GridColumnState>(columns.size) {
+                index -> GridColumnState(headerState.value.leaves[index])
+            }
+        )
     private val observers = ArrayList<GridModelObserver>()
     private val filterCandidates = HashMap<GridColumnId, GridFilterValues>()
     public val query: GridQuery get() = computed.value.query
     public val result: GridResult<Row> get() = computed.value.result
     public val columns: Array<GridColumn<Row>> get() = computed.value.columns.values
     public val columnState: Array<GridColumnState> get() = presentation.value
+    public val headers: Array<GridHeaderNode> get() = headerState.value.values
+    internal val headerTree: GridHeaders get() = headerState.value
     public fun column(id: GridColumnId): GridColumn<Row> = computed.value.columns.get(id)
     public fun filterValues(id: GridColumnId): GridFilterValues {
         computed.checkMutation()
@@ -118,10 +129,15 @@ public class DataGridState<Row> public constructor(
         computed.value = next
         notify(old.query, next.query)
     }
-    public fun replaceColumns(values: Array<GridColumn<Row>>) {
+    public fun replaceColumns(
+        values: Array<GridColumn<Row>>,
+        headers: Array<GridHeaderNode>? = None
+    ) {
         computed.checkMutation()
         val old = computed.value
         val nextColumns = GridColumns(values)
+        val ids = Array<GridColumnId>(values.size) { index -> values[index].id }
+        val nextHeaders = GridHeaders(ids, Some(headers ?: headerTree.surviving(ids)))
         val sorting = ArrayList<GridSort>()
         for (sort in old.query.sorting)
             if (nextColumns.contains(sort.column))
@@ -149,7 +165,18 @@ public class DataGridState<Row> public constructor(
             if (!retained.contains(column.id))
                 states.add(GridColumnState(column.id))
         filterCandidates.clear()
-        presentation.value = states.toArray()
+        val nextStates =
+            when (headers) {
+                case Some(_) -> {
+                    val byId = HashMap<GridColumnId, GridColumnState>()
+                    for (entry in states)
+                        byId.put(entry.id, entry)
+                    Array<GridColumnState>(values.size) { at -> byId[nextHeaders.leaves[at]]!! }
+                }
+                case None -> states.toArray()
+            }
+        headerState.value = nextHeaders
+        presentation.value = nextStates
         computed.value = next
         notify(old.query, next.query)
     }
@@ -188,41 +215,32 @@ public class DataGridState<Row> public constructor(
                     }
                 GridColumnState(entry.id, entry.visible, width, entry.pin)
             }
+        when (val error = headerTree.orderError(next)) {
+            case Some(val message) -> throw IllegalArgumentException(Some(message))
+            case None -> {}
+        }
         if (gridArrayEqual(presentation.value, next))
             return
         presentation.value = next
         changed()
     }
     public fun moveColumn(id: GridColumnId, index: Long) {
+        moveHeader(GridHeaderKey.Column(id), index)
+    }
+    public fun moveColumnGroup(id: GridColumnGroupId, index: Long) {
+        moveHeader(GridHeaderKey.Group(id), index)
+    }
+    private fun moveHeader(key: GridHeaderKey, index: Long) {
         presentation.checkMutation()
-        column(id)
-        val old = presentation.value
-        gridRequire(index >= 0L && index < old.size, "grid column destination is out of range")
-        val others = ArrayList<GridColumnState>()
-        var moving: GridColumnState? = None
-        for (item in old)
-            if (item.id == id)
-                moving = Some(item)
-            else
-                others.add(item)
-        val entry =
-            moving ?: throw IllegalArgumentException(Some("grid column has no presentation state"))
-        val next =
-            Array<GridColumnState>(old.size) {
-                at -> if (at == index)
-                    entry
-                else
-                    others[
-                        if (at < index)
-                            at
-                        else
-                            at - 1L
-                    ]
+        when (val move = headerTree.relocate(presentation.value, key, index)) {
+            case Ready(val next) -> {
+                if (next === presentation.value)
+                    return
+                presentation.value = next
+                changed()
             }
-        if (gridArrayEqual(old, next))
-            return
-        presentation.value = next
-        changed()
+            case Rejected(val message) -> throw IllegalArgumentException(Some(message))
+        }
     }
     private fun notify(old: GridQuery, next: GridQuery) {
         changed()

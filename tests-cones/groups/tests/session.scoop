@@ -1,0 +1,232 @@
+package scoop.grid.tests.groups
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.ViewProbe
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridGroupsWindowTest {
+    @Test
+    fun `native headers preserve group membership across pin fragments and real moves`() {
+        val probe = GroupsProbe()
+        try {
+            context(probe.theme) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertEquals(1, probe.submissions)
+            assertEquals(0L, probe.live)
+            assertTrue(probe.created < 1400L)
+        } catch (error: Throwable) {
+            println(
+                f"groups phase=${probe.phase}, retry=${probe.retry}, created=${
+                    probe.created
+                }, live=${probe.live}"
+            )
+            if (error is Exception)
+                error.printStackTrace()
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+internal class GroupsProbe: Closeable {
+    var rows = GroupRows()
+    val columns = groupColumns(this)
+    val model = DataGridState(rows, columns, headers = Some(groupTree()))
+    val theme = ThemeSource(shadcnTheme())
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val direction = state(LayoutDirection.Ltr)
+    val enabled = state(true)
+    var created = 0L
+    var live = 0L
+    var frame: ComponentScope? = None
+    var editor: GridTextEditor<Long>? = None
+    var pending: GridCommit<Long>? = None
+    var pendingValue = 0L
+    var submissions = 0
+    val address = GridCellAddress(ViewKey.Number(0L), GridColumnId("c1"))
+    var fit: GridColumnFit? = None
+    var before = model.columnState
+    var result = model.result
+    var phase = 0
+    var waiting = false
+    var retry = false
+    var finished = false
+    var active: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var view: ViewProbe? = None
+    var calls: NativeCalls? = None
+    var root: NativeNode? = None
+    var grid: NativeNode? = None
+    var leaf: NativeNode? = None
+    var center: NativeNode? = None
+    var start: NativeNode? = None
+    var cell: NativeNode? = None
+    var control: NativeNode? = None
+    var pointer = Point(0.0, 0.0)
+    private val held = ArrayList<NativeNode>()
+    init {
+        reset()
+    }
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                active = Some(application)
+                application.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
+                )
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid grouped headers";
+                            size = LogicalSize(960.0, 660.0)
+                        }
+                    )
+                window = Some(native)
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> view = Some(ViewProbe(pointer))
+                            }
+                        }
+                    }
+                }
+                ui = host.attach(native, { scope -> GroupsScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(
+                            application.proxy(),
+                            { tag -> inspect(tag) },
+                            { tag, result -> completed(tag, result) }
+                        )
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(
+                Some(f"groups timeout at ${phase}, focused=${window?.isFocused ?: false}")
+            )
+            else -> {}
+        }
+    }
+    fun accepted() {
+        if (finished || waiting || !(window?.isFocused ?: false))
+            return
+        waiting = true;
+        retry = false
+        when (phase) {
+            case 50 -> calls!!.post(control!!, phase, 16)
+            case 52 -> calls!!.post(control!!, phase)
+            else -> calls!!.post(root!!, phase, 20)
+        }
+    }
+    fun completed(tag: Int, result: Int) {
+        assertEquals(phase, tag)
+        assertEquals(1, result, Some(f"native operation at ${phase}"))
+        waiting = false
+        if (retry) {
+            frame!!.requestFrame();
+            return
+        }
+        phase += 1;
+        advance()
+        if (!finished && !waiting)
+            frame!!.requestFrame()
+    }
+    fun keep(node: NativeNode): NativeNode {
+        held.add(node);
+        return node
+    }
+    fun identified(id: String): NativeNode =
+        keep(root!!.find(id) ?: fail(Some(f"missing ${id} at ${phase}")))
+    fun named(node: NativeNode, name: String): NativeNode? {
+        if (node.flag(0) && node.text(0, Some(name)))
+            return Some(node)
+        if (node.text(2, Some("AXTable")))
+            return None
+        for (index in 0L ..< node.count) {
+            when (val child = named(keep(node.child(index)), name)) {
+                case Some(_) -> return child
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun entry(index: Long): GridColumnState {
+        val id = GridColumnId(f"c${index}")
+        for (entry in model.columnState)
+            if (entry.id == id)
+                return entry
+        return fail(Some("missing column state"))
+    }
+    fun cell(index: Long): NativeNode {
+        var position = 0L
+        for (pin in [GridPin.Start, GridPin.None, GridPin.End])
+            for (entry in model.columnState)
+                if (entry.visible && entry.pin == pin) {
+                    if (entry.id.value == f"c${index}")
+                        return keep(grid!!.cell(0L, position)!!)
+                    position += 1L
+                }
+        return fail(Some("missing displayed cell"))
+    }
+    fun capture() {
+        before = model.columnState;
+        result = model.result
+    }
+    fun unchanged() {
+        assertTrue(before === model.columnState);
+        assertTrue(result === model.result)
+    }
+    fun order(prefix: Array<Long>) {
+        for (at in 0L ..< prefix.size)
+            assertEquals(
+                f"c${prefix[at]}",
+                model.columnState[at].id.value,
+                Some(f"order at ${phase}/${at}")
+            )
+        assertTrue(result === model.result)
+        assertEquals(GridPin.Start, entry(0L).pin)
+        assertEquals(GridPin.End, entry(4L).pin)
+        assertEquals(GridPin.End, entry(6L).pin)
+        assertTrue(model.query.sorting.size == 0L)
+    }
+    public override fun close() {
+        calls?.close();
+        view?.close();
+        ui?.close()
+        for (node in held)
+            node.close()
+    }
+}

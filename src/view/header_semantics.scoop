@@ -1,0 +1,48 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.ui.*
+import scoop.window.accessibility.*
+
+/** References follow real header mounts; they do not realize offscreen views. */
+internal class GridHeaderSemantics {
+    private var tree: GridHeaders? = None
+    private val references = HashMap<ViewKey, SemanticsReference>()
+    fun update(value: GridHeaders) {
+        when (tree) {
+            case Some(val old) -> if (old === value)
+                return
+            case None -> {}
+        }
+        references.clear()
+        tree = Some(value)
+    }
+    fun reference(target: GridHeaderTarget): SemanticsReference {
+        val key = target.viewKey()
+        when (references[key]) {
+            case Some(val value) -> return value
+            case None -> {}
+        }
+        val value = SemanticsReference()
+        references.put(key, value)
+        return value
+    }
+    fun headers(plan: GridHeadersPlan, index: Long, includeSelf: Boolean): Array<SemanticNodeId> {
+        val result = ArrayList<SemanticNodeId>()
+        val ancestors = plan.ancestors[index]
+        var at = ancestors.size
+        while (at > 0L) {
+            at -= 1L
+            append(result, plan.items[ancestors[at]].target)
+        }
+        if (includeSelf)
+            append(result, plan.items[index].target)
+        return result.toArray()
+    }
+    private fun append(result: ArrayList<SemanticNodeId>, target: GridHeaderTarget) {
+        when (reference(target).id) {
+            case Some(val id) -> result.add(id)
+            case None -> {}
+        }
+    }
+}
