@@ -183,6 +183,10 @@ internal class GridSession<Row>: GridMount {
         return true
     }
     public override val active: Boolean get() = owner?.isMounted ?: false
+    val inputEnabled: Boolean get() {
+        val scope = owner ?: return false
+        return scope.isMounted && scope.input.isEnabledInHierarchy
+    }
     public override val pending: Boolean get() = requested != None
     val preparing: GridCellAddress? get() {
         val focus = bodyFocus ?: return None

@@ -2,6 +2,8 @@ package scoop.grid
 
 import scoop.ui.*
 import scoop.ui.component.TableSource
+import scoop.ui.text.TextEditorState
+import scoop.ui.text.TextInputStartOptions
 import scoop.window.KeyEvent
 
 internal enum GridDraftStatus {
@@ -11,7 +13,8 @@ internal enum GridDraftStatus {
 internal class GridActiveEdit<Row>(
     val draft: GridEdit<Row>,
     val column: GridColumn<Row>,
-    val rowIndex: Long
+    val rowIndex: Long,
+    val cancelInput: (() -> Unit)? = None
 ) {
     val focus = FocusHandle()
     val status = state(GridDraftStatus.Ready)
@@ -142,9 +145,39 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
             }
             case None -> {}
         }
-        val edit = GridActiveEdit(editing.create(address, row), column, index)
+        return activate(GridActiveEdit(editing.create(address, row), column, index))
+    }
+    fun startInput(
+        address: GridCellAddress,
+        state: TextEditorState,
+        cancel: () -> Unit
+    ): TextInputStartOptions? {
+        value.checkMutation()
+        if (!session.active || !session.enabled)
+            return None
+        when (current) {
+            case Some(_) -> return None
+            case None -> {}
+        }
+        val input = model ?: return None
+        val index = input.result.rows.indexOfKey(address.row) ?: return None
+        if (!input.visibleColumn(address.column))
+            return None
+        val column = input.findColumn(address.column) ?: return None
+        val editing = column.editing ?: return None
+        val row = input.result.rows.rowAt(index)
+        if (!editing.editable(row) || !session.independent(row, column.id))
+            return None
+        val draft = editing.create(address, row)
+        val options = draft.startInput(state) ?: return None
+        return if (activate(GridActiveEdit(draft, column, index, Some(cancel))))
+            Some(options)
+        else
+            None
+    }
+    private fun activate(edit: GridActiveEdit<Row>): Boolean {
         value.value = Some(edit)
-        if (session.requestCell(address, Some(edit.focus)))
+        if (session.requestCell(edit.address, Some(edit.focus)))
             return true
         finish(edit, GridEditEndReason.Cancelled, false)
         return false
@@ -207,7 +240,7 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
     }
     fun focusChanged() {
         val edit = current ?: return
-        if (!session.active || !session.enabled)
+        if (!session.active || !session.enabled || !session.inputEnabled)
             return
         if (session.focused == Some(edit.address)) {
             if (edit.focus.hasFocus)
@@ -341,6 +374,7 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
         value.value = None
         if (session.requested == Some(edit.address))
             session.cancel()
+        edit.cancelInput?.invoke()
         edit.draft.cancelComposition()
         if (restore)
             session.restore(edit.address, edit.rowIndex)

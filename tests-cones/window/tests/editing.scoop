@@ -6,16 +6,26 @@ import scoop.test.*
 import scoop.tests.surface.sendSurfaceKey
 import scoop.ui.*
 import scoop.ui.component.*
+import scoop.ui.text.TextEditorState
+import scoop.ui.text.TextInputStartOptions
 import scoop.window.*
 
 internal class EditRow(val id: Long, val name: String, val amount: Long)
 
-internal class TrackedEditor<T>(val text: GridTextEditor<T>): GridEditor<T> {
+internal class TrackedEditor<T>(
+    val text: GridTextEditor<T>,
+    private val direct: Boolean = true
+): GridEditor<T> {
     var focus: FocusHandle? = None
     var submitting = false
     public override val composing: Boolean get() = text.composing
     public override fun candidate(): GridCandidate<T> = text.candidate()
     public override fun importText(value: String): String? = text.importText(value)
+    public override fun startInput(state: TextEditorState): TextInputStartOptions? =
+        if (direct)
+            text.startInput(state)
+        else
+            None
     public override fun cancelComposition() {
         text.cancelComposition()
     }
@@ -31,6 +41,7 @@ internal class GridEditingProbe {
     val visible = state(false)
     val enabled = state(true)
     val show = state(true)
+    val spanned = state(false)
     val handle = DataGridHandle()
     val scroll = ScrollState()
     val outside = FocusHandle()
@@ -49,6 +60,9 @@ internal class GridEditingProbe {
     val ime = GridSystemImeProbe(this)
     val interaction = GridEditInteractionProbe(this)
     val paste = GridPasteProbe(this)
+    val direct = GridDirectInputProbe(this)
+    var allowDirect = true
+    var connection: TextInputConnection? = None
     var defer = false
     var submissions = 0
     var completion: GridCommit<EditRow>? = None
@@ -76,7 +90,11 @@ internal class GridEditingProbe {
                         gridEdit<EditRow, String>(
                             {
                                 value ->
-                                val editor = TrackedEditor(gridTextEditor(value, probe.multiline))
+                                val editor =
+                                    TrackedEditor(
+                                        gridTextEditor(value, probe.multiline),
+                                        probe.allowDirect
+                                    )
                                 probe.text = Some(editor)
                                 probe.created += 1
                                 editor
@@ -196,6 +214,10 @@ internal class GridEditingProbe {
     fun advance(active: ActiveApplication) {
         if (!(window?.isFocused ?: false))
             return
+        if (phase >= 82) {
+            direct.advance(active)
+            return
+        }
         if (phase >= 66) {
             paste.advance(active)
             return

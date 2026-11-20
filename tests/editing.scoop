@@ -4,12 +4,60 @@ import scoop.test.*
 import scoop.ui.ViewKey
 import scoop.ui.component.TableRecord
 import scoop.ui.component.TableRows
+import scoop.ui.text.TextEditorState
 import scoop.window.*
 
 private class EditedRow(val value: Long, val note: String)
 
 @Test
 private class GridEditingTest {
+    @Test
+    fun `direct input adopts one empty document and preserves the typed commit baseline`() {
+        val editor = gridLongEditor(9007199254740993L)
+        val changes = ArrayList<GridChange<EditedRow, Long>>()
+        val column =
+            gridColumn<EditedRow, Long>(
+                GridColumnId("value"),
+                "Value",
+                { row -> row.value },
+                gridLongValues(),
+                edit =
+                    Some(
+                        gridEdit<EditedRow, Long>(
+                            { _ -> editor },
+                            { change, _ -> changes.add(change) }
+                        )
+                    )
+            )
+        val original = EditedRow(9007199254740993L, "before")
+        val draft =
+            column.editing!!.create(GridCellAddress(ViewKey.Number(1L), column.id), original)
+        val document = TextEditorState()
+        assertFalse(draft.startInput(document)!!.multiline)
+        assertTrue(editor.state === document)
+        assertEquals("", document.text)
+        assertTrue(draft.baselineMatches(original))
+        document.applyInput(
+            TextInputBatch(
+                None,
+                [TextInputOperation.Commit("9223372036854775807", TextReplacement.CurrentSelection)]
+            )
+        )
+        when (draft.proposal(EditedRow(original.value, "current"))) {
+            case Submit(val submit) -> submit(
+                GridCommit<EditedRow>({ true }, { _ -> true }, { _ -> true })
+            )
+            else -> fail(Some("direct input should produce a typed proposal"))
+        }
+        assertEquals(9007199254740993L, changes[0L].original)
+        assertEquals(9223372036854775807L, changes[0L].value)
+        assertEquals("current", changes[0L].row.note)
+        assertTrue(document.undo())
+        assertEquals("", document.text)
+        assertTrue(document.redo())
+        assertEquals("9223372036854775807", document.text)
+    }
+
     @Test
     fun `typed drafts preserve integers and distinguish parse errors from validation`() {
         val editor = gridLongEditor(9007199254740993L)

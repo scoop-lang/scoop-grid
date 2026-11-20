@@ -147,8 +147,8 @@ internal class GridPasteProbe(private val probe: GridEditingProbe) {
                 assertEquals("", row(3L).name)
                 assertEquals(GridPasteResult.Committed, last())
                 assertEquals(None, handle.editingCell)
-                probe.finished = true
-                active.requestExit()
+                probe.phase = 82
+                probe.frame!!.requestFrame()
             }
             else -> {}
         }

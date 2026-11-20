@@ -4,6 +4,8 @@ import scoop.graphics.text.FontCollection
 import scoop.ui.*
 import scoop.ui.component.TableSource
 import scoop.ui.style.ThemeSource
+import scoop.ui.text.TextEditorState
+import scoop.ui.text.TextInputStartOptions
 import scoop.window.KeyEvent
 
 public enum GridCandidate<T> {
@@ -29,6 +31,8 @@ public interface GridEditor<T> {
     public val holdsFocus: Boolean get() = false
     public fun candidate(): GridCandidate<T>
     public fun importText(text: String): String?
+    /** Adopts the untouched native document, or declines typing to start this editor. */
+    public fun startInput(state: TextEditorState): TextInputStartOptions? = None
     public fun view(options: GridEditorOptions): View
     public fun cancelComposition()
 }
@@ -124,6 +128,7 @@ internal interface GridEdit<Row> {
     fun baselineMatches(row: Row): Boolean
     fun proposal(row: Row): GridProposal<Row>
     fun importText(text: String): String?
+    fun startInput(state: TextEditorState): TextInputStartOptions?
     fun view(options: GridEditorOptions): View
     fun cancelComposition()
 }
@@ -143,6 +148,8 @@ private class TypedGridEdit<Row, T>(
     public override val composing: Boolean get() = editor.composing
     public override val holdsFocus: Boolean get() = editor.holdsFocus
     public override fun importText(text: String): String? = editor.importText(text)
+    public override fun startInput(state: TextEditorState): TextInputStartOptions? =
+        editor.startInput(state)
     public override fun baselineMatches(row: Row): Boolean = spec.equal(original, read(row))
     public override fun proposal(row: Row): GridProposal<Row> =
         when (editor.candidate()) {

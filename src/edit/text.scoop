@@ -4,6 +4,7 @@ import scoop.text.*
 import scoop.ui.*
 import scoop.ui.component.*
 import scoop.ui.text.TextEditorState
+import scoop.ui.text.TextInputStartOptions
 
 public class GridTextEditor<T> public constructor(
     initial: T,
@@ -11,7 +12,12 @@ public class GridTextEditor<T> public constructor(
     private val parse: (String) -> GridCandidate<T>,
     public val multiline: Boolean = false
 ): GridEditor<T> {
-    public val state: TextEditorState = TextEditorState(format(initial))
+    private var document = TextEditorState(format(initial))
+    public val state: TextEditorState get() = document
+    public override fun startInput(state: TextEditorState): TextInputStartOptions? {
+        document = state
+        return Some(TextInputStartOptions(multiline = multiline))
+    }
     public override val composing: Boolean get() = state.isComposing
     public override fun candidate(): GridCandidate<T> = parse(state.committedText)
     public override fun importText(text: String): String? {

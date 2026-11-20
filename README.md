@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。完整编辑入口和分析功能继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。选择与分析功能继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -83,6 +83,10 @@ scoop test --release .
 跨列格只读，拆分后才恢复各列的编辑能力；外部规则变化会结束受影响的旧编辑。自动行高按合并后的宽度测量，多个高度贡献列落在同一跨度时只测一次；单列内容测宽跳过合并格，CSV 仍按各列原值输出。[十万行示例](examples/basic/src/main.scoop) 可切换名称／金额的跨列说明。
 
 浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。双击或 Enter／F2 进入可编辑列的编辑器；Enter／F2 也可进入自定义单元格的真实控件。编辑中的 Enter／Tab、点击其他格和失焦会先尝试提交，校验失败保留草稿。Escape 先交给输入法，再取消草稿；内部控件先处理自己的键盘与文本输入。
+
+在文本、整数或浮点格上直接键入会从空草稿开始，以新输入替换原值；Enter／F2 仍从原值开始。首字、Unicode 和系统输入法的组合通过同一原生连接交给正常 Input／Textarea，编辑器内撤销可回到空草稿，取消编辑则保留原记录。非法数字保留输入文字供修正。只读格、跨列显示、布尔／日期／选项等非文本编辑器不通过键入改值。
+
+自定义 `GridEditor<T>` 可实现 `startInput(state): TextInputStartOptions?`，采用传入的 `TextEditorState`，返回与真实编辑器相同的 policy／multiline 配置；默认 None 拒绝直接开始。不要写入旧值或重放首字符。取消、禁用和卸载会清理尚未接管的输入状态。
 
 列通过 `edit = Some(gridEdit<Row, T>(...))` 明确声明编辑器、校验和有类型的应用回调。内置 `gridTextEditor`、`gridLongEditor`、`gridDoubleEditor` 复用原生文本编辑器；`gridBooleanEditor`、`gridDateEditor` 和 `gridChoiceEditor<T>` 分别复用 Checkbox、DatePicker 和 Select。`GridEditor<T>` 可接入自定义控件。应用用 `GridCommit<Row>.accept(nextSource)` 发布真实数据快照，或 `reject(message)` 保留草稿；异步 completion 只完成原会话一次，取消／卸载后的结果返回 false。`handle.editingCell`、`editError` 和 `isSubmitting` 可用于响应式状态栏。
 

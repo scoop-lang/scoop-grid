@@ -28,6 +28,17 @@ internal class EditingScene(
                         handle = Some(probe.handle)
                         scroll = Some(probe.scroll)
                         enabled = probe.enabled.value
+                        columnSpans =
+                            if (probe.spanned.value)
+                                Some {
+                                    _ -> [
+                                        GridColumnSpan(
+                                            [GridColumnId("name"), GridColumnId("amount")]
+                                        )
+                                    ]
+                                }
+                            else
+                                None
                         onEditEnd = { event -> probe.ends.add(event) }
                         onPasteResult = { _, result -> probe.pastes.add(result) }
                     }

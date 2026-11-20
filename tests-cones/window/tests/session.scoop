@@ -31,7 +31,11 @@ private class GridWindowTest {
                 }
             } finally {
                 try {
-                    probe.editing.ime.close()
+                    try {
+                        probe.editing.ime.close()
+                    } finally {
+                        probe.editing.direct.close()
+                    }
                 } finally {
                     assertEquals(0, restoreNativeClipboard(clipboard))
                 }
@@ -104,6 +108,14 @@ internal class GridWindowProbe {
                     }, lastKey=${navigation.lastKey}"
                 )
             )
+            case Window(
+                _,
+                WindowEvent.TextInput(TextInputEvent.Enabled(val value))
+            ) -> editing.connection = value
+            case Window(
+                _,
+                WindowEvent.TextInput(TextInputEvent.Disabled(_))
+            ) -> editing.connection = None
             else -> {}
         }
     }

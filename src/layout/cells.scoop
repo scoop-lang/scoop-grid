@@ -6,6 +6,7 @@ import scoop.math.min
 import scoop.surface.*
 import scoop.ui.*
 import scoop.ui.style.ThemeSource
+import scoop.ui.text.*
 import scoop.window.*
 import scoop.window.accessibility.*
 
@@ -244,6 +245,16 @@ internal class GridCell<Row>(
         }
     private val press =
         scope.press(area, PressOptions(acceptsEnter = props.value.address == None)) { activate() }
+    private val starter =
+        if (props.value.address == None)
+            None
+        else
+            Some(
+                scope.textInputStarter(
+                    area,
+                    props.value.enabled && props.value.editable && !props.value.submitting
+                ) { state -> startInput(state) }
+            )
     private var registered: GridCellAddress? = None
     private var doubleClick = false
     private var additiveSort = false
@@ -329,6 +340,9 @@ internal class GridCell<Row>(
     public override fun update(): UiInvalidation {
         val input = props.value
         headerDrag?.update()
+        starter?.update(input.enabled && input.editable && !input.submitting) {
+            state -> startInput(state)
+        }
         semantics.bindReference(input.headerReference)
         area.scope.textCommandAvailability =
             Some(TextCommandAvailability(paste = input.editable && !input.submitting))
@@ -380,6 +394,14 @@ internal class GridCell<Row>(
         if (input.address == None)
             focus.options = FocusOptions(Some(handle), input.tabStop)
         return UiInvalidation.Layout
+    }
+    private fun startInput(state: TextEditorState): TextInputStartOptions? {
+        val input = props.value
+        if (!input.enabled || !input.editable || input.submitting)
+            return None
+        val address = input.address ?: return None
+        val session = input.session ?: return None
+        return session.editing.startInput(address, state) { starter?.cancel() }
     }
     private fun activate() {
         when (props.value.activate) {
