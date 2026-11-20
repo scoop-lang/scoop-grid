@@ -1,0 +1,50 @@
+package scoop.grid.tests.query
+
+import scoop.test.*
+import scoop.tests.surface.sendSurfaceKey
+import scoop.ui.LayoutDirection
+import scoop.window.*
+import scoop.window.native.*
+
+internal fun queryClick(
+    window: Window,
+    column: Long,
+    direction: LayoutDirection,
+    command: Boolean = false,
+    shift: Boolean = false
+) {
+    val index =
+        if (direction == LayoutDirection.Rtl)
+            2L - column
+        else
+            column
+    @Unsafe
+    {
+        window.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                when (lease.handle) {
+                    case AppKit(_, val view) -> assertTrue(
+                        click(view, index.toDouble() * 120.0 + 60.0, 16.0, command, shift)
+                    )
+                }
+            }
+        }
+    }
+}
+
+internal fun queryKey(
+    window: Window,
+    code: Int,
+    command: Boolean = false,
+    shift: Boolean = false,
+    repeat: Boolean = false
+) {
+    assertTrue(
+        sendSurfaceKey(window, code, true, repeat = repeat, command = command, shift = shift)
+    )
+    assertTrue(sendSurfaceKey(window, code, false, command = command, shift = shift))
+}
+
+@Extern(name = "scoop_grid_test_header_click")
+private fun click(view: Ptr<Unit>, x: Double, y: Double, command: Boolean, shift: Boolean): Boolean

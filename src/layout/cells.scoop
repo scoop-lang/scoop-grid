@@ -44,7 +44,8 @@ internal class GridRowCells<Row>(
 internal class GridHeaderCells<Row>(
     private val columns: GridColumnsPlan<Row>,
     private val model: DataGridState<Row>,
-    private val session: GridSession<Row>
+    private val session: GridSession<Row>,
+    private val modifier: GridMultiSortModifier
 ): ItemSource {
     public override val count: Long get() = columns.columns.size
     public override fun keyAt(index: Long): ViewKey = ViewKey.Text(columns.columns[index].id.value)
@@ -59,26 +60,37 @@ internal class GridHeaderCells<Row>(
     public override fun build(index: Long): View {
         val column = columns.columns[index]
         var title = column.title
-        for (sort in model.query.sorting)
-            if (sort.column == column.id)
+        val sorting = model.query.sorting
+        for (priority in 0L ..< sorting.size) {
+            val sort = sorting[priority]
+            if (sort.column == column.id) {
                 title += if (sort.direction == GridSortDirection.Ascending)
                     " ↑"
                 else
                     " ↓"
+                if (sorting.size > 1L)
+                    title += f"${priority + 1L}"
+            }
+        }
         return element(
             GridCellProps<Row>(
                 None,
                 0L,
                 index,
                 column.id,
-                Some(column.title),
+                Some(title),
                 columns.appearance,
                 None,
                 column.sortable,
                 if (column.sortable)
-                    Some { session.editing.leave { model.toggleSort(column.id) } }
+                    Some {
+                        additive ->
+                        session.editing.leave { model.toggleSort(column.id, additive) };
+                        Unit
+                    }
                 else
-                    None
+                    None,
+                multiSortModifier = modifier
             ),
             { props, scope -> GridCell(props, scope) },
             [columns.appearance.label(title)]
@@ -95,11 +107,12 @@ internal class GridCellProps<Row>(
     val appearance: GridAppearance,
     val session: GridSession<Row>?,
     val tabStop: Boolean = true,
-    val activate: (() -> Unit)? = None,
+    val activate: ((Boolean) -> Unit)? = None,
     val content: GridContentHandle? = None,
     val editable: Boolean = false,
     val error: String? = None,
-    val submitting: Boolean = false
+    val submitting: Boolean = false,
+    val multiSortModifier: GridMultiSortModifier = GridMultiSortModifier.Shift
 )
 
 internal class GridCell<Row>(
@@ -120,6 +133,7 @@ internal class GridCell<Row>(
         scope.press(area, PressOptions(acceptsEnter = props.value.address == None)) { activate() }
     private var registered: GridCellAddress? = None
     private var doubleClick = false
+    private var additiveSort = false
     init {
         scope.routeChildren(area)
         scope.routeSemanticsChildren(Some(semantics))
@@ -131,13 +145,27 @@ internal class GridCell<Row>(
                 event -> when (event) {
                     case Pointer(
                         InputPointerEvent.Button(
-                            _,
+                            val pointer,
                             MouseButton.Left,
-                            ElementState.Pressed,
+                            val state,
                             val clicks
                         )
-                    ) -> doubleClick = clicks >= 2
-                    case Pointer(InputPointerEvent.Cancelled(_, _)) -> doubleClick = false
+                    ) -> {
+                        additiveSort =
+                            gridAdditiveSort(pointer.state.modifiers, props.value.multiSortModifier)
+                        if (state == ElementState.Pressed)
+                            doubleClick = clicks >= 2
+                    }
+                    case Contact(InputContactEvent.Began(val value)) -> additiveSort =
+                        gridAdditiveSort(value.pointer.modifiers, props.value.multiSortModifier)
+                    case Contact(InputContactEvent.Ended(val value)) -> additiveSort =
+                        gridAdditiveSort(value.pointer.modifiers, props.value.multiSortModifier)
+                    case Keyboard(val key) -> additiveSort =
+                        gridAdditiveSort(key.modifiers, props.value.multiSortModifier)
+                    case Pointer(InputPointerEvent.Cancelled(_, _)) -> {
+                        doubleClick = false
+                        additiveSort = false
+                    }
                     else -> {}
                 }
             }
@@ -157,14 +185,15 @@ internal class GridCell<Row>(
         }
         scope.resource {
             scope.input.observeActivity {
-                if (scope.input.activity.hasFocus) {
-                    when (props.value.address) {
-                        case Some(val address) -> props.value.session?.remember(address);
-                        case None -> {}
+                if (scope.isMounted) {
+                    if (scope.input.activity.hasFocus) {
+                        when (props.value.address) {
+                            case Some(val address) -> props.value.session?.remember(address);
+                            case None -> {}
+                        }
                     }
-                }
-                if (scope.isMounted)
                     scope.requestFrame()
+                }
             }
         }
     }
@@ -223,7 +252,7 @@ internal class GridCell<Row>(
     }
     private fun activate() {
         when (props.value.activate) {
-            case Some(val action) -> action()
+            case Some(val action) -> action(additiveSort)
             case None -> when (props.value.address) {
                 case Some(val address) -> if (doubleClick && props.value.editable)
                     props.value.session?.beginEdit(address)
@@ -234,7 +263,7 @@ internal class GridCell<Row>(
         }
     }
     private fun keyboard(context: RoutedEventContext, event: InputEvent) {
-        val address = props.value.address ?: return
+        val address = props.value.address ?: return headerKey(context, event)
         if (handle.hasFocus && gridPasteCommand(event)) {
             props.value.session?.pasteClipboard(address)
             context.consume()
@@ -291,6 +320,19 @@ internal class GridCell<Row>(
                 (props.value.session?.navigate(address, key) ?: false)
         )
             context.consume()
+    }
+    private fun headerKey(context: RoutedEventContext, event: InputEvent) {
+        val key =
+            when (event) {
+                case Keyboard(val value) -> value
+                else -> return
+            }
+        val action = props.value.activate ?: return
+        if (handle.hasFocus && gridHeaderSortKey(key, props.value.multiSortModifier)) {
+            if (!key.isRepeat)
+                action(true)
+            context.consume()
+        }
     }
     public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
         GridCellClip

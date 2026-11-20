@@ -1,0 +1,64 @@
+package scoop.grid.tests.query
+
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class QueryRow(val group: String, val amount: Long)
+
+internal fun queryRows(): TableRows<QueryRow> {
+    val groups = ["B", "A", "A", "B", "A"]
+    val amounts = [2L, 2L, 1L, 1L, 1L]
+    return TableRows(
+        Array<TableRecord<QueryRow>>(5L) {
+            index -> TableRecord(ViewKey.Number(index), QueryRow(groups[index], amounts[index]))
+        }
+    )
+}
+
+internal fun queryColumns(probe: QueryProbe): Array<GridColumn<QueryRow>> =
+    [
+        gridColumn<QueryRow, String>(
+            GridColumnId("group"),
+            "Group",
+            { row -> row.group },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(120.0))
+        ),
+        gridColumn<QueryRow, Long>(
+            GridColumnId("amount"),
+            "Amount",
+            { row -> row.amount },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(120.0)),
+            edit =
+                Some(
+                    gridEdit<QueryRow, Long>(
+                        {
+                            value ->
+                            val editor = gridLongEditor(value)
+                            probe.editor = Some(editor)
+                            editor
+                        },
+                        { change, completion -> probe.save(change, completion) }
+                    )
+                )
+        ),
+        gridColumn<QueryRow, String>(
+            GridColumnId("note"),
+            "Note",
+            { _ -> "Read only" },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(120.0)),
+            sortable = false
+        )
+    ]
+
+internal fun querySort(id: String, descending: Boolean = false): GridSort =
+    GridSort(
+        GridColumnId(id),
+        if (descending)
+            GridSortDirection.Descending
+        else
+            GridSortDirection.Ascending
+    )

@@ -1,0 +1,31 @@
+package scoop.grid
+
+import scoop.platform.system.OperatingSystem
+import scoop.platform.system.operatingSystem
+import scoop.window.*
+
+public enum GridMultiSortModifier {
+    Shift, Primary
+}
+
+internal fun gridAdditiveSort(modifiers: Modifiers, mode: GridMultiSortModifier): Boolean =
+    when (mode) {
+        case Shift -> modifiers.shift
+        case Primary -> if (operatingSystem == OperatingSystem.Darwin)
+            modifiers.superKey
+        else
+            modifiers.control
+    }
+
+internal fun gridHeaderSortKey(key: KeyEvent, mode: GridMultiSortModifier): Boolean {
+    if (key.state != ElementState.Pressed || key.synthetic)
+        return false
+    val modifiers =
+        if (mode == GridMultiSortModifier.Shift)
+            ShortcutModifiers(shift = true)
+        else
+            ShortcutModifiers(primary = true)
+    return ShortcutChord(ShortcutKey.Logical(LogicalKey.Named(NamedKey.Enter)), modifiers)
+    .matches(key) ||
+        ShortcutChord(ShortcutKey.Logical(LogicalKey.Named(NamedKey.Space)), modifiers).matches(key)
+}

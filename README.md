@@ -39,6 +39,8 @@ scoop test --release .
 
 原生无障碍支持按行列读取离屏值，以及明确的 Realize／Reveal／Focus。读取不创建 View；显露使用表头和冻结区扣除后的实际空间，RTL 沿逻辑 Start／End 解析。`pendingCell`、`isPending` 与 `cancelFocus()` 同样覆盖原生焦点请求。
 
+点击表头在升序、降序和无排序之间切换。默认按住 Shift 追加或调整多列排序，表头同时显示方向和优先级；可用 `multiSortModifier = GridMultiSortModifier.Primary` 改为平台主修饰键。真实表头焦点下的 Enter／Space 使用同一规则，并先处理当前编辑会话。
+
 浏览使用方向键、Home／End、Primary＋Home／End、PageUp／PageDown 和 Tab。双击或 Enter／F2 进入可编辑列的编辑器；Enter／F2 也可进入自定义单元格的真实控件。编辑中的 Enter／Tab、点击其他格和失焦会先尝试提交，校验失败保留草稿。Escape 先交给输入法，再取消草稿；内部控件先处理自己的键盘与文本输入。
 
 列通过 `edit = Some(gridEdit<Row, T>(...))` 明确声明编辑器、校验和有类型的应用回调。内置 `gridTextEditor`、`gridLongEditor`、`gridDoubleEditor` 复用原生文本编辑器；`gridBooleanEditor`、`gridDateEditor` 和 `gridChoiceEditor<T>` 分别复用 Checkbox、DatePicker 和 Select。`GridEditor<T>` 可接入自定义控件。应用用 `GridCommit<Row>.accept(nextSource)` 发布真实数据快照，或 `reject(message)` 保留草稿；异步 completion 只完成原会话一次，取消／卸载后的结果返回 false。`handle.editingCell`、`editError` 和 `isSubmitting` 可用于响应式状态栏。
@@ -58,9 +60,11 @@ scoop check --tests --release tests-cones/controls
 scoop test --release tests-cones/controls
 scoop check --tests --release tests-cones/accessibility
 scoop test --release tests-cones/accessibility
+scoop check --tests --release tests-cones/query
+scoop test --release tests-cones/query
 ```
 
-原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期。
+原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

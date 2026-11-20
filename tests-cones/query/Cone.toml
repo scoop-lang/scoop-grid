@@ -1,0 +1,38 @@
+schema = 1
+
+[cone]
+group = "scoop.grid.tests"
+name = "query"
+version = "0.1.0"
+kind = "library"
+
+[[test.sources]]
+path = "tests"
+when = { os = "darwin" }
+
+[test-dependencies]
+"scoop:scoop.grid" = { version = "0.1.0", path = "../.." }
+"scoop:scoop.core" = "0.1.0"
+"scoop:scoop.std" = "0.1.0"
+"scoop:scoop.test" = "0.1.0"
+"scoop:scoop.ui" = "0.1.0"
+"scoop:scoop.ui.component" = "0.1.0"
+"scoop:scoop.ui.style" = "0.1.0"
+"scoop:scoop.ui.style.shadcn" = "0.1.0"
+"scoop:scoop.graphics" = "0.1.0"
+"scoop:scoop.surface" = "0.1.0"
+"scoop:scoop.window" = "0.1.0"
+"scoop:scoop.platform" = "0.1.0"
+"scoop.tests:surface-native" = { version = "0.1.0", path = "../../../scoop/sysroot/src/scoop.surface/test-native" }
+"scoop.tests:ui-accessibility-native" = { version = "0.1.0", path = "../../../scoop/sysroot/src/scoop.ui/test-native" }
+
+[native]
+objc_flags = ["-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter"]
+
+[[native.sources]]
+path = "native/header.m"
+when = { os = "darwin" }
+
+[[native.libraries]]
+name = "AppKit"
+kind = "framework"

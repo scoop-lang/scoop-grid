@@ -56,6 +56,8 @@ Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一
 
 `GridCellAddress(row, column)` 使用来源 key 与 `GridColumnId`。`DataGridHandle.focusCell(address)` 只接受当前结果中的有效可见列及业务 key，返回请求是否接受；真实焦点必须等布局 Accepted 后落到该格的真实 FocusHandle。`focusedCell` 反映实际焦点（包括自定义内容后代），`pendingCell`／`isPending` 反映尚未完成的请求。`cancelFocus()` 只取消定位请求。目标删除、禁用、外部焦点或新请求沿原 UI 焦点路径取消旧请求，不能在迟到帧中复活。表头排序沿模型入口执行。
 
+表头点击按未排序、升序、降序、未排序循环。`multiSortModifier` 默认 `GridMultiSortModifier.Shift`，可配置为平台 `Primary`；按住配置的修饰键追加或调整该列排序，其余排序维度与既有优先级保留。普通点击只保留当前列。表头显示方向，多列排序时同时显示从 1 开始的优先级，语义名称与可见标题一致。表头取得真实焦点后，普通 Enter／Space 使用单列排序，配置的修饰键加 Enter／Space 使用多列排序；自动重复不连续切换方向。所有入口先经过当前编辑会话的提交规则，非法草稿、组合输入与等待保存不会执行新的排序。不可排序列不执行排序动作。
+
 原生表格按稳定的行 key 与列 ID 描述完整当前结果，读取离屏单元格值不创建 View、焦点目标或执行 I/O。明确的 Realize 动作只准备目标行和列，不滚动或抢焦点；Reveal 显露该格并保留已有焦点；Focus 使用同一个真实单元格焦点与 Accepted 布局路径。`pendingCell`、`isPending` 与 `cancelFocus()` 同样覆盖原生 Focus 请求。取消某格原生焦点只影响该格的真实子树。隐藏列、删除行、禁用或卸载使相应动作失效；已退役的原生代理不会因复用业务 key 而复活。
 
 ## 键盘浏览与单元格内控件
