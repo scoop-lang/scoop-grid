@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、按组展开、小计与总计。公开合同见 [SPEC.md](docs/SPEC.md)，树、透视、详情和外部结果继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、按层级展开、小计与总计。公开合同见 [SPEC.md](docs/SPEC.md)，透视、详情和外部结果继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -37,6 +37,12 @@ fun main() {
 `expandedRows = GridExpandedRows(true)` 可以初始展开全部组；默认折叠，真实展开按钮、键盘进入按钮及系统展开动作共用编辑门控。`query.groupTotals = GridTotals(GridTotalPlacement.After, "小计")` 在已展开组内显示小计。分页按根组计数，后代与小计留在同一页；页内全选和组选择作用于匹配的业务成员，折叠不改变选择范围。固定业务行仍只出现一次。展开、总计位置与固定行不重新计算聚合。
 
 `GridCsvOptions(data = GridExportData.Displayed)` 导出当前展开的展示结果，`includeGroups` 和 `includeTotals` 分别控制组标题及汇总；缺省 Records 导出业务记录。十万行示例提供“按区域分组”，列工具可继续调整分组排序及小计位置。完整路径、选择、恢复及导出约定见 [公开合同](docs/SPEC.md)。
+
+树数据使用 `DataGridState(..., treeData = Some(GridTreeData<Row>({ row -> row.parentKey }, Some(nameColumn))))`，稳定业务 key 来自原 TableSource，父 key 为 None 的记录是根。接入时检查重复 key、缺失父引用及实际环路；分组和树模式互斥。兄弟节点按业务列稳定排序，展开状态使用 `GridRowKey.Data(key)`。`setTreeData` 显式切换拓扑，筛选和排序复用已经验证的父关系。
+
+筛选保留匹配节点与必要路径祖先，`hierarchyAt` 的 contextOnly 及 `isContextRow` 标明上下文。祖先显示自身字段并可编辑，页内全选和聚合只计算匹配记录。树分页明确使用根节点数；后代与根同页，固定记录保留原层级且只显示一次。`treeAggregations(key)` 读取该节点子树内的匹配聚合；`query.withTreeTotals(GridTotals(GridTotalPlacement.After, "子树小计"))` 显示明确的小计，不改写父节点自身数值。
+
+树的展开按钮和系统展开动作复用编辑门控，Alt＋Right 展开、Alt＋Left 收起；可编辑层级格的 Enter／F2 保留编辑行为。筛选、折叠、数据替换、CSV 范围和视图恢复的约定见 [公开合同](docs/SPEC.md)。[树示例](examples/tree/src/main.scoop) 展示项目与任务、工时编辑、按完成状态筛选、根分页、路径上下文与固定任务。
 
 本地模型验证：
 
@@ -190,6 +196,8 @@ scoop check --tests --release tests-cones/aggregation
 scoop test --release tests-cones/aggregation
 scoop check --tests --release tests-cones/grouping
 scoop test --release tests-cones/grouping
+scoop check --tests --release tests-cones/tree
+scoop test --release tests-cones/tree
 ```
 
 原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合，`pinned` 覆盖顶部／底部固定、分页去重、筛选／删除、可变高度、原生身份与编辑保留，以及零正文和三段内容测宽。

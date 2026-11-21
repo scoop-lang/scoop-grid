@@ -106,9 +106,10 @@ public class GridGroupRow internal constructor(
 public struct GridRowHierarchy(
     val level: Long,
     val parent: GridRowKey?,
-    val expanded: Boolean? = None
+    val expanded: Boolean? = None,
+    val contextOnly: Boolean = false
 )
 
 public enum GridPageUnit {
-    Records, Roots
+    Records, Roots, TreeRoots
 }

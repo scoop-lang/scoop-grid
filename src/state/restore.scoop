@@ -25,9 +25,26 @@ internal fun <Row> gridRestoreView(
             gridRestorePins(saved.pinnedRows.top, previous.source, issues),
             gridRestorePins(saved.pinnedRows.bottom, previous.source, issues)
         )
-    val query = gridRestoreQuery(saved.query, previous.columns, issues)
-    val expanded = gridRestoreExpansion(saved.expandedRows, query.grouping, issues)
-    val next = gridCompute(previous.source, previous.columns, query, Some(previous), pins, expanded)
+    val query = gridRestoreQuery(saved.query, previous.columns, issues, previous.treeMode)
+    val expanded =
+        when (previous.tree) {
+            case Some(val tree) -> gridTreeExpansion(
+                saved.expandedRows,
+                tree.topology,
+                Some(issues)
+            )
+            case None -> gridRestoreExpansion(saved.expandedRows, query.grouping, issues)
+        }
+    val next =
+        gridCompute(
+            previous.source,
+            previous.columns,
+            query,
+            Some(previous),
+            pins,
+            expanded,
+            previous.treeData
+        )
     if (next.query.pagination != query.pagination)
         issues.add(GridRestoreIssue(GridStatePart.Pagination, "页码已按恢复后的结果调整"))
     val selected =

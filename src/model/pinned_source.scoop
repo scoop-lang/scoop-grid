@@ -27,7 +27,7 @@ internal fun <Row> gridPinResult(
         totals,
         total,
         GridPageUnit.Records,
-        None
+        GridDataRows(ordered)
     )
 }
 
@@ -42,10 +42,10 @@ internal fun <Row> gridComposeResult(
     totals: GridTotals,
     rootCount: Long,
     pageUnit: GridPageUnit,
-    groups: GridGrouped<Row>?
+    pinnable: GridRowSource<Row>
 ): GridResult<Row> {
-    val top = GridPickedRows(ordered, pins.top)
-    val bottom = GridPickedRows(ordered, pins.bottom)
+    val top = GridPickedLogicalRows(pinnable, pins.top)
+    val bottom = GridPickedLogicalRows(pinnable, pins.bottom)
     if (top.count == 0L && bottom.count == 0L)
         return GridResult(
             gridTotalRows(logical, aggregates, totals),
@@ -62,7 +62,7 @@ internal fun <Row> gridComposeResult(
     val omitted = ArrayList<Long>()
     for (fixed in [top, bottom])
         for (index in 0L ..< fixed.count)
-            when (logical.indexOfKey(GridRowKey.Data(fixed.keyAt(index)))) {
+            when (logical.indexOfKey(fixed.rowKeyAt(index))) {
                 case Some(val at) -> omitted.add(at)
                 case None -> {}
             }
@@ -72,12 +72,7 @@ internal fun <Row> gridComposeResult(
             logical
         else
             GridUnpinnedLogicalRows(logical, omitted.toArray())
-    val rows =
-        GridCombinedRows(
-            gridPinnedData(top, groups),
-            gridTotalRows(body, aggregates, totals),
-            gridPinnedData(bottom, groups)
-        )
+    val rows = GridCombinedRows(top, gridTotalRows(body, aggregates, totals), bottom)
     return GridResult(
         rows,
         page,
@@ -92,14 +87,30 @@ internal fun <Row> gridComposeResult(
     )
 }
 
-private fun <Row> gridPinnedData(
-    source: TableSource<Row>,
-    groups: GridGrouped<Row>?
-): GridRowSource<Row> =
-    when (groups) {
-        case Some(val value) -> GridGroupedDataRows(source, value)
-        case None -> GridDataRows(source)
+private class GridPickedLogicalRows<Row>(
+    private val source: GridRowSource<Row>,
+    keys: Array<ViewKey>
+): GridRowSource<Row> {
+    private val indices = ArrayList<Long>()
+    private val positions = HashMap<ViewKey, Long>()
+    init {
+        for (key in keys)
+            when (source.indexOfKey(GridRowKey.Data(key))) {
+                case Some(val at) -> {
+                    positions.put(source.keyAt(at), indices.size)
+                    indices.add(at)
+                }
+                case None -> {}
+            }
     }
+    public override val count: Long get() = indices.size
+    public override fun keyAt(index: Long): ViewKey = source.keyAt(indices[index])
+    public override fun rowAt(index: Long): GridRow<Row> = source.rowAt(indices[index])
+    public override fun infoAt(index: Long): GridRowInfo = source.infoAt(indices[index])
+    public override fun indexOfKey(key: ViewKey): Long? = positions[key]
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? =
+        source.hierarchyAt(indices[index])
+}
 
 private class GridUnpinnedLogicalRows<Row>(
     private val source: GridRowSource<Row>,

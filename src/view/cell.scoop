@@ -18,7 +18,8 @@ internal class GridDataCellProps<Row>(
     val selection: GridSelectionView<Row>?,
     val range: GridCellRangeBounds?,
     val labels: GridLabels,
-    val labelColumn: GridColumnId?
+    val labelColumn: GridColumnId?,
+    val hierarchy: GridRowHierarchy?
 )
 
 /** One stable cell element hosts either its display content or its actual editor. */
@@ -33,6 +34,11 @@ internal class GridDataCell<Row>(
         val appearance = input.appearance
         val address = GridCellAddress(input.key, input.column.id)
         val edit = input.session.editing.cell(address)
+        val browsing =
+            when (edit) {
+                case Some(_) -> false
+                case None -> true
+            }
         val error =
             when (val message = edit?.error ?: None) {
                 case Some(val text) -> Some(input.labels.error(text))
@@ -123,7 +129,9 @@ internal class GridDataCell<Row>(
                         ),
                     enabled = input.enabled,
                     columnSpan = input.columnSpan,
-                    selectedRow = input.selection?.selected?.contains(input.key) ?: false,
+                    selectedRow =
+                        !(input.hierarchy?.contextOnly ?: false) &&
+                            (input.selection?.selected?.contains(input.key) ?: false),
                     range = input.range,
                     focusHandle = Some(focus)
                 ),
@@ -134,14 +142,21 @@ internal class GridDataCell<Row>(
                         { props, scope -> GridContent(props, scope) },
                         [
                             when (input.row) {
-                                case Data(val row, val key) -> input.selection?.cell(
-                                    key,
-                                    row,
-                                    input.rowIndex,
-                                    input.columnIndex,
-                                    child
-                                ) ?:
-                                    child
+                                case Data(val row, val key) -> {
+                                    val selected =
+                                        input.selection?.cell(
+                                            key,
+                                            row,
+                                            input.rowIndex,
+                                            input.columnIndex,
+                                            child
+                                        ) ?:
+                                            child
+                                    if (input.labelColumn == Some(input.column.id) && browsing)
+                                        gridTreeCell(input, selected)
+                                    else
+                                        selected
+                                }
                                 case Group(val group) -> if (
                                     input.labelColumn == Some(input.column.id)
                                 )

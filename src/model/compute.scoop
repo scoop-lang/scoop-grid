@@ -15,8 +15,16 @@ internal class GridComputed<Row>(
     val pins: GridPinnedRows,
     val filtered: TableSource<Row>,
     val expanded: GridExpandedRows,
-    val groups: GridGrouped<Row>? = None
-)
+    val groups: GridGrouped<Row>? = None,
+    val tree: GridTreeComputed<Row>? = None
+) {
+    val treeData: GridTreeData<Row>? get() = tree?.topology?.definition
+    val treeMode: Boolean get() =
+        when (tree) {
+            case Some(_) -> true
+            case None -> false
+        }
+}
 
 internal fun <Row> gridCompute(
     source: TableSource<Row>,
@@ -24,9 +32,34 @@ internal fun <Row> gridCompute(
     query: GridQuery,
     previous: GridComputed<Row>?,
     pins: GridPinnedRows,
-    expanded: GridExpandedRows
+    expanded: GridExpandedRows,
+    treeData: GridTreeData<Row>? = None
 ): GridComputed<Row> {
     gridRequire(source.count >= 0L, "negative grid source count")
+    val topology =
+        when (treeData) {
+            case Some(val definition) -> {
+                gridRequire(
+                    query.grouping.size == 0L,
+                    "tree data and row grouping are mutually exclusive"
+                )
+                Some(
+                    when (val old = previous?.tree ?: None) {
+                        case Some(val value) -> if (
+                            value.topology.source ===
+                                source &&
+                                value.topology.definition ===
+                                definition
+                        )
+                            value.topology
+                        else
+                            GridTreeTopology(source, definition)
+                        case None -> GridTreeTopology(source, definition)
+                    }
+                )
+            }
+            case None -> None
+        }
     var filterCache: TableSource<Row>? = None
     var orderCache: TableSource<Row>? = None
     var aggregateCache: GridAggregations? = None
@@ -39,10 +72,16 @@ internal fun <Row> gridCompute(
                 gridFilterCriteriaEqual(old.query, query)
         ) {
             filterCache = Some(old.filtered)
-            if (old.query.grouping.size == 0L && gridArrayEqual(old.query.sorting, query.sorting))
+            if (
+                !old.treeMode &&
+                    old.query.grouping.size ==
+                    0L &&
+                    gridArrayEqual(old.query.sorting, query.sorting)
+            )
                 orderCache = Some(old.result.ordered)
             if (
-                old.query.grouping.size ==
+                !old.treeMode &&
+                    old.query.grouping.size ==
                     0L &&
                     gridArrayEqual(old.query.aggregations, query.aggregations)
             )
@@ -51,6 +90,26 @@ internal fun <Row> gridCompute(
         case None -> {}
     }
     val filtered = filterCache ?: gridLocalFilter(source, columns, query)
+    when (topology) {
+        case Some(val value) -> {
+            gridCheckGroupSorting(query)
+            val tree = gridComputeTree(value, filtered, columns, query, previous?.tree ?: None)
+            val expansion = gridTreeExpansion(expanded, value)
+            val(result, resolved) = gridPresentTree(tree, query, expansion, pins, previous)
+            return GridComputed(
+                source,
+                columns,
+                resolved,
+                result,
+                pins,
+                filtered,
+                expansion,
+                None,
+                Some(tree)
+            )
+        }
+        case None -> {}
+    }
     val expansion = expanded.forGrouping(query.grouping)
     if (query.grouping.size > 0L) {
         val groups = gridComputeGroups(filtered, columns, query, previous?.groups ?: None)
@@ -74,7 +133,8 @@ internal fun <Row> gridCompute(
     val pageCache =
         when (previous) {
             case Some(val old) -> if (
-                old.query.grouping.size ==
+                !old.treeMode &&
+                    old.query.grouping.size ==
                     0L &&
                     old.result.ordered ===
                     ordered &&

@@ -124,7 +124,7 @@ internal class GridGroupedRows<Row>(
                 case Group(val path) -> Some(
                     GridRowHierarchy(path.parts.size, Some(GridRowKey.Group(path)))
                 )
-                case AllFiltered -> None
+                else -> None
             }
             case Records(val group, _, _) -> Some(
                 gridGroupMemberHierarchy(groups.descriptions[group])

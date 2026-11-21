@@ -1,0 +1,99 @@
+package scoop.grid
+
+import scoop.math.BigDecimal
+import scoop.test.*
+import scoop.text.contains
+import scoop.ui.ViewKey
+
+@Test
+private class GridTreeTextTest {
+    @Test
+    fun `tree CSV separates matching records displayed ancestors subtotals and saved selection`() {
+        val model = treeModel()
+        model.setSelectedRows([ViewKey.Number(20L)])
+        model.setQuery(
+            model.query.withFilter(treeOnlyHit()).withTreeTotals(
+                GridTotals(GridTotalPlacement.After, "Sub")
+            )
+        )
+        val records =
+            GridCsvOptions(
+                includeHeaders = false,
+                columns = Some([GridColumnId("name"), GridColumnId("amount")])
+            )
+        assertEquals("hit,7\r\n", model.exportCsv(records))
+        val display =
+            GridCsvOptions(
+                includeHeaders = false,
+                columns = records.columns,
+                data = GridExportData.Displayed
+            )
+        assertEquals(
+            "same,100\r\nbranch,5\r\nhit,7\r\nSub,7\r\nSub,7\r\n",
+            model.exportCsv(display)
+        )
+        assertEquals(
+            "same,100\r\nbranch,5\r\nhit,7\r\n",
+            model.exportCsv(
+                GridCsvOptions(
+                    includeHeaders = false,
+                    columns = records.columns,
+                    data = GridExportData.Displayed,
+                    includeTotals = false
+                )
+            )
+        )
+        assertEquals(
+            "same,200\r\n",
+            model.exportCsv(
+                GridCsvOptions(
+                    scope = GridExportScope.SelectedRows,
+                    includeHeaders = false,
+                    columns = records.columns
+                )
+            )
+        )
+        model.setExpanded(treeKey(10L), false)
+        assertEquals("same,100\r\n", model.exportCsv(display))
+        assertEquals("hit,7\r\n", model.exportCsv(records))
+        model.setQuery(
+            model.query.withFilter(GridFilter.All).withPagination(GridPagination.Page(1L, 1L))
+        )
+        model.setPage(1L)
+        val all =
+            model.exportCsv(
+                GridCsvOptions(
+                    scope = GridExportScope.AllFiltered,
+                    includeHeaders = false,
+                    columns = records.columns,
+                    data = GridExportData.Displayed
+                )
+            )
+        assertEquals("same,100\r\nsame,200\r\nleaf,\r\nSub,200\r\nother,2\r\n", all)
+    }
+
+    @Test
+    fun `tree copy find and rectangle statistics use node values and explicit total addresses`() {
+        val model = treeModel()
+        model.setQuery(
+            model.query.withFilter(treeOnlyHit()).withTreeTotals(
+                GridTotals(GridTotalPlacement.Before, "Sub")
+            )
+        )
+        val amount = GridColumnId("amount")
+        val first = GridCellAddress(ViewKey.Number(10L), amount)
+        val total =
+            GridCellAddress(GridRowKey.Total(GridTotalKey.Tree(ViewKey.Number(10L))), amount)
+        assertEquals(Some("100"), model.copyText(Some(first)))
+        assertEquals(Some("7"), model.copyText(Some(total)))
+        assertEquals(Some(first), model.findCell("100")?.address)
+        assertTrue(model.setCellRange(Some(GridCellRange(first, total))))
+        assertEquals(Some("100\n7"), model.copyText())
+        assertEquals(BigDecimal(107L), model.rangeStatistics()!!.sum)
+        val saved = model.saveViewState(focusedCell = Some(total))
+        model.setQuery(model.query.withTreeTotals(GridTotals()))
+        val restored = model.restoreViewState(saved)
+        assertEquals(0L, restored.issues.size)
+        assertEquals(Some(total), restored.state.focusedCell)
+    }
+}

@@ -50,7 +50,7 @@
 
 `result.aggregates.total(column)` 返回该项显示结果（Value／Missing／Failed），未配置该列时返回 None。`numericTotal(column)` 只返回已成功且有数值转换的精确 BigDecimal。结果内部保留真实类型与比较操作，显示字符串不用于排序。聚合始终消费整个筛选结果；切页、列宽、显隐、固定行和业务选择均复用既有聚合。改变排序只改变行序，保留同一筛选集的聚合结果；数据、筛选、快速筛选、度量或列定义变化时重新计算。
 
-选择聚合沿查询动作通知并重置页码，列替换清理已移除或不再允许的操作；视图保存和恢复包含聚合选择，恢复报告具体失效项。列面板只为允许聚合的列显示选择器，使用现有编辑提交门控；非法草稿或等待保存时不切换聚合。`gridAggregationSummary` 显示筛选记录数与各列总计，使用现有主题、字体和显式 Labels，不读取记录或在绘制中启动计算。分组行及小计复用相同的类型化结果；树数据继续按设计实施。
+选择聚合沿查询动作通知并重置页码，列替换清理已移除或不再允许的操作；视图保存和恢复包含聚合选择，恢复报告具体失效项。列面板只为允许聚合的列显示选择器，使用现有编辑提交门控；非法草稿或等待保存时不切换聚合。`gridAggregationSummary` 显示筛选记录数与各列总计，使用现有主题、字体和显式 Labels，不读取记录或在绘制中启动计算。分组行及两种层级的小计复用相同的类型化结果。
 
 ## 本地行分组
 
@@ -68,7 +68,7 @@
 
 `GridRowSource.hierarchyAt(index)` 返回可选 `GridRowHierarchy(level, parent, expanded)`，只读取元数据。平面行没有层级；组声明深度及展开状态，业务成员和小计声明其父组与深度。来源组合、固定及切片保留这份描述，系统语义不通过构造 View 推测层级。
 
-组行只读，使用现有单元格布局和连续矩形操作。组标签优先放在对应分组列，其次是首个没有度量的可见列；仅有度量列时在首列同时显示组标签和度量。Enter／F2 从组标签格进入真实展开按钮，按钮自身的 Enter／Space、点击与原生 expanded 动作进入同一编辑门控，普通方向键保留二维导航。收起含当前编辑或焦点的后代前先完成编辑门控，再将焦点恢复到有效父组。组行不作为独立业务选择对象；其 Checkbox 和明确的组选择操作按整个已知匹配成员集计算三态，折叠不改变成员，可选性规则仍作用于实际业务记录。
+组行只读，使用现有单元格布局和连续矩形操作。组标签优先放在对应分组列，其次是首个没有度量的可见列；仅有度量列时在首列同时显示组标签和度量。Enter／F2 从组标签格进入真实展开按钮，按钮自身的 Enter／Space、点击与原生 expanded 动作进入同一编辑门控，普通方向键保留二维导航，Alt＋Right／Left 也可明确展开／收起当前层级行。收起含当前编辑或焦点的后代前先完成编辑门控，再将焦点恢复到有效父组。组行不作为独立业务选择对象；其 Checkbox 和明确的组选择操作按整个已知匹配成员集计算三态，折叠不改变成员，可选性规则仍作用于实际业务记录。
 
 `groupSelectableRows(path)` 和 `groupRowSelection(path)` 只在 Multiple 模式统计本次筛选的合格成员；`selectGroupRows(path, value)` 修改这些业务 key，保留其他组与暂不匹配筛选的已有选择。不存在的组返回 false；Single／Disabled 模式不提供组选择。挂载的 `handle.setExpanded(key, value)` 与 `handle.selectGroupRows(path, value)` 返回 `GridRowActionResult`，旧语义快照或已失效目标不能操作新结果。
 
@@ -76,9 +76,27 @@
 
 复制、查找、统计与 CSV 使用同一逻辑值描述；业务回调只接收真实 Row。Records 导出业务记录；Displayed 导出按当前展开状态排列的组、业务行与小计，可独立排除组行及总计。AllFiltered 取消根分页但保留当前展开配置；SelectedRows 始终导出业务选择。
 
+## 本地树数据
+
+`DataGridState(..., treeData = Some(GridTreeData(parentKey, column)))` 使用现有完整 `TableSource<Row>` 和 `(Row) -> ViewKey?` 父引用；None 表示根，column 是可选的层级显示列，默认使用首个可见列。父引用只依赖当前不可变记录。接入来源时一次检查显式且唯一的业务 key、缺失父引用和实际父环；数据或父引用定义不变时，筛选、排序、分页、展开、列状态和选择复用已验证拓扑。深度遍历与路径保留使用迭代处理，不依赖调用栈深度。
+
+树数据与行分组互斥。`setTreeData(value)` 显式启用、替换或关闭树定义；启用时当前 grouping 必须为空，树模式中的 setGrouping 拒绝非空维度。切换拓扑回到第一页并清除旧矩形，准备失败保留原状态。`replaceData` 更新父引用和记录，删除已失效的展开 key；更改显示列或隐藏它时，层级控件回退到首个可见列。树定义包含应用回调，不序列化进视图快照；恢复视图时使用当前定义，并报告不相容的分组或展开项。
+
+筛选逐条判断原始记录，只保留匹配节点及连接它们所必需的祖先。匹配父节点不会自动带入不匹配的后代。`GridRowHierarchy.contextOnly` 标记仅因路径保留的祖先；`isContextRow(key)` 可直接查询。它们继续显示自己的真实业务字段，允许普通单格编辑，但不可作为本次筛选的业务选择对象。当前页全选、三态与聚合只计算实际匹配节点；筛选前保存的全局选择仍保留，SelectedRows 导出继续按保存的业务 key 工作。
+
+`GridQuery.sorting` 在每个兄弟集合内稳定排序，根也使用相同比较；相同值保持来源顺序，缺值沿列规则处理。`expandedRows` 使用 `GridRowKey.Data(key)` 保存展开选择，默认折叠；筛选暂时隐藏节点不会清除其展开状态。业务节点的层级、父 key、当前可展开状态及 contextOnly 可通过 `hierarchyAt` 读取，不构造 Row 或 View。叶节点没有 expanded 语义，明确展开叶或已删除节点返回 false。
+
+树结果的 `pageUnit` 为 TreeRoots，`rootCount` 为保留的根数，pageSize 表示根节点数；分页界面明确显示“根／页”。所选根的后代与小计留在同一页。`pageRows` 包含当前根页中所有实际匹配记录，`ordered` 包含全部匹配记录，二者不受折叠影响且不包含仅作路径的祖先；`totalRows` 统计匹配记录。呈现结果包含必要上下文。固定业务记录从正文移出后仍保留原层级，只出现一次；固定一个折叠分支中的记录也保留其原父 key，固定与折叠不改根页及聚合成员。
+
+树节点自身字段不被后代聚合覆盖。`treeAggregations(key)` 返回该节点子树中实际匹配记录的类型化聚合，包含节点自身（仅当它匹配）；未知或本次筛选未保留的节点返回 None。全筛选总计仍只计算每条匹配记录一次。`GridQuery.treeTotals` 明确启用已展开非叶节点的小计，默认 Hidden、标签为“子树小计”，Before 放在父记录之后、子项之前，After 放在该分支后。`GridTotalKey.Tree(key)` 与业务、分组及全筛选总计身份分域。小计复用已有类型化结果，排序、展开、分页及固定不重读聚合输入。
+
+树的展开按钮、按钮 Enter／Space 及系统 expanded 动作共用分组的编辑门控。浏览格的 Alt＋Right 展开、Alt＋Left 收起；只读层级格的 Enter／F2 进入真实控件，可编辑格继续进入编辑器。展开控件位于真实业务内容前，深度缩进和路径上下文提示沿同一单元格显示；普通方向键仍用于二维导航。收起使当前后代格消失时，完成编辑后将焦点恢复到父节点同列。层级列可照常编辑，进入编辑后使用原类型化编辑器。`GridLabels` 的 expandNode／collapseNode／contextRow 与 `GridPagerLabels` 的 treeRootSize／treeRootSizeName／treeRoots／treeRootStatus 可配置。
+
+CSV 的 Records 范围仅包含匹配业务记录，Displayed 保留实际展开、必要路径祖先和已启用小计；includeTotals 控制两种层级的小计及全筛选总计，includeGroups 只控制分组合成的组行。AllFiltered 取消根分页但保留展开状态。复制、查找、数值统计和单格提交继续使用节点自身字段，路径提示不改写业务文本。
+
 ## 本地状态与数据
 
-`GridRowKey` 区分 `Data(ViewKey)`、`Group(GridGroupPath)` 与 `Total(GridTotalKey)`；全筛选集总计使用 `GridTotalKey.AllFiltered`，组小计使用 `GridTotalKey.Group(path)`。`GridCellAddress.row` 和 `GridReadingPosition.row` 保存该类型化身份，接收业务 `ViewKey` 的构造器等价于显式构造 Data。业务选择、固定行和应用提交仍使用原业务 key。底层 ViewKey 编码将文本业务 key 与结果行身份分域，不能将编码后的 ViewKey 再当业务 key 使用。
+`GridRowKey` 区分 `Data(ViewKey)`、`Group(GridGroupPath)` 与 `Total(GridTotalKey)`；全筛选集总计使用 `GridTotalKey.AllFiltered`，组小计使用 `GridTotalKey.Group(path)`，子树小计使用 `GridTotalKey.Tree(key)`。`GridCellAddress.row` 和 `GridReadingPosition.row` 保存该类型化身份，接收业务 `ViewKey` 的构造器等价于显式构造 Data。业务选择、固定行和应用提交仍使用原业务 key。底层 ViewKey 编码将文本业务 key 与结果行身份分域，不能将编码后的 ViewKey 再当业务 key 使用。
 
 `GridResult.rows` 为 `GridRowSource<Row>`，其 `rowAt` 返回完整的 `GridRow.Data(row, key)`、`GridRow.Group(group)` 或 `GridRow.Total(total)`。`infoAt` 只返回同种身份及展示元数据，不读取 Row；`rowKeyAt` 和 `indexOfKey(GridRowKey)` 用于逻辑地址定位。普通 `keyAt`／`indexOfKey(ViewKey)` 是 UI 虚拟化使用的编码身份。无论结果多大，平面来源包装、分页、固定行和追加总计都不为全部记录分配逐行描述。
 

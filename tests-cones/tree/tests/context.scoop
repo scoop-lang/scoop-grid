@@ -1,0 +1,97 @@
+package scoop.grid.tests.tree
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+
+internal fun TreeProbe.inspectContext() {
+    when (phase) {
+        case 28 -> {
+            assertEquals(250L, model.result.rootCount)
+            assertEquals(250L, model.result.pageCount)
+            assertEquals(4L, model.result.pageRows.count)
+            assertEquals(5L, table!!.rowCount)
+            assertTrue(named("grid-page-size").text(0, Some("每页根节点数")))
+        }
+        case 29 -> {
+            assertEquals(6L, table!!.rowCount)
+            assertEquals(1L, model.result.bottomCount)
+            assertEquals(4L, model.result.pageRows.count)
+            assertEquals(1L, keep(keep(table!!.cell(5L, 0L)!!).parent()!!).hierarchyLevel)
+        }
+        case 30 -> {
+            assertEquals(8L, table!!.rowCount)
+            val subtotal = keep(keep(table!!.cell(3L, 0L)!!).parent()!!)
+            assertTrue(subtotal.text(0, Some("Subtree")))
+            assertEquals(2L, subtotal.hierarchyLevel)
+            assertFalse(subtotal.flag(18))
+            assertFalse(subtotal.flag(20))
+            assertTrue(keep(table!!.cell(3L, 1L)!!).text(1, Some("25")))
+            assertTrue(keep(table!!.cell(5L, 1L)!!).text(1, Some("30")))
+        }
+        case 31 -> {
+            assertEquals(1L, model.result.totalRows)
+            assertEquals(1L, model.result.pageRows.count)
+            assertEquals(6L, table!!.rowCount)
+            assertEquals(0L, model.result.bottomCount)
+            assertTrue(nodeRow!!.text(0, Some("路径上下文")))
+            assertFalse(nodeRow!!.flag(20))
+            assertFalse(nodeRow!!.flag(19))
+            assertTrue(keep(table!!.cell(0L, 1L)!!).text(1, Some("1")))
+            assertTrue(keep(table!!.cell(1L, 1L)!!).text(1, Some("22")))
+            assertTrue(keep(table!!.cell(3L, 1L)!!).text(1, Some("3")))
+            assertEquals(1L, table!!.selectedCount)
+            assertFalse(named("grid-row-selection-0").flag(1))
+            assertTrue(named("grid-row-selection-2").flag(1))
+        }
+        case 33 -> {
+            assertEquals(1L, model.selectedRowKeys.size)
+            assertFalse(model.isRowSelected(ViewKey.Number(0L)))
+            assertFalse(nodeRow!!.flag(21))
+        }
+        case 35 -> {
+            assertFalse(model.isExpanded(node))
+            assertEquals(3L, table!!.rowCount)
+            assertTrue(nodeRow!!.flag(20))
+            assertEquals(4L, model.result.pageRows.count)
+            assertEquals(0L, table!!.selectedCount)
+        }
+        case 36 -> {
+            assertTrue(model.isExpanded(node))
+            assertTrue(model.isExpanded(GridRowKey.Data(ViewKey.Number(1L))))
+            assertEquals(8L, table!!.rowCount)
+            assertEquals(1L, table!!.selectedCount)
+        }
+        case 37 -> assertFalse(nodeRow!!.flag(18))
+        case 39 -> {
+            assertTrue(model.isExpanded(node))
+            assertTrue(nodeRow!!.flag(18))
+        }
+        case 40 -> {
+            assertTrue(keep(table!!.cell(0L, 0L)!!).text(1, Some("1")))
+            button = Some(named("grid-tree-expand-n0"))
+            assertTrue(button!!.flag(1))
+        }
+        case 42 -> {
+            assertFalse(model.isExpanded(node))
+            assertEquals(3L, table!!.rowCount)
+            assertTrue(keep(table!!.cell(0L, 0L)!!).text(1, Some("Node 0")))
+        }
+        case 43 -> {
+            assertFalse(nodeRow!!.flag(0))
+            assertFalse(nodeCell!!.flag(0))
+            assertFalse(model.expandedRows.contains(node))
+            assertEquals(0L, model.selectedRowKeys.size)
+            assertEquals(249L, model.result.rootCount)
+            assertEquals(
+                Some(GridAggregateDisplay.Value("500490")),
+                model.result.aggregates.total(GridColumnId("amount"))
+            )
+        }
+        case 44 -> {
+            assertFalse(handle.isAttached)
+            assertFalse(table!!.flag(0))
+        }
+        else -> {}
+    }
+}

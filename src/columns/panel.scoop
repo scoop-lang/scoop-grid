@@ -328,19 +328,22 @@ public class GridColumnsPanel<Row> public constructor(
                 }
             )
             add(gridColumnsLabel(labels.title(title), appearance))
-            when (definition.grouping) {
-                case Some(_) -> add(
-                    gridColumnGroupingControl(
-                        input.state,
-                        definition,
-                        active,
-                        labels.grouping,
-                        input.fonts,
-                        input.theme,
-                        { query -> this @GridColumnsPanel.groupQuery(current.id, query) }
+            when (input.state.treeData) {
+                case Some(_) -> {}
+                case None -> when (definition.grouping) {
+                    case Some(_) -> add(
+                        gridColumnGroupingControl(
+                            input.state,
+                            definition,
+                            active,
+                            labels.grouping,
+                            input.fonts,
+                            input.theme,
+                            { query -> this @GridColumnsPanel.groupQuery(current.id, query) }
+                        )
                     )
-                )
-                case None -> {}
+                    case None -> {}
+                }
             }
             if (definition.aggregations.size > 0L)
                 add(

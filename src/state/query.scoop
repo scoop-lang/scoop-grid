@@ -5,7 +5,8 @@ import scoop.collections.HashSet
 internal fun <Row> gridRestoreQuery(
     saved: GridQuery,
     columns: GridColumns<Row>,
-    issues: ArrayList<GridRestoreIssue>
+    issues: ArrayList<GridRestoreIssue>,
+    treeMode: Boolean = false
 ): GridQuery {
     val sorting = ArrayList<GridSort>()
     val seen = HashSet<GridColumnId>()
@@ -36,7 +37,11 @@ internal fun <Row> gridRestoreQuery(
         else
             aggregations.add(entry)
     }
-    val grouping = gridSurvivingGrouping(saved.grouping, columns)
+    val grouping =
+        if (treeMode)
+            []
+        else
+            gridSurvivingGrouping(saved.grouping, columns)
     val groupIds = HashSet<GridColumnId>()
     for (id in grouping)
         groupIds.add(id)
@@ -69,7 +74,8 @@ internal fun <Row> gridRestoreQuery(
         saved.totals,
         grouping,
         groupSorting,
-        saved.groupTotals
+        saved.groupTotals,
+        saved.treeTotals
     )
 }
 

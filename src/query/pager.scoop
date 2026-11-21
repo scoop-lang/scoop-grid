@@ -82,11 +82,15 @@ public class GridPager<Row> public constructor(
         val result = model.result
         val available = input.enabled && !(input.handle?.isSubmitting ?: false)
         val rootPages = result.pageUnit == GridPageUnit.Roots
+        val treePages = result.pageUnit == GridPageUnit.TreeRoots
         val sizeLabel =
-            if (rootPages)
-                labels.rootSize
+            if (treePages)
+                labels.treeRootSize
             else
-                labels.size
+                if (rootPages)
+                    labels.rootSize
+                else
+                    labels.size
         val choices = ArrayList<Choice<GridPagination>>()
         choices.add(Choice(ViewKey.Text("all"), GridPagination.Disabled, labels.all))
         var listed = false
@@ -105,15 +109,31 @@ public class GridPager<Row> public constructor(
             }
         val status =
             if (query.pagination == GridPagination.Disabled || result.pageCount == 0L)
-                if (rootPages)
-                    labels.roots(result.rootCount, result.totalRows)
+                if (treePages)
+                    labels.treeRoots(result.rootCount, result.totalRows)
                 else
-                    labels.rows(result.totalRows)
+                    if (rootPages)
+                        labels.roots(result.rootCount, result.totalRows)
+                    else
+                        labels.rows(result.totalRows)
             else
-                if (rootPages)
-                    labels.rootStatus(result.rootCount, result.totalRows, page(), result.pageCount)
+                if (treePages)
+                    labels.treeRootStatus(
+                        result.rootCount,
+                        result.totalRows,
+                        page(),
+                        result.pageCount
+                    )
                 else
-                    labels.status(result.totalRows, page(), result.pageCount)
+                    if (rootPages)
+                        labels.rootStatus(
+                            result.rootCount,
+                            result.totalRows,
+                            page(),
+                            result.pageCount
+                        )
+                    else
+                        labels.status(result.totalRows, page(), result.pageCount)
         return column {
             add(
                 queryRow {
@@ -140,10 +160,13 @@ public class GridPager<Row> public constructor(
                                 ComponentSemantics(
                                     name =
                                         Some(
-                                            if (rootPages)
-                                                labels.rootSizeName
+                                            if (treePages)
+                                                labels.treeRootSizeName
                                             else
-                                                labels.sizeName
+                                                if (rootPages)
+                                                    labels.rootSizeName
+                                                else
+                                                    labels.sizeName
                                         ),
                                     automationId = Some("grid-page-size")
                                 )

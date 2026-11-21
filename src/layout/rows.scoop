@@ -43,7 +43,8 @@ internal class GridRows<Row>(
                 spans,
                 selection,
                 range,
-                labels
+                labels,
+                source.hierarchyAt(index)
             )
         return lazyElement(
             cells,
@@ -66,8 +67,11 @@ internal class GridRows<Row>(
         val selected = ArrayList<SemanticItemKey>()
         when (selection) {
             case Some(val value) -> for (key in value.selected.keys)
-                if (source.indexOfKey(GridRowKey.Data(key)) != None)
-                    selected.add(gridSelectionItemKey(GridRowKey.Data(key).viewKey))
+                when (val at = source.indexOfKey(GridRowKey.Data(key))) {
+                    case Some(val index) -> if (!(source.hierarchyAt(index)?.contextOnly ?: false))
+                        selected.add(gridSelectionItemKey(GridRowKey.Data(key).viewKey))
+                    case None -> {}
+                }
             case None -> {}
         }
         return ItemSemantics(
@@ -78,15 +82,22 @@ internal class GridRows<Row>(
                 val hierarchy = source.hierarchyAt(index)
                 Some(
                     SemanticItemProperties(
-                        name = info.label,
+                        name =
+                            if (hierarchy?.contextOnly ?: false)
+                                Some(labels.contextRow)
+                            else
+                                info.label,
                         enabled = enabled,
                         focusable = true,
                         hierarchyLevel = hierarchy?.level,
                         expanded = hierarchy?.expanded ?: None,
-                        selectable = info.dataKey != None,
+                        selectable = info.dataKey != None && !(hierarchy?.contextOnly ?: false),
                         selected =
                             when (info.dataKey) {
-                                case Some(val key) -> selection?.selected?.contains(key)
+                                case Some(val key) -> if (hierarchy?.contextOnly ?: false)
+                                    None
+                                else
+                                    selection?.selected?.contains(key)
                                 case None -> None
                             }
                     )

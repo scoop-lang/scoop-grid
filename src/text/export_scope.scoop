@@ -88,46 +88,62 @@ private fun <Row> gridExportRows(
         else
             None
     val currentPage = options.scope == GridExportScope.CurrentPage
+    val tree =
+        if (displayed)
+            snapshot.tree
+        else
+            None
+    val query =
+        snapshot.query.withPagination(
+            if (currentPage)
+                snapshot.query.pagination
+            else
+                GridPagination.Disabled
+        ).withTotals(totals).withGroupTotals(
+            if (options.includeTotals)
+                snapshot.query.groupTotals
+            else
+                GridTotals()
+        ).withTreeTotals(
+            if (options.includeTotals)
+                snapshot.query.treeTotals
+            else
+                GridTotals()
+        )
     val result =
-        when (groups) {
+        when (tree) {
             case Some(val value) -> {
-                val query =
-                    snapshot.query.withPagination(
-                        if (currentPage)
-                            snapshot.query.pagination
-                        else
-                            GridPagination.Disabled
-                    ).withTotals(totals).withGroupTotals(
-                        if (options.includeTotals)
-                            snapshot.query.groupTotals
-                        else
-                            GridTotals()
-                    )
-                val(result, _) =
-                    gridPresentGroups(
-                        value,
-                        query,
-                        snapshot.expanded,
-                        snapshot.pins,
-                        options.includeGroups
-                    )
+                val(result, _) = gridPresentTree(value, query, snapshot.expanded, snapshot.pins)
                 result
             }
-            case None -> gridPinResult(
-                if (currentPage)
-                    snapshot.result.pageRows
-                else
+            case None -> when (groups) {
+                case Some(val value) -> {
+                    val(result, _) =
+                        gridPresentGroups(
+                            value,
+                            query,
+                            snapshot.expanded,
+                            snapshot.pins,
+                            options.includeGroups
+                        )
+                    result
+                }
+                case None -> gridPinResult(
+                    if (currentPage)
+                        snapshot.result.pageRows
+                    else
+                        snapshot.result.ordered,
                     snapshot.result.ordered,
-                snapshot.result.ordered,
-                snapshot.result.totalRows,
-                if (currentPage)
-                    snapshot.result.pageCount
-                else
-                    1L,
-                snapshot.pins,
-                snapshot.result.aggregates,
-                totals
-            )
+                    snapshot.result.totalRows,
+                    if (currentPage)
+                        snapshot.result.pageCount
+                    else
+                        1L,
+                    snapshot.pins,
+                    snapshot.result.aggregates,
+                    totals
+                )
+            }
         }
     return if (options.includePinnedRows)
         result.rows

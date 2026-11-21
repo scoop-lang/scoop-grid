@@ -1,0 +1,357 @@
+package scoop.grid.examples.tree
+
+import scoop.graphics.*
+import scoop.collections.contains
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as treeColumn
+import scoop.window.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+
+private struct Task(val parent: Long?, val title: String, val hours: Long, val done: Boolean)
+
+private class TreeExample(scope: ComponentScope): Component(scope) {
+    private var rows =
+        TableRows(
+            Array<TableRecord<Task>>(80L) {
+                index ->
+                val part = index % 4L
+                TableRecord(
+                    ViewKey.Number(index),
+                    Task(
+                        if (part == 0L)
+                            None
+                        else
+                            Some(
+                                if (part == 2L)
+                                    index - 1L
+                                else
+                                    index - part
+                            ),
+                        when (part) {
+                            case 0L -> f"项目 ${index / 4L + 1L}"
+                            case 1L -> "需求与规划"
+                            case 2L -> "交付任务"
+                            else -> "复核与验收"
+                        },
+                        part + 1L,
+                        part >= 2L && index % 8L < 4L
+                    )
+                )
+            }
+        )
+    private val handle = DataGridHandle()
+    private val message = state("父节点显示自己的工时；子树小计只统计本次筛选匹配的节点")
+    private val model =
+        DataGridState(
+            rows,
+            columns(),
+            GridQuery(
+                aggregations =
+                    [GridAggregationSelection(GridColumnId("hours"), GridAggregateId("sum"))],
+                totals = GridTotals(GridTotalPlacement.After, "全部匹配工时"),
+                treeTotals = GridTotals(GridTotalPlacement.After, "子树小计"),
+                pagination = GridPagination.Page(0L, 5L)
+            ),
+            rowSelection = GridRowSelectionMode.Multiple,
+            expandedRows = GridExpandedRows(true),
+            treeData =
+                Some(
+                    GridTreeData<Task>(
+                        {
+                            row -> when (row.parent) {
+                                case Some(val key) -> Some(ViewKey.Number(key))
+                                case None -> None
+                            }
+                        },
+                        Some(GridColumnId("title"))
+                    )
+                )
+        )
+    private fun save(key: ViewKey, row: Task, completion: GridCommit<Task>) {
+        val next =
+            TableRows(
+                Array<TableRecord<Task>>(rows.count) {
+                    index ->
+                    val current = rows.keyAt(index)
+                    TableRecord(
+                        current,
+                        if (current == key)
+                            row
+                        else
+                            rows.rowAt(index)
+                    )
+                }
+            )
+        if (completion.accept(next))
+            rows = next
+    }
+    private fun change(action: () -> Unit) {
+        when (handle.commitEdit()) {
+            case NoEdit -> action()
+            case Committed -> action()
+            else -> message.value = handle.editError ?: "请先完成当前编辑"
+        }
+    }
+    private fun columns(): Array<GridColumn<Task>> {
+        val example = this
+        return [
+            gridColumn<Task, String>(
+                GridColumnId("title"),
+                "项目与任务",
+                { row -> row.title },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fixed(440.0)),
+                edit =
+                    Some(
+                        gridEdit<Task, String>(
+                            { value -> gridTextEditor(value) },
+                            {
+                                edit,
+                                completion -> example.save(
+                                    edit.address.row.dataKey!!,
+                                    Task(
+                                        edit.row.parent,
+                                        edit.value,
+                                        edit.row.hours,
+                                        edit.row.done
+                                    ),
+                                    completion
+                                )
+                            },
+                            validate =
+                                {
+                                    _,
+                                    value -> if (value == "")
+                                        Some("名称不能为空")
+                                    else
+                                        None
+                                }
+                        )
+                    )
+            ),
+            gridColumn<Task, Long>(
+                GridColumnId("hours"),
+                "自身工时",
+                { row -> row.hours },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(160.0)),
+                edit =
+                    Some(
+                        gridEdit<Task, Long>(
+                            { value -> gridLongEditor(value) },
+                            {
+                                edit,
+                                completion -> example.save(
+                                    edit.address.row.dataKey!!,
+                                    Task(
+                                        edit.row.parent,
+                                        edit.row.title,
+                                        edit.value,
+                                        edit.row.done
+                                    ),
+                                    completion
+                                )
+                            },
+                            validate =
+                                {
+                                    _,
+                                    value -> if (value < 0L)
+                                        Some("工时不能为负数")
+                                    else
+                                        None
+                                }
+                        )
+                    ),
+                aggregations =
+                    [
+                        gridSumLongAggregation(),
+                        gridAverageLongAggregation(),
+                        gridCountAggregation<Long>()
+                    ]
+            ),
+            gridColumn<Task, Boolean>(
+                GridColumnId("done"),
+                "已完成",
+                { row -> row.done },
+                gridBooleanValues(),
+                TableColumnSize(GridTrack.Fixed(140.0)),
+                edit =
+                    Some(
+                        gridEdit<Task, Boolean>(
+                            { value -> gridBooleanEditor(value) },
+                            {
+                                edit,
+                                completion -> example.save(
+                                    edit.address.row.dataKey!!,
+                                    Task(
+                                        edit.row.parent,
+                                        edit.row.title,
+                                        edit.row.hours,
+                                        edit.value
+                                    ),
+                                    completion
+                                )
+                            }
+                        )
+                    )
+            )
+        ]
+    }
+    public override fun render(): View {
+        val example = this
+        val model = this.model
+        val handle = this.handle
+        val filtered = model.query.filter != GridFilter.All
+        val pinned = model.pinnedRows.top.contains(ViewKey.Number(2L))
+        val total = model.query.treeTotals.placement != GridTotalPlacement.Hidden
+        val filterCaption: String =
+            if (filtered)
+                "显示全部任务"
+            else
+                "只显示已完成"
+        val totalCaption: String =
+            if (total)
+                "隐藏小计"
+            else
+                "显示小计"
+        val pinCaption: String =
+            if (pinned)
+                "解除任务固定"
+            else
+                "固定首个交付任务"
+        val theme = currentThemeSource().read(scope)
+        return styled(
+            row {
+                item(
+                    treeColumn {
+                        label("项目树 · 20 个根节点")
+                        label("Alt＋左右展开或收起；F2 编辑；匹配任务保留路径祖先")
+                        row {
+                            button(
+                                filterCaption,
+                                onClick =
+                                    {
+                                        example.change {
+                                            model.setQuery(
+                                                model.query.withFilter(
+                                                    if (filtered)
+                                                        GridFilter.All
+                                                    else
+                                                        GridFilter.Column(
+                                                            GridColumnId("done"),
+                                                            GridCondition.Compare(
+                                                                GridComparison.Equal,
+                                                                GridLiteral.BooleanValue(true)
+                                                            )
+                                                        )
+                                                )
+                                            )
+                                        }
+                                    }
+                            )
+                            button(
+                                "展开全部",
+                                onClick =
+                                    {
+                                        example.change {
+                                            model.setExpandedRows(GridExpandedRows(true))
+                                        }
+                                    }
+                            )
+                            button(
+                                "收起全部",
+                                onClick =
+                                    { example.change { model.setExpandedRows(GridExpandedRows()) } }
+                            )
+                            spacing = 6.0
+                        }
+                        row {
+                            button(
+                                totalCaption,
+                                onClick =
+                                    {
+                                        example.change {
+                                            model.setQuery(
+                                                model.query.withTreeTotals(
+                                                    GridTotals(
+                                                        if (total)
+                                                            GridTotalPlacement.Hidden
+                                                        else
+                                                            GridTotalPlacement.After,
+                                                        "子树小计"
+                                                    )
+                                                )
+                                            )
+                                        }
+                                    }
+                            )
+                            button(
+                                pinCaption,
+                                onClick =
+                                    {
+                                        example.change {
+                                            model.pinRow(
+                                                ViewKey.Number(2L),
+                                                if (pinned)
+                                                    GridRowPin.None
+                                                else
+                                                    GridRowPin.Top
+                                            )
+                                        }
+                                    }
+                            )
+                            spacing = 6.0
+                        }
+                        add(gridQuickFilter(model) { this.handle = Some(handle) })
+                        add(
+                            dataGrid(model) {
+                                this.handle = Some(handle)
+                                height = 430.0
+                                rowHeight = 44.0
+                            }
+                        )
+                        add(
+                            gridPager(model) {
+                                this.handle = Some(handle);
+                                pageSizes = [5L, 10L, 20L]
+                            }
+                        )
+                        label(handle.editError ?: example.message.value)
+                        spacing = 8.0
+                    }
+                ) { grow = 1.0 }
+                frame(gridColumnsPanel(model, handle) { height = 540.0 }) { width = Some(290.0) }
+                spacing = 18.0
+                padding = Insets.all(12.0)
+                alignment = CrossAlignment.Start
+            }
+        ) { style { background = Some(Paint(theme.tokens.palette.background.background)) } }
+    }
+}
+
+fun main() {
+    context(ThemeSource(shadcnTheme())) {
+        val application =
+            Application(applicationOptions { lastWindowPolicy = LastWindowPolicy.Exit })
+        UiHost(onRootError = { _, error -> throw error }) {
+            host,
+            active,
+            event -> when (event) {
+                case Resumed -> host.attach(
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid — Tree data"
+                            size = LogicalSize(1240.0, 820.0)
+                        }
+                    ),
+                    { scope -> TreeExample(scope) }
+                )
+                case Window(_, WindowEvent.CloseRequested) -> active.requestExit()
+                else -> {}
+            }
+        }.use { host -> application.run(host) }
+    }
+}

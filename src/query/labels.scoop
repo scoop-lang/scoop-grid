@@ -25,5 +25,11 @@ public class GridPagerLabels public constructor(
     public val rootSizeName: String = "每页根组数",
     public val roots: (Long, Long) -> String = { count, records -> f"共 ${count} 组 · ${records} 条" },
     public val rootStatus: (Long, Long, Long, Long) -> String =
-        { count, records, page, pages -> f"共 ${count} 组 · ${records} 条 · ${page} / ${pages} 页" }
+        { count, records, page, pages -> f"共 ${count} 组 · ${records} 条 · ${page} / ${pages} 页" },
+    public val treeRootSize: (Long) -> String = { count -> f"${count} 根 / 页" },
+    public val treeRootSizeName: String = "每页根节点数",
+    public val treeRoots: (Long, Long) -> String =
+        { count, records -> f"共 ${count} 根 · 匹配 ${records} 条" },
+    public val treeRootStatus: (Long, Long, Long, Long) -> String =
+        { count, records, page, pages -> f"共 ${count} 根 · 匹配 ${records} 条 · ${page} / ${pages} 页" }
 )

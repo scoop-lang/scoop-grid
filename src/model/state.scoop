@@ -17,7 +17,8 @@ public class DataGridState<Row> public constructor(
     public val rowSelection: GridRowSelectionMode = GridRowSelectionMode.Disabled,
     private val selectable: ((Row) -> Boolean)? = None,
     public val onSelectionChange: ((Array<ViewKey>) -> Unit)? = None,
-    expandedRows: GridExpandedRows = GridExpandedRows()
+    expandedRows: GridExpandedRows = GridExpandedRows(),
+    treeData: GridTreeData<Row>? = None
 ) {
     private val computed =
         state(
@@ -27,7 +28,8 @@ public class DataGridState<Row> public constructor(
                 query,
                 None,
                 gridCheckPinnedRows(source, pinnedRows),
-                expandedRows
+                expandedRows,
+                treeData
             )
         )
     private val headerState =
@@ -53,7 +55,7 @@ public class DataGridState<Row> public constructor(
     public fun isRowSelected(key: ViewKey): Boolean = selection.value.contains(key)
     internal fun acceptsRow(row: Row): Boolean = selectable?.invoke(row) ?: true
     public fun isRowSelectable(key: ViewKey): Boolean {
-        if (rowSelection == GridRowSelectionMode.Disabled)
+        if (rowSelection == GridRowSelectionMode.Disabled || isContextRow(key))
             return false
         val index = source.indexOfKey(key) ?: return false
         return selectable?.invoke(source.rowAt(index)) ?: true
@@ -200,39 +202,85 @@ public class DataGridState<Row> public constructor(
         return gridSelectionState(count, total)
     }
     public val expandedRows: GridExpandedRows get() = computed.value.expanded
-    public fun isExpanded(key: GridRowKey): Boolean {
-        val groups = computed.value.groups ?: return false
+    public val treeData: GridTreeData<Row>? get() = computed.value.treeData
+    public fun isContextRow(key: ViewKey): Boolean {
+        val tree = computed.value.tree ?: return false
+        val node = tree.topology.positions[key] ?: return false
+        return tree.matches.context(node)
+    }
+    public fun treeAggregations(key: ViewKey): GridAggregations? {
+        val tree = computed.value.tree ?: return None
+        val node = tree.topology.positions[key] ?: return None
+        return if (tree.matches.retained(node))
+            Some(tree.aggregates.atGroup(node + 1L))
+        else
+            None
+    }
+    public fun setTreeData(value: GridTreeData<Row>?) {
+        computed.checkMutation()
+        val old = computed.value
+        when ((old.treeData, value)) {
+            case(None, None) -> return
+            case(Some(val a), Some(val b)) -> {
+                if (a === b)
+                    return
+            }
+            else -> {}
+        }
+        val query = old.query.withPagination(gridFirstPage(old.query.pagination))
+        val next =
+            gridCompute(old.source, old.columns, query, Some(old), old.pins, old.expanded, value)
+        if (computed.value !== old)
+            throw IllegalStateException(Some("准备树数据期间模型已更新，请重试"))
+        computed.value = next
+        clearCellRange()
+        notify(old.query, next.query)
+    }
+    internal fun canExpand(key: GridRowKey): Boolean {
         return when (key) {
-            case Group(val path) -> groups.topology.paths.containsKey(path) &&
-                expandedRows.contains(key)
+            case Group(val path) -> computed.value.groups?.topology?.paths?.containsKey(path) ?:
+                false
+            case Data(val business) -> {
+                val tree = computed.value.tree ?: return false
+                val node = tree.topology.positions[business] ?: return false
+                tree.topology.children[node].size > 0L
+            }
             else -> false
         }
     }
+    public fun isExpanded(key: GridRowKey): Boolean = canExpand(key) && expandedRows.contains(key)
     public fun setExpanded(key: GridRowKey, value: Boolean): Boolean {
         computed.checkMutation()
         val old = computed.value
-        val groups = old.groups ?: return false
-        when (key) {
-            case Group(val path) -> {
-                if (!groups.topology.paths.containsKey(path))
-                    return false
-            }
-            else -> return false
-        }
+        if (!canExpand(key))
+            return false
         setExpandedRows(old.expanded.changed(key, value))
         return true
     }
     public fun setExpandedRows(value: GridExpandedRows) {
         computed.checkMutation()
         val old = computed.value
-        val checked = value.forGrouping(old.query.grouping)
+        val checked =
+            when (old.tree) {
+                case Some(val tree) -> gridTreeExpansion(value, tree.topology)
+                case None -> value.forGrouping(old.query.grouping)
+            }
         gridRequire(
             checked.exceptions.size == value.exceptions.size,
-            "expansion key does not match grouping dimensions"
+            "expansion key does not match the current hierarchy"
         )
         if (old.expanded.same(checked))
             return
-        val next = gridCompute(old.source, old.columns, old.query, Some(old), old.pins, checked)
+        val next =
+            gridCompute(
+                old.source,
+                old.columns,
+                old.query,
+                Some(old),
+                old.pins,
+                checked,
+                old.treeData
+            )
         if (computed.value !== old)
             throw IllegalStateException(Some("准备展开期间模型已更新，请重试"))
         computed.value = next
@@ -490,7 +538,15 @@ public class DataGridState<Row> public constructor(
         if (old.query == requested)
             return
         val next =
-            gridCompute(old.source, old.columns, requested, Some(old), old.pins, old.expanded)
+            gridCompute(
+                old.source,
+                old.columns,
+                requested,
+                Some(old),
+                old.pins,
+                old.expanded,
+                old.treeData
+            )
         if (computed.value !== old)
             throw IllegalStateException(Some("准备查询期间模型已更新，请重试"))
         computed.value = next
@@ -501,7 +557,9 @@ public class DataGridState<Row> public constructor(
                 old.query.totals.placement !=
                 next.query.totals.placement ||
                 old.query.groupTotals.placement !=
-                next.query.groupTotals.placement
+                next.query.groupTotals.placement ||
+                old.query.treeTotals.placement !=
+                next.query.treeTotals.placement
         )
             clearCellRange()
         notify(old.query, next.query)
@@ -586,7 +644,8 @@ public class DataGridState<Row> public constructor(
                 old.query,
                 Some(old),
                 old.pins.surviving(source),
-                old.expanded
+                old.expanded,
+                old.treeData
             )
         val kept = gridSurvivingSelection(selection.value, source, selectable)
         val keepRange =
@@ -633,9 +692,19 @@ public class DataGridState<Row> public constructor(
                 old.query.totals,
                 grouping,
                 gridSurvivingGroupSorting(old.query.groupSorting, grouping, aggregations),
-                old.query.groupTotals
+                old.query.groupTotals,
+                old.query.treeTotals
             )
-        val next = gridCompute(old.source, nextColumns, requested, None, old.pins, old.expanded)
+        val next =
+            gridCompute(
+                old.source,
+                nextColumns,
+                requested,
+                Some(old),
+                old.pins,
+                old.expanded,
+                old.treeData
+            )
         val states = ArrayList<GridColumnState>()
         val retained = HashSet<GridColumnId>()
         for (entry in presentation.value)
@@ -703,7 +772,16 @@ public class DataGridState<Row> public constructor(
         if (old.pins.same(value))
             return
         gridCheckPinnedRows(old.source, value)
-        val next = gridCompute(old.source, old.columns, old.query, Some(old), value, old.expanded)
+        val next =
+            gridCompute(
+                old.source,
+                old.columns,
+                old.query,
+                Some(old),
+                value,
+                old.expanded,
+                old.treeData
+            )
         if (computed.value !== old)
             throw IllegalStateException(Some("准备固定行期间模型已更新，请重试"))
         computed.value = next

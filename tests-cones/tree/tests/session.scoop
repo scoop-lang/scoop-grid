@@ -1,0 +1,349 @@
+package scoop.grid.tests.tree
+
+import scoop.grid.*
+import scoop.collections.HashSet
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.tests.window.nativeEditorKey
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridTreeWindowTest {
+    @Test
+    fun `native tree shares parent context expansion editing root pages and pinned rows`() {
+        val probe = TreeProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(1, probe.submissions)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            treeFailure(error)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+private fun treeFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        treeFailure(error.primaryFailure)
+        treeFailure(error.cleanupFailure)
+    } else
+        if (error is AssertionFailure) {
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        } else
+            if (error is Exception)
+                error.printStackTrace()
+}
+
+internal struct TreeWindowRow(val index: Long, val amount: Long, val name: String)
+
+internal class TreeWindowSource(
+    private val first: Long = 2L,
+    private val dropped: Boolean = false
+): TableSource<TreeWindowRow> {
+    private val offset: Long get() =
+        if (dropped)
+            4L
+        else
+            0L
+    public override val count: Long get() = 1000L - offset
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index + offset)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= offset && index < 1000L)
+                Some(index - offset)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): TreeWindowRow {
+        val actual = index + offset
+        return TreeWindowRow(
+            actual,
+            if (actual == 1L)
+                first
+            else
+                actual + 1L,
+            f"Node ${actual}"
+        )
+    }
+}
+
+internal class TreeProbe: Closeable {
+    val handle = DataGridHandle()
+    val enabled = state(true)
+    var editor: GridTextEditor<Long>? = None
+    var options: GridEditorOptions? = None
+    var pending: GridCommit<TreeWindowRow>? = None
+    var submissions = 0
+    var dataBuilds = 0L
+    val built = HashSet<Long>()
+    var nameEditor: GridTextEditor<String>? = None
+    val model =
+        DataGridState(
+            TreeWindowSource(),
+            columns(),
+            GridQuery(
+                aggregations =
+                    [GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum"))],
+                totals = GridTotals(GridTotalPlacement.After, "All")
+            ),
+            rowSelection = GridRowSelectionMode.Multiple,
+            treeData =
+                Some(
+                    GridTreeData<TreeWindowRow>(
+                        {
+                            row ->
+                            val part = row.index % 4L
+                            if (part == 0L)
+                                None
+                            else
+                                Some(
+                                    ViewKey.Number(
+                                        if (part == 2L)
+                                            row.index - 1L
+                                        else
+                                            row.index - part
+                                    )
+                                )
+                        },
+                        Some(GridColumnId("name"))
+                    )
+                )
+        )
+    val node = GridRowKey.Data(ViewKey.Number(0L))
+    val far = GridRowKey.Data(ViewKey.Number(800L))
+    val address = GridCellAddress(ViewKey.Number(1L), GridColumnId("amount"))
+    val nodeAddress = GridCellAddress(node, GridColumnId("name"))
+    val nodeAmount = GridCellAddress(node, GridColumnId("amount"))
+    var aggregate: GridAggregations? = None
+    var table: NativeNode? = None
+    var nodeCell: NativeNode? = None
+    var nodeRow: NativeNode? = None
+    var oldNode: NativeNode? = None
+    var farRow: NativeNode? = None
+    var member: NativeNode? = None
+    var button: NativeNode? = None
+    var checkbox: NativeNode? = None
+    var childRow: NativeNode? = None
+    var childCell: NativeNode? = None
+    var leafRow: NativeNode? = None
+    var frame: ComponentScope? = None
+    var application: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var root: NativeNode? = None
+    var calls: NativeCalls? = None
+    var phase = 0
+    var waiting = false
+    var retry = false
+    var finished = false
+    val focused: Boolean get() = options?.focus?.hasFocus ?: false
+    val diagnostic: String get() =
+        f"tree phase=${phase}, waiting=${waiting}, retry=${retry}, focus=${focused}, rows=${
+            model.result.rows.count
+        }, builds=${dataBuilds}, submitting=${handle.isSubmitting}"
+    private val retained = ArrayList<NativeNode>()
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(35L)
+
+    init {
+        model.setColumnState(GridColumnState(GridColumnId("name"), pin = GridPin.Start))
+        model.setColumnState(GridColumnState(GridColumnId("amount"), pin = GridPin.End))
+    }
+    private fun columns(): Array<GridColumn<TreeWindowRow>> {
+        val probe = this
+        return [
+            gridColumn<TreeWindowRow, String>(
+                GridColumnId("name"),
+                "Name",
+                { row -> row.name },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fixed(290.0)),
+                groupable = true,
+                edit =
+                    Some(
+                        gridEdit<TreeWindowRow, String>(
+                            {
+                                value ->
+                                val editor = gridTextEditor(value)
+                                probe.nameEditor = Some(editor)
+                                TreeEditor(editor, probe)
+                            },
+                            { _, _ -> fail(Some("cancelled name editor submitted")) }
+                        )
+                    )
+            ),
+            gridColumn<TreeWindowRow, Long>(
+                GridColumnId("amount"),
+                "Amount",
+                { row -> row.amount },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(220.0)),
+                cell =
+                    Some {
+                        row ->
+                        probe.dataBuilds += 1L
+                        probe.built.add(row.index)
+                        label(f"${row.amount}")
+                    },
+                edit =
+                    Some(
+                        gridEdit<TreeWindowRow, Long>(
+                            {
+                                value ->
+                                val editor = gridLongEditor(value)
+                                probe.editor = Some(editor)
+                                TreeEditor(editor, probe)
+                            },
+                            {
+                                _, completion ->
+                                probe.submissions += 1
+                                probe.pending = Some(completion)
+                            }
+                        )
+                    ),
+                aggregations = [gridSumLongAggregation()]
+            )
+        ]
+    }
+    fun event(host: UiHost, active: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                application = Some(active)
+                active.setControlFlow(ControlFlow.WaitUntil(timeout))
+                val native =
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid tree"
+                            size = LogicalSize(980.0, 780.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> TreeScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(active.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(Some(diagnostic))
+            else -> {}
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        retained.add(node)
+        return node
+    }
+    fun named(id: String): NativeNode =
+        keep(root!!.find(id) ?: fail(Some(f"missing ${id} at ${phase}")))
+    fun find(node: NativeNode, role: String, name: String? = None): NativeNode? {
+        if (node.flag(0) && node.text(2, Some(role)) && (name == None || node.text(0, name)))
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val found = find(keep(node.child(index)), role, name)
+            when (found) {
+                case Some(_) -> return found
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun key(code: Int) {
+        assertTrue(sendSurfaceKey(window!!, code, true))
+        assertTrue(sendSurfaceKey(window!!, code, false))
+    }
+    fun alt(code: Int) {
+        @Unsafe
+        {
+            val result =
+                window!!.acquireNativeWindow().use {
+                    lease -> @Unsafe
+                    {
+                        return@use when (lease.handle) {
+                            case AppKit(_, val view) -> "".withUtf8Bytes {
+                                bytes,
+                                length -> @Unsafe
+                                {
+                                    return@withUtf8Bytes nativeEditorKey(
+                                        view,
+                                        code,
+                                        bytes,
+                                        length,
+                                        4
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            assertEquals(0, result)
+        }
+    }
+    fun applied(result: GridRowActionResult) {
+        when (result) {
+            case Applied -> {}
+            case Rejected(val reason) -> fail(Some(reason))
+        }
+    }
+    fun rejected(result: GridRowActionResult) {
+        when (result) {
+            case Rejected(_) -> {}
+            case Applied -> fail(Some("an invalid edit allowed a tree action"))
+        }
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in retained)
+            node.close()
+    }
+}
+
+private class TreeEditor<T>(
+    private val editor: GridTextEditor<T>,
+    private val probe: TreeProbe
+): GridEditor<T> {
+    public override val composing: Boolean get() = editor.composing
+    public override fun candidate(): GridCandidate<T> = editor.candidate()
+    public override fun importText(text: String): String? = editor.importText(text)
+    public override fun cancelComposition() {
+        editor.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        probe.options = Some(options)
+        return editor.view(options)
+    }
+}

@@ -5,17 +5,19 @@ import scoop.ui.ViewKey
 import scoop.ui.component.TableSource
 
 public enum GridTotalKey: Equals<GridTotalKey>, Hash {
-    AllFiltered, Group(GridGroupPath)
+    AllFiltered, Group(GridGroupPath), Tree(ViewKey)
     public override operator fun equals(other: GridTotalKey): Boolean =
         when ((this, other)) {
             case(AllFiltered, AllFiltered) -> true
             case(Group(val a), Group(val b)) -> a == b
+            case(Tree(val a), Tree(val b)) -> a == b
             else -> false
         }
     public override fun hash(): Long =
         when (this) {
             case AllFiltered -> 0L
             case Group(val path) -> path.hash() xor 1L
+            case Tree(val key) -> key.hash() xor 2L
         }
 }
 
@@ -45,6 +47,13 @@ public enum GridRowKey: Equals<GridRowKey>, Hash {
             }
             case Total(GridTotalKey.AllFiltered) -> ViewKey.Text("t:all")
             case Total(GridTotalKey.Group(val path)) -> ViewKey.Text(f"t:group${path.encoded}")
+            case Total(GridTotalKey.Tree(val key)) -> when (key) {
+                case Number(val value) -> ViewKey.Text(f"t:tree:n${value}")
+                case Text(val value) -> ViewKey.Text(f"t:tree:s${value}")
+                case Position -> throw IllegalArgumentException(
+                    Some("tree totals require an explicit key")
+                )
+            }
             case Group(val path) -> ViewKey.Text(f"g${path.encoded}")
         }
     public val dataKey: ViewKey? get() =

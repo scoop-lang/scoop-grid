@@ -99,7 +99,7 @@ internal fun <Row> gridPresentGroups(
             query.totals,
             groups.order.roots.size,
             GridPageUnit.Roots,
-            Some(groups)
+            GridGroupedDataRows(groups.order.rows, groups)
         )
     return (
         result,
