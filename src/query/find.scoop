@@ -42,7 +42,7 @@ private fun gridFindStep(
 }
 
 internal fun <Row> gridFindCell(
-    rows: TableSource<Row>,
+    rows: GridRowSource<Row>,
     definitions: GridColumns<Row>,
     states: Array<GridColumnState>,
     text: String,
@@ -102,15 +102,24 @@ internal fun <Row> gridFindCell(
     var at = beginning.position
     var wrapped = beginning.wrapped
     var cachedIndex = -1L
-    var cachedRow: Row? = None
+    var cachedRow: GridRow<Row>? = None
+    var labelColumn: GridColumnId? = None
     while (true) {
         val column = columns[at.column]
         if (column.exportable) {
             if (cachedIndex != at.row) {
                 cachedRow = Some(rows.rowAt(at.row))
                 cachedIndex = at.row
+                labelColumn =
+                    when (cachedRow!!) {
+                        case Data(_, _) -> None
+                        case Total(val total) -> gridRowLabelColumn(
+                            columns.toArray(),
+                            total.aggregates
+                        )
+                    }
             }
-            when (column.text(cachedRow!!)) {
+            when (cachedRow!!.text(column, labelColumn)) {
                 case Some(val value) -> {
                     val candidate =
                         if (matchCase)
@@ -119,7 +128,10 @@ internal fun <Row> gridFindCell(
                             value.lowercaseAscii()
                     if (candidate.contains(needle))
                         return Some(
-                            GridFindMatch(GridCellAddress(rows.keyAt(at.row), column.id), wrapped)
+                            GridFindMatch(
+                                GridCellAddress(rows.rowKeyAt(at.row), column.id),
+                                wrapped
+                            )
                         )
                 }
                 case None -> {}

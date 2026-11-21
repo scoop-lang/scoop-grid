@@ -41,7 +41,8 @@ internal fun <Row> gridRestoreQuery(
         filter,
         saved.quickFilter,
         saved.pagination,
-        aggregations.toArray()
+        aggregations.toArray(),
+        saved.totals
     )
 }
 

@@ -144,7 +144,7 @@ internal fun RangeProbe.inspectFind() {
         }
         case 135 -> {
             findRejected()
-            assertEquals(100L, model.result.rows.rowAt(0L).value)
+            assertEquals(100L, nativeGridData(model.result.rows.rowAt(0L)).value)
             selectedRange(rangeAddress(0L), rangeAddress(1L, 1L))
         }
         case 136 -> {

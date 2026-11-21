@@ -3,10 +3,13 @@ package scoop.grid
 import scoop.ui.ViewKey
 
 public struct GridReadingPosition(
-    val row: ViewKey,
+    val row: GridRowKey,
     val rowOffset: Double = 0.0,
     val horizontalOffset: Double = 0.0
-)
+) {
+    public constructor(row: ViewKey, rowOffset: Double = 0.0, horizontalOffset: Double = 0.0):
+    this(GridRowKey.Data(row), rowOffset, horizontalOffset) {}
+}
 
 /** Persistent view data, independent of row values and mounted UI resources. */
 public class GridViewState public constructor(

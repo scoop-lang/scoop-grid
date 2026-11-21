@@ -188,7 +188,7 @@ internal class RangeProbe: Closeable {
                         val row = before.rowAt(index)
                         TableRecord(
                             before.keyAt(index),
-                            if (before.keyAt(index) == change.address.row)
+                            if (before.keyAt(index) == change.address.row.dataKey!!)
                                 RangeRecord(row.key, change.value)
                             else
                                 row
@@ -408,3 +408,9 @@ private fun nativeRangeCoordinate(
 
 @Extern(name = "scoop_grid_range_menu_copy")
 private fun nativeRangeMenuCopy(view: Ptr<Unit>): Boolean
+
+internal fun <Row> nativeGridData(row: GridRow<Row>): Row =
+    when (row) {
+        case Data(val value, _) -> value
+        case Total(_) -> fail(Some("expected a business record"))
+    }

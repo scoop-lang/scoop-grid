@@ -89,7 +89,7 @@ internal fun <Row> gridCompute(
         source,
         columns,
         resolved,
-        gridPinResult(rows, ordered, total, pages, pins, aggregates),
+        gridPinResult(rows, ordered, total, pages, pins, aggregates, query.totals),
         pins,
         filtered
     )

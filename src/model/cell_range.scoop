@@ -12,7 +12,10 @@ public class GridCellRange public constructor(
 ): Equals<GridCellRange> {
     init {
         gridRequire(
-            anchor.row != ViewKey.Position && end.row != ViewKey.Position,
+            anchor.row.dataKey !=
+                Some(ViewKey.Position) &&
+                end.row.dataKey !=
+                Some(ViewKey.Position),
             "cell ranges require explicit row keys"
         )
     }
@@ -40,7 +43,7 @@ internal struct GridCellRangeBounds(
 
 internal fun <Row> gridCellRangeBounds(
     range: GridCellRange,
-    rows: TableSource<Row>,
+    rows: GridRowSource<Row>,
     columns: GridSpanColumns
 ): GridCellRangeBounds? {
     val firstRow = rows.indexOfKey(range.anchor.row) ?: return None

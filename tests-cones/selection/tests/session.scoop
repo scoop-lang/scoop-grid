@@ -76,7 +76,7 @@ internal class SelectionProbe: Closeable {
     val enabled = state(true)
     val checkboxes = state(true)
     val labels = state(GridLabels())
-    var labelRows: TableSource<Long>? = None
+    var labelRows: GridRowSource<Long>? = None
     var labelColumns: Array<GridColumnState>? = None
     val direction = state(LayoutDirection.Ltr)
     var editor: GridTextEditor<Long>? = None
@@ -132,7 +132,7 @@ internal class SelectionProbe: Closeable {
                     Array<TableRecord<Long>>(before.count) {
                         index -> TableRecord(
                             before.keyAt(index),
-                            if (before.keyAt(index) == change.address.row)
+                            if (before.keyAt(index) == change.address.row.dataKey!!)
                                 change.value
                             else
                                 before.rowAt(index)

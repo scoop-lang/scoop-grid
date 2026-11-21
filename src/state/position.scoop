@@ -175,7 +175,7 @@ internal class GridViewStateController<Row>(private val session: GridSession<Row
             when (value.anchor) {
                 case Some(val anchor) -> Some(
                     GridReadingPosition(
-                        anchor.key,
+                        input.rows.source.rowKeyAt(anchor.index),
                         anchor.inside / density,
                         plan.scroll.snapshot.offset.x / density
                     )

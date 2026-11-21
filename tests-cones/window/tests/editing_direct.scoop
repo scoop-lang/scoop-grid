@@ -37,7 +37,11 @@ internal class GridDirectInputProbe(private val probe: GridEditingProbe) {
         }
     }
     private fun row(key: Long): EditRow =
-        probe.model.result.rows.rowAt(probe.model.result.rows.indexOfKey(ViewKey.Number(key))!!)
+        nativeGridData(
+            probe.model.result.rows.rowAt(
+                probe.model.result.rows.indexOfKey(GridRowKey.Data(ViewKey.Number(key)))!!
+            )
+        )
     private fun focus(key: Long, column: String) {
         previous = probe.connection
         target = probe.address(key, column)

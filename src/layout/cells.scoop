@@ -24,8 +24,8 @@ internal class GridCellClip(
 )
 
 internal class GridRowCells<Row>(
-    private val row: Row,
-    private val rowKey: ViewKey,
+    private val row: GridRow<Row>,
+    private val rowKey: GridRowKey,
     private val rowIndex: Long,
     private val columns: GridColumnsPlan<Row>,
     private val session: GridSession<Row>,
@@ -68,7 +68,11 @@ internal class GridRowCells<Row>(
                 spans.span(columnIndex).count,
                 selection,
                 range,
-                labels
+                labels,
+                when (row) {
+                    case Data(_, _) -> None
+                    case Total(val total) -> gridRowLabelColumn(columns.columns, total.aggregates)
+                }
             ),
             { props, scope -> GridDataCell(props, scope) }
         )
@@ -509,6 +513,8 @@ internal class GridCell<Row>(
         if (
             handle.hasFocus &&
                 gridRowSelectionKey(key) &&
+                address.row.dataKey !=
+                None &&
                 (session?.rowSelectionEnabled ?: false) &&
                 (session?.editingCell ?: None) ==
                 None

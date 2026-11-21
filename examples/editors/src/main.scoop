@@ -65,6 +65,7 @@ private class EditorsExample(scope: ComponentScope): Component(scope) {
                 },
                 numbers.compare,
                 numbers.literal,
+                encode = numbers.encode,
                 number = numbers.number
             )
         return [
@@ -81,7 +82,7 @@ private class EditorsExample(scope: ComponentScope): Component(scope) {
                             {
                                 change,
                                 completion -> example.save(
-                                    change.address.row,
+                                    change.address.row.dataKey!!,
                                     Record(change.value, change.row.date, change.row.priority),
                                     completion
                                 )
@@ -102,7 +103,7 @@ private class EditorsExample(scope: ComponentScope): Component(scope) {
                             {
                                 change,
                                 completion -> example.save(
-                                    change.address.row,
+                                    change.address.row.dataKey!!,
                                     Record(change.row.enabled, change.value, change.row.priority),
                                     completion
                                 )
@@ -131,7 +132,7 @@ private class EditorsExample(scope: ComponentScope): Component(scope) {
                             {
                                 change,
                                 completion -> example.save(
-                                    change.address.row,
+                                    change.address.row.dataKey!!,
                                     Record(change.row.enabled, change.row.date, change.value),
                                     completion
                                 )

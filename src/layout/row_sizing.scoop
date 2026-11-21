@@ -123,7 +123,7 @@ internal class GridReadingAnchor(val key: ViewKey, val index: Long, val inside: 
 
 internal class GridRowReading<Row>(
     val model: DataGridState<Row>,
-    val source: TableSource<Row>,
+    val source: GridRowSource<Row>,
     val scroll: ScrollState,
     val revision: ULong,
     val anchor: GridReadingAnchor?

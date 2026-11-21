@@ -128,8 +128,8 @@ private fun <Row> gridRestoreReading(
     val value = saved ?: return None
     val index = result.rows.indexOfKey(value.row)
     if (
-        value.row ==
-            ViewKey.Position ||
+        value.row.dataKey ==
+            Some(ViewKey.Position) ||
             !value.rowOffset.isFinite() ||
             value.rowOffset <
             0.0 ||

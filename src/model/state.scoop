@@ -81,7 +81,10 @@ public class DataGridState<Row> public constructor(
         if (extend && rowSelection == GridRowSelectionMode.Multiple) {
             when (selectionAnchor) {
                 case Some(val anchor) -> if (
-                    result.rows.indexOfKey(anchor) != None && result.rows.indexOfKey(key) != None
+                    result.rows.indexOfKey(GridRowKey.Data(anchor)) !=
+                        None &&
+                        result.rows.indexOfKey(GridRowKey.Data(key)) !=
+                        None
                 )
                     return selectRowRange(anchor, key, value)
                 case None -> {}
@@ -108,8 +111,8 @@ public class DataGridState<Row> public constructor(
         if (rowSelection != GridRowSelectionMode.Multiple)
             return false
         val rows = result.rows
-        val first = rows.indexOfKey(anchor) ?: return false
-        val last = rows.indexOfKey(end) ?: return false
+        val first = rows.indexOfKey(GridRowKey.Data(anchor)) ?: return false
+        val last = rows.indexOfKey(GridRowKey.Data(end)) ?: return false
         val start =
             if (first < last)
                 first
@@ -123,7 +126,7 @@ public class DataGridState<Row> public constructor(
         val targeted = HashSet<ViewKey>()
         val keys = ArrayList<ViewKey>()
         for (index in start .. stop) {
-            val key = rows.keyAt(index)
+            val key = rows.infoAt(index).dataKey ?: continue
             if (isRowSelectable(key)) {
                 targeted.add(key)
                 keys.add(key)
@@ -251,7 +254,17 @@ public class DataGridState<Row> public constructor(
             Array<GridColumn<Row>>(bounds.lastColumn - bounds.firstColumn + 1L) {
                 index -> snapshot.columns.get(order.idAt(bounds.firstColumn + index))
             }
-        return Some(gridCopyText(snapshot.result.rows, columns, bounds, includeHeaders))
+        val visible =
+            Array<GridColumn<Row>>(order.count) { at -> snapshot.columns.get(order.idAt(at)) }
+        return Some(
+            gridCopyText(
+                snapshot.result.rows,
+                columns,
+                bounds,
+                includeHeaders,
+                gridRowLabelColumn(visible, snapshot.result.aggregates)
+            )
+        )
     }
     public val query: GridQuery get() = computed.value.query
     public fun findCell(
@@ -393,7 +406,13 @@ public class DataGridState<Row> public constructor(
         if (computed.value !== old)
             throw IllegalStateException(Some("准备查询期间模型已更新，请重试"))
         computed.value = next
-        if (old.query != next.query)
+        if (
+            !gridCriteriaEqual(old.query, next.query) ||
+                old.query.pagination !=
+                next.query.pagination ||
+                old.query.totals.placement !=
+                next.query.totals.placement
+        )
             clearCellRange()
         notify(old.query, next.query)
     }
@@ -508,7 +527,8 @@ public class DataGridState<Row> public constructor(
                 filter,
                 old.query.quickFilter,
                 old.query.pagination,
-                gridSurvivingAggregations(old.query.aggregations, nextColumns)
+                gridSurvivingAggregations(old.query.aggregations, nextColumns),
+                old.query.totals
             )
         val next = gridCompute(old.source, nextColumns, requested, None, old.pins)
         val states = ArrayList<GridColumnState>()
@@ -586,7 +606,8 @@ public class DataGridState<Row> public constructor(
                 before.totalRows,
                 before.pageCount,
                 value,
-                before.aggregates
+                before.aggregates,
+                old.query.totals
             )
         computed.value =
             GridComputed(old.source, old.columns, old.query, result, value, old.filtered)

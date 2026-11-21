@@ -81,7 +81,7 @@ internal class QueryProbe: Closeable {
                         val key = current.keyAt(index)
                         TableRecord(
                             key,
-                            if (key == change.address.row)
+                            if (key == change.address.row.dataKey!!)
                                 QueryRow(change.row.group, change.value)
                             else
                                 current.rowAt(index)

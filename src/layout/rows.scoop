@@ -11,7 +11,7 @@ import scoop.ui.component.TableSource
 import scoop.window.accessibility.*
 
 internal class GridRows<Row>(
-    val source: TableSource<Row>,
+    val source: GridRowSource<Row>,
     val columns: GridColumnsPlan<Row>,
     val session: GridSession<Row>,
     val policy: GridRowPolicy<Row>,
@@ -29,7 +29,7 @@ internal class GridRows<Row>(
     public override fun indexOfKey(key: ViewKey): Long? = source.indexOfKey(key)
     public override fun build(index: Long): View {
         val row = source.rowAt(index)
-        val key = keyAt(index)
+        val key = source.rowKeyAt(index)
         val spans = spansFor(row)
         val cells =
             GridRowCells(
@@ -48,30 +48,47 @@ internal class GridRows<Row>(
         return lazyElement(
             cells,
             GridRowProps(row, index, key, columns, session, policy, spans, selection),
-            { props, scope -> GridRow(props, scope) }
+            { props, scope -> GridRowView(props, scope) }
         )
     }
-    fun spansFor(row: Row): GridRowSpans =
-        when (columnSpans) {
-            case Some(val resolve) -> columns.spans.resolve(resolve(row))
-            case None -> GridRowSpans(columns.columns.size)
+    fun spansFor(row: GridRow<Row>): GridRowSpans =
+        when (row) {
+            case Data(val value, _) -> when (columnSpans) {
+                case Some(val resolve) -> columns.spans.resolve(resolve(value))
+                case None -> GridRowSpans(columns.columns.size)
+            }
+            case Total(_) -> GridRowSpans(columns.columns.size)
+        }
+    fun indexOfKey(key: GridRowKey): Long? = source.indexOfKey(key)
+    private fun labelColumn(row: GridRow<Row>): GridColumnId? =
+        when (row) {
+            case Data(_, _) -> None
+            case Total(val total) -> gridRowLabelColumn(columns.columns, total.aggregates)
         }
     fun semantics(): ItemSemantics {
         val selected = ArrayList<SemanticItemKey>()
         when (selection) {
             case Some(val value) -> for (key in value.selected.keys)
-                if (source.indexOfKey(key) != None)
-                    selected.add(gridSelectionItemKey(key))
+                if (source.indexOfKey(GridRowKey.Data(key)) != None)
+                    selected.add(gridSelectionItemKey(GridRowKey.Data(key).viewKey))
             case None -> {}
         }
         return ItemSemantics(
             this,
             {
-                index -> Some(
+                index ->
+                val info = source.infoAt(index)
+                Some(
                     SemanticItemProperties(
+                        name = info.label,
                         enabled = enabled,
                         focusable = true,
-                        selected = selection?.selected?.contains(source.keyAt(index))
+                        selectable = info.dataKey != None,
+                        selected =
+                            when (info.dataKey) {
+                                case Some(val key) -> selection?.selected?.contains(key)
+                                case None -> None
+                            }
                     )
                 )
             },
@@ -113,7 +130,8 @@ internal class GridRows<Row>(
                                     val span = spansFor(row).span(column)
                                     Some(
                                         SemanticItemProperties(
-                                            value = columns.columns[column].text(row),
+                                            value =
+                                                row.text(columns.columns[column], labelColumn(row)),
                                             enabled = enabled,
                                             focusable = true,
                                             selected =
@@ -255,9 +273,9 @@ internal class GridBody<Row>(
 }
 
 internal class GridRowProps<Row>(
-    val row: Row,
+    val row: GridRow<Row>,
     val index: Long,
-    val key: ViewKey,
+    val key: GridRowKey,
     val columns: GridColumnsPlan<Row>,
     val session: GridSession<Row>,
     val policy: GridRowPolicy<Row>,
@@ -265,19 +283,24 @@ internal class GridRowProps<Row>(
     val selection: GridSelectionView<Row>?
 )
 
-internal class GridRow<Row>(
+internal class GridRowView<Row>(
     private val props: Props<GridRowProps<Row>>,
     scope: ComponentScope
 ): LazyElement<Unit>(scope) {
     private val semantics = scope.semantics(SemanticRole.Row)
     public override fun onMount() {
-        scope.bindGridColumns(props.value.session.tableSemantics!!, props.value.key)
+        scope.bindGridColumns(props.value.session.tableSemantics!!, props.value.key.viewKey)
     }
     public override fun update(): UiInvalidation {
         scope.routeSemanticsChildren(Some(semantics))
         semantics.update(
             SemanticProperties(
-                selected = props.value.selection?.selected?.contains(props.value.key)
+                name = props.value.row.info.label,
+                selected =
+                    when (props.value.key.dataKey) {
+                        case Some(val key) -> props.value.selection?.selected?.contains(key)
+                        case None -> None
+                    }
             )
         )
         return UiInvalidation.Layout
@@ -331,7 +354,11 @@ internal class GridRow<Row>(
             }
             case None -> {}
         }
-        var height = props.value.policy.height(props.value.row, plan.rows.estimate)
+        var height =
+            when (props.value.row) {
+                case Data(val row, _) -> props.value.policy.height(row, plan.rows.estimate)
+                case Total(_) -> plan.rows.estimate
+            }
         for (index in contributors) {
             val column = spans.columnIndex(index)
             val range = spans.span(column)

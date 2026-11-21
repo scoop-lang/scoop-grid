@@ -74,6 +74,9 @@ scoop test --release .
 
 `gridAggregationSummary(model)` 显示整个筛选结果的记录数与总计，可放入 footer；翻页、排序、固定和选行不会改变聚合成员或重新聚合。`model.result.aggregates.total(id)` 返回 Value／Missing／Failed，未配置返回 None；`numericTotal(id)` 返回成功数值的 BigDecimal。Long 求和保留整数精度，超出 Long 范围时明确失败；count 只数非缺值，全缺值的其他操作返回 Missing。可空列使用 `nullableGridAggregation(...)`。内置 Double／BigDecimal 的求和与平均值，以及 `gridAggregation<T, A, R>` 的自定义累加器／结果格式化，见 [聚合合同](docs/SPEC.md#类型化聚合)。操作 title、列面板 Labels 和 `GridAggregationLabels` 分别配置名称、选择器及总计文案。十万行示例默认汇总金额，修改金额后总计随数据更新。
 
+`model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "全部筛选结果")))` 把全筛选集总计显示为正文结果行，After 放在正文末尾，Hidden 隐藏。它不占分页名额，与业务行共用布局、焦点、矩形、复制和查找，保持只读；固定行不改变聚合成员。`GridCellAddress(GridRowKey.Total(GridTotalKey.AllFiltered), columnId)` 定位总计。`result.rows.rowAt(index)` 返回完整的 Data／Total 变体，`infoAt` 与 `rowKeyAt` 只读取元数据；原始业务数据仍从 pageRows／ordered 访问。CSV 缺省导出业务记录；指定 `GridCsvOptions(data = GridExportData.Displayed)` 包含已启用的总计，可用 includeTotals 排除。十万行示例在首部固定记录之后直接显示总计。
+
+
 `gridFind(handle) { ... }` 提供真实查找输入框、上一项／下一项和结果提示，Enter 查找下一项。它在当前呈现结果与可见逻辑列的数据文字中定位，不改变筛选／排序／分页。默认忽略 ASCII 大小写，Unicode 原文保留；可配置 `matchCase`、`wrap`、`labels`、字体／主题／焦点与 `onResult`。连续操作从上次匹配继续，修改文字重新开始；组合输入期间不提交查找。未命中或编辑校验拒绝时保留原范围，成功时清除矩形并显露匹配格。
 
 只读取模型时调用 `model.findCell(text, after, backwards, matchCase, wrap)`，返回包含地址与是否循环的 `GridFindMatch` 或 None；它不创建 View。`handle.findCell(...)` 返回 `Found`／`NotFound`／`Rejected`，通过当前编辑门控后使用既有按 key 定位；Found 表示请求接受，实际焦点等布局呈现后到达。扫描期间应用更新结果时拒绝旧定位。

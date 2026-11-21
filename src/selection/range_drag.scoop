@@ -9,7 +9,7 @@ import scoop.ui.component.TableSource
 
 internal class GridRangeMove<Row>(
     val model: DataGridState<Row>,
-    val source: TableSource<Row>,
+    val source: GridRowSource<Row>,
     val columns: GridColumnsPlan<Row>,
     val origin: GridCellAddress,
     val anchor: GridCellAddress,
@@ -144,7 +144,7 @@ internal class GridRangeDrag<Row>(private val session: GridSession<Row>): Closea
                 ).column
                 case None -> hit.column
             }
-        val target = GridCellAddress(move.source.keyAt(hit.row), move.columns.columns[column].id)
+        val target = GridCellAddress(move.source.rowKeyAt(hit.row), move.columns.columns[column].id)
         val next = Some(GridCellRange(move.anchor, target))
         if (next == move.expected)
             return

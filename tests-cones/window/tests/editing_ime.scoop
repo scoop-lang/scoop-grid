@@ -108,7 +108,7 @@ internal class GridSystemImeProbe(private val probe: GridEditingProbe) {
             }
             case 44 -> {
                 if (probe.handle.editingCell == None) {
-                    assertEquals(committed, probe.model.result.rows.rowAt(0L).name)
+                    assertEquals(committed, nativeGridData(probe.model.result.rows.rowAt(0L)).name)
                     assertEquals(
                         GridEditEndReason.Accepted,
                         probe.ends[probe.ends.size - 1L].reason

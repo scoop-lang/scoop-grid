@@ -8,13 +8,22 @@ public fun <Row> gridCsv(
     rows: TableSource<Row>,
     columns: Array<GridColumn<Row>>,
     includeHeaders: Boolean = true
-): String = gridDelimited(rows, columns, ',', "\r\n", includeHeaders, true)
+): String = gridDelimited(GridDataRows(rows), columns, ',', "\r\n", includeHeaders, true)
 
 public fun <Row> gridTsv(rows: TableSource<Row>, columns: Array<GridColumn<Row>>): String =
+    gridDelimited(GridDataRows(rows), columns, '\t', "\n", false, false)
+
+public fun <Row> gridCsv(
+    rows: GridRowSource<Row>,
+    columns: Array<GridColumn<Row>>,
+    includeHeaders: Boolean = true
+): String = gridDelimited(rows, columns, ',', "\r\n", includeHeaders, true)
+
+public fun <Row> gridTsv(rows: GridRowSource<Row>, columns: Array<GridColumn<Row>>): String =
     gridDelimited(rows, columns, '\t', "\n", false, false)
 
 private fun <Row> gridDelimited(
-    rows: TableSource<Row>,
+    rows: GridRowSource<Row>,
     columns: Array<GridColumn<Row>>,
     delimiter: Char,
     newline: String,
@@ -39,12 +48,17 @@ private fun <Row> gridDelimited(
         if (headers || rowIndex > 0L)
             output.append(newline)
         val row = rows.rowAt(rowIndex)
+        val labelColumn =
+            when (row) {
+                case Data(_, _) -> None
+                case Total(val total) -> gridRowLabelColumn(exported.toArray(), total.aggregates)
+            }
         for (columnIndex in 0L ..< exported.size) {
             if (columnIndex > 0L)
                 output.append(delimiter)
             val column = exported[columnIndex]
             val text =
-                column.text(row) ?:
+                row.text(column, labelColumn) ?:
                     throw IllegalArgumentException(
                         Some(f"export column has no data text: ${column.id.value}")
                     )

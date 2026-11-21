@@ -62,6 +62,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
             columns(),
             query =
                 GridQuery(
+                    totals = GridTotals(GridTotalPlacement.Before, "全部筛选结果"),
                     aggregations =
                         [GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum"))]
                 ),

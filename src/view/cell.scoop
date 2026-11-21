@@ -1,10 +1,11 @@
 package scoop.grid
 
 import scoop.ui.*
+import scoop.ui.component.*
 
 internal class GridDataCellProps<Row>(
-    val row: Row,
-    val key: ViewKey,
+    val row: GridRow<Row>,
+    val key: GridRowKey,
     val rowIndex: Long,
     val columnIndex: Long,
     val column: GridColumn<Row>,
@@ -16,7 +17,8 @@ internal class GridDataCellProps<Row>(
     val columnSpan: Long,
     val selection: GridSelectionView<Row>?,
     val range: GridCellRangeBounds?,
-    val labels: GridLabels
+    val labels: GridLabels,
+    val labelColumn: GridColumnId?
 )
 
 /** One stable cell element hosts either its display content or its actual editor. */
@@ -60,20 +62,44 @@ internal class GridDataCell<Row>(
                     else
                         error
                 )
-                case None -> input.column.cell(
-                    input.row,
-                    Some(appearance.fonts),
-                    Some(appearance.body),
-                    Some(
-                        if (input.wraps)
-                            appearance.wrapping
-                        else
-                            appearance.paragraph
+                case None -> when (input.row) {
+                    case Data(val row, _) -> input.column.cell(
+                        row,
+                        Some(appearance.fonts),
+                        Some(appearance.body),
+                        Some(
+                            if (input.wraps)
+                                appearance.wrapping
+                            else
+                                appearance.paragraph
+                        )
                     )
-                )
+                    case Total(_) -> component(
+                        LabelProps(
+                            LabelText.Plain(
+                                input.row.text(input.column, input.labelColumn) ?: "",
+                                None
+                            ),
+                            Some(appearance.fonts),
+                            Some(
+                                if (input.wraps)
+                                    appearance.wrapping
+                                else
+                                    appearance.paragraph
+                            ),
+                            baseStyle = Some(appearance.body)
+                        ),
+                        { props, scope -> Label(props, scope) }
+                    )
+                }
             }
         val editable =
-            input.columnSpan == 1L && (input.column.editing?.editable(input.row) ?: false)
+            input.columnSpan ==
+                1L &&
+                when (input.row) {
+                    case Data(val row, _) -> input.column.editing?.editable(row) ?: false
+                    case Total(_) -> false
+                }
         val cell =
             element(
                 GridCellProps(
@@ -81,7 +107,7 @@ internal class GridDataCell<Row>(
                     input.rowIndex,
                     input.columnIndex,
                     input.column.id,
-                    input.column.text(input.row),
+                    input.row.text(input.column, input.labelColumn),
                     appearance,
                     Some(input.session),
                     content = Some(content),
@@ -107,14 +133,17 @@ internal class GridDataCell<Row>(
                         content,
                         { props, scope -> GridContent(props, scope) },
                         [
-                            input.selection?.cell(
-                                input.key,
-                                input.row,
-                                input.rowIndex,
-                                input.columnIndex,
-                                child
-                            ) ?:
-                                child
+                            when (input.row) {
+                                case Data(val row, val key) -> input.selection?.cell(
+                                    key,
+                                    row,
+                                    input.rowIndex,
+                                    input.columnIndex,
+                                    child
+                                ) ?:
+                                    child
+                                case Total(_) -> child
+                            }
                         ]
                     )
                 ]

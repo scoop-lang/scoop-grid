@@ -3,6 +3,7 @@ package scoop.grid.tests.aggregation
 import scoop.graphics.*
 import scoop.grid.*
 import scoop.surface.FrameSubmission
+import scoop.test.*
 import scoop.ui.*
 
 internal class AggregationScene(
@@ -42,6 +43,20 @@ internal class AggregationScene(
                     width = Some(620.0)
                     height = 620.0
                     rowHeight = 48.0
+                    if (probe.logical) {
+                        rowSizing =
+                            GridRowSizing.Explicit {
+                                value ->
+                                assertTrue(value > 0L && value < 10L)
+                                48.0
+                            }
+                        columnSpans =
+                            Some {
+                                value ->
+                                assertTrue(value > 0L && value < 10L)
+                                []
+                            }
+                    }
                     handle = Some(probe.handle)
                     enabled = probe.enabled.value
                     footer = Some(gridAggregationSummary(probe.model) { labels = totals })

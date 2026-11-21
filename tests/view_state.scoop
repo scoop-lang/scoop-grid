@@ -315,7 +315,7 @@ private class GridViewStateTest {
         val snapshot =
             GridViewState(
                 model.columnState,
-                selectedRows = [address.row, ViewKey.Number(0L)],
+                selectedRows = [address.row.dataKey!!, ViewKey.Number(0L)],
                 cellRange = Some(GridCellRange(savedAddress(0L), address)),
                 readingPosition = Some(GridReadingPosition(address.row, 12.0, 150.0)),
                 focusedCell = Some(address)
@@ -326,9 +326,12 @@ private class GridViewStateTest {
         assertEquals(snapshot.cellRange, model.cellRange)
         assertEquals(address.row, report.state.readingPosition!!.row)
         assertEquals(Some(address), report.state.focusedCell)
-        assertEquals(address.row, model.selectedRowKeys[0L])
+        assertEquals(address.row.dataKey!!, model.selectedRowKeys[0L])
         model.restoreViewState(
-            GridViewState(model.columnState, selectedRows = [ViewKey.Number(0L), address.row])
+            GridViewState(
+                model.columnState,
+                selectedRows = [ViewKey.Number(0L), address.row.dataKey!!]
+            )
         )
         assertEquals(ViewKey.Number(0L), model.selectedRowKeys[0L])
         assertEquals(0L, rows.reads)

@@ -24,9 +24,12 @@ internal class GridSelectionView<Row>(
         else
             GridRowActionResult.Rejected("网格数据模型已替换")
     fun semanticSelect(key: ViewKey, value: Boolean): SemanticActionResult {
-        if (!session.usesModel(model) || model.result.rows.indexOfKey(key) == None)
+        if (!session.usesModel(model))
             return SemanticActionResult.Unavailable
-        return when (change(key, value)) {
+        val at = model.result.rows.indexOfKey(key) ?: return SemanticActionResult.Unavailable
+        val dataKey =
+            model.result.rows.infoAt(at).dataKey ?: return SemanticActionResult.Unsupported
+        return when (change(dataKey, value)) {
             case Applied -> SemanticActionResult.Completed
             case Rejected(_) -> SemanticActionResult.Rejected
         }

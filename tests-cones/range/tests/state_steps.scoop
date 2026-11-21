@@ -169,7 +169,7 @@ internal fun RangeProbe.inspectViewState() {
         case 172 -> assertEquals(None, handle.editingCell)
         case 173 -> {
             restored()
-            assertEquals(33L, model.result.rows.rowAt(3L).value)
+            assertEquals(33L, nativeGridData(model.result.rows.rowAt(3L)).value)
         }
         case 176 -> {
             restoreRejected()

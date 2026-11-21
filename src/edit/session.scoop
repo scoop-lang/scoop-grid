@@ -80,7 +80,8 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
         val input = model ?: return Some(GridEditEndReason.Detached)
         val source = input.source
         val index =
-            source.indexOfKey(edit.address.row) ?: return Some(GridEditEndReason.RecordRemoved)
+            source.indexOfKey(edit.address.row.dataKey!!) ?:
+                return Some(GridEditEndReason.RecordRemoved)
         val column =
             input.findColumn(edit.address.column) ?: return Some(GridEditEndReason.ColumnChanged)
         if (column !== edit.column)
@@ -119,7 +120,11 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
             return false
         val column = input.findColumn(address.column) ?: return false
         val editing = column.editing ?: return false
-        val row = input.result.rows.rowAt(index)
+        val row =
+            when (input.result.rows.rowAt(index)) {
+                case Data(val row, _) -> row
+                case Total(_) -> return false
+            }
         if (!editing.editable(row) || !session.independent(row, column.id))
             return false
         when (current) {
@@ -165,7 +170,11 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
             return None
         val column = input.findColumn(address.column) ?: return None
         val editing = column.editing ?: return None
-        val row = input.result.rows.rowAt(index)
+        val row =
+            when (input.result.rows.rowAt(index)) {
+                case Data(val row, _) -> row
+                case Total(_) -> return None
+            }
         if (!editing.editable(row) || !session.independent(row, column.id))
             return None
         val draft = editing.create(address, row)
@@ -286,7 +295,7 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
             case None -> {}
         }
         val source = model!!.source
-        val row = source.rowAt(source.indexOfKey(edit.address.row)!!)
+        val row = source.rowAt(source.indexOfKey(edit.address.row.dataKey!!)!!)
         when (edit.draft.proposal(row)) {
             case Unchanged -> {
                 finish(edit, GridEditEndReason.Unchanged, restoreAfter(after))

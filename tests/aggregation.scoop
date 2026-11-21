@@ -453,7 +453,7 @@ private class GridAggregationTest {
         val model = aggregationModel([1L, 2L], aggregationColumn(gridLongValues(), [operation]))
         calls.action = Some { model.replaceData(aggregationRows([99L])) }
         assertFailsWith<IllegalStateException> { aggregateValue(model, "sum") }
-        assertEquals(99L, model.result.rows.rowAt(0L))
+        assertEquals(99L, testGridData(model.result.rows.rowAt(0L)))
         assertEquals(0L, model.query.aggregations.size)
     }
 }

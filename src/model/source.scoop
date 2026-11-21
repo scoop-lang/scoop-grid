@@ -5,7 +5,7 @@ import scoop.ui.ViewKey
 import scoop.ui.component.TableSource
 
 public class GridResult<Row> internal constructor(
-    public val rows: TableSource<Row>,
+    public val rows: GridRowSource<Row>,
     public val pageRows: TableSource<Row>,
     public val ordered: TableSource<Row>,
     public val totalRows: Long,

@@ -441,3 +441,9 @@ internal class GridEditingProbe {
         }
     }
 }
+
+internal fun <Row> nativeGridData(row: GridRow<Row>): Row =
+    when (row) {
+        case Data(val value, _) -> value
+        case Total(_) -> fail(Some("expected a business record"))
+    }

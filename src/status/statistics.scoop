@@ -17,7 +17,7 @@ public class GridRangeStatistics public constructor(
 )
 
 internal fun <Row> gridRangeStatistics(
-    rows: TableSource<Row>,
+    rows: GridRowSource<Row>,
     definitions: GridColumns<Row>,
     states: Array<GridColumnState>,
     range: GridCellRange
@@ -36,7 +36,7 @@ internal fun <Row> gridRangeStatistics(
     for (index in bounds.firstRow .. bounds.lastRow) {
         val row = rows.rowAt(index)
         for (column in columns) {
-            val value = column.numericValue(row) ?: continue
+            val value = row.numericValue(column) ?: continue
             count += BigInteger.ONE
             sum += value
             minimum = Some(minimum?.min(value) ?: value)

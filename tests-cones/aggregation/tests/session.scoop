@@ -34,6 +34,26 @@ private class GridAggregationWindowTest {
             probe.close()
         }
     }
+    @Test
+    fun `native logical totals share cells focus and retirement without business callbacks`() {
+        val probe = AggregationProbe(true)
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(0, probe.submissions)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            reportAggregationFailure(error)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
 }
 
 private fun reportAggregationFailure(error: Throwable) {
@@ -58,7 +78,7 @@ internal fun aggregateRows(values: Array<Long>): TableRows<Long> =
         }
     )
 
-internal class AggregationProbe: Closeable {
+internal class AggregationProbe(val logical: Boolean = false): Closeable {
     val handle = DataGridHandle()
     val enabled = state(true)
     val localized = state(false)
@@ -71,8 +91,25 @@ internal class AggregationProbe: Closeable {
         DataGridState(
             aggregateRows([4L, 1L, 3L, 2L]),
             columns(),
-            GridQuery(pagination = GridPagination.Page(0L, 2L)),
-            Some { _ -> changes += 1 }
+            GridQuery(
+                pagination = GridPagination.Page(0L, 2L),
+                aggregations =
+                    if (logical)
+                        [GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum"))]
+                    else
+                        [],
+                totals =
+                    if (logical)
+                        GridTotals(GridTotalPlacement.After, "Grand total")
+                    else
+                        GridTotals()
+            ),
+            Some { _ -> changes += 1 },
+            rowSelection =
+                if (logical)
+                    GridRowSelectionMode.Multiple
+                else
+                    GridRowSelectionMode.Disabled
         )
     val address = GridCellAddress(ViewKey.Number(1L), GridColumnId("amount"))
     var totals: GridAggregations? = None
@@ -83,6 +120,12 @@ internal class AggregationProbe: Closeable {
     var category: NativeNode? = None
     var amount: NativeNode? = None
     var summary: NativeNode? = None
+    var totalTable: NativeNode? = None
+    var totalCell: NativeNode? = None
+    var totalRow: NativeNode? = None
+    var retiredTotal: NativeNode? = None
+    val totalAddress =
+        GridCellAddress(GridRowKey.Total(GridTotalKey.AllFiltered), GridColumnId("amount"))
     var frame: ComponentScope? = None
     var active: ActiveApplication? = None
     var window: Window? = None

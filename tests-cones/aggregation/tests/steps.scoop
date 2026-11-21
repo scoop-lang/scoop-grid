@@ -5,6 +5,8 @@ import scoop.test.*
 import scoop.ui.*
 
 internal fun AggregationProbe.accepted() {
+    if (logical)
+        return acceptedTotal()
     if (finished || waiting || !(window?.isFocused ?: false))
         return
     waiting = true
@@ -38,6 +40,8 @@ internal fun AggregationProbe.accepted() {
 }
 
 internal fun AggregationProbe.inspect(tag: Int) {
+    if (logical)
+        return inspectTotal(tag)
     assertEquals(phase, tag)
     when (phase) {
         case 0 -> {
@@ -154,6 +158,8 @@ internal fun AggregationProbe.inspect(tag: Int) {
 }
 
 internal fun AggregationProbe.completed(tag: Int, result: Int) {
+    if (logical)
+        return completedTotal(tag, result)
     assertEquals(phase, tag)
     val expected =
         if (phase == 10) {

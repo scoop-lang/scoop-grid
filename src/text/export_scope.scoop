@@ -9,12 +9,18 @@ public enum GridExportScope {
     CurrentPage, SelectedRows, AllFiltered
 }
 
+public enum GridExportData {
+    Records, Displayed
+}
+
 public class GridCsvOptions public constructor(
     public val scope: GridExportScope = GridExportScope.CurrentPage,
     public val includeHeaders: Boolean = true,
     public val includeHiddenColumns: Boolean = false,
     public val includePinnedRows: Boolean = true,
-    public val columns: Array<GridColumnId>? = None
+    public val columns: Array<GridColumnId>? = None,
+    public val data: GridExportData = GridExportData.Records,
+    public val includeTotals: Boolean = true
 )
 
 internal fun <Row> gridExportCsv(
@@ -55,21 +61,38 @@ private fun <Row> gridExportRows(
     snapshot: GridComputed<Row>,
     selection: GridSelectedRows,
     options: GridCsvOptions
-): TableSource<Row> {
+): GridRowSource<Row> {
+    val totals =
+        if (options.data == GridExportData.Displayed && options.includeTotals)
+            snapshot.query.totals
+        else
+            GridTotals()
     val result =
         when (options.scope) {
-            case CurrentPage -> snapshot.result
+            case CurrentPage -> if (totals == snapshot.query.totals)
+                snapshot.result
+            else
+                gridPinResult(
+                    snapshot.result.pageRows,
+                    snapshot.result.ordered,
+                    snapshot.result.totalRows,
+                    snapshot.result.pageCount,
+                    snapshot.pins,
+                    snapshot.result.aggregates,
+                    totals
+                )
             case AllFiltered -> gridPinResult(
                 snapshot.result.ordered,
                 snapshot.result.ordered,
                 snapshot.result.totalRows,
                 1L,
                 snapshot.pins,
-                snapshot.result.aggregates
+                snapshot.result.aggregates,
+                totals
             )
             case SelectedRows -> {
                 if (options.includePinnedRows)
-                    return GridPickedRows(snapshot.source, selection.keys)
+                    return GridDataRows(GridPickedRows(snapshot.source, selection.keys))
                 val pinned = HashSet<ViewKey>()
                 for (keys in [snapshot.pins.top, snapshot.pins.bottom])
                     for (key in keys)
@@ -78,11 +101,11 @@ private fun <Row> gridExportRows(
                 for (key in selection.keys)
                     if (!pinned.contains(key))
                         keys.add(key)
-                return GridPickedRows(snapshot.source, keys.toArray())
+                return GridDataRows(GridPickedRows(snapshot.source, keys.toArray()))
             }
         }
     return if (options.includePinnedRows)
         result.rows
     else
-        GridPageRows(result.rows, result.topCount, result.bodyCount)
+        GridSliceRows(result.rows, result.topCount, result.bodyCount)
 }

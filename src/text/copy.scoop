@@ -4,10 +4,11 @@ import scoop.ui.component.TableSource
 
 /** Reads one captured result and keeps empty fields for columns without copy text. */
 internal fun <Row> gridCopyText(
-    rows: TableSource<Row>,
+    rows: GridRowSource<Row>,
     columns: Array<GridColumn<Row>>,
     bounds: GridCellRangeBounds,
-    includeHeaders: Boolean
+    includeHeaders: Boolean,
+    labelColumn: GridColumnId?
 ): String {
     val output = StringBuilder()
     if (includeHeaders) {
@@ -35,7 +36,7 @@ internal fun <Row> gridCopyText(
             val column = columns[at]
             val value =
                 if (column.exportable)
-                    column.text(row) ?: ""
+                    row.text(column, labelColumn) ?: ""
                 else
                     ""
             appendGridField(output, value, '\t')

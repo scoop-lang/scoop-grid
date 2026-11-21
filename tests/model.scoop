@@ -86,7 +86,7 @@ private fun columns(calls: Calls): Array<GridColumn<Record>> =
 private fun filter(id: String, condition: GridCondition): GridFilter =
     GridFilter.Column(GridColumnId(id), condition)
 
-private fun ids(source: TableSource<Record>): Array<Long> =
+private fun <Row> ids(source: TableSource<Row>): Array<Long> =
     Array<Long>(source.count) {
         index -> when (source.keyAt(index)) {
             case Number(val id) -> id

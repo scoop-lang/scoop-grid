@@ -130,7 +130,7 @@ private class GridColumnStateTest {
         val result = model.result
         gesture.restore()
         assertEquals(None, model.columnState[0L].width)
-        assertEquals(9L, model.result.rows.rowAt(0L))
+        assertEquals(9L, testGridData(model.result.rows.rowAt(0L)))
         assertTrue(result === model.result)
         val restored = model.columnState
         gesture.restore()

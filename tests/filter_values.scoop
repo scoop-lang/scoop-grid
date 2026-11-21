@@ -69,7 +69,7 @@ private class GridFilterValuesTest {
             )
         )
         assertEquals(1L, model.result.rows.count)
-        assertEquals(9007199254740992L, model.result.rows.rowAt(0L))
+        assertEquals(9007199254740992L, testGridData(model.result.rows.rowAt(0L)))
         val afterQuery = calls.reads
         model.setColumnState(GridColumnState(id, visible = false, width = Some(210.0)))
         assertTrue(model.filterValues(id) === candidates)

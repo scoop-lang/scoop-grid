@@ -19,6 +19,11 @@ internal class GridSelectedRows(val keys: Array<ViewKey>) {
         }
     }
     fun contains(key: ViewKey): Boolean = values.contains(key)
+    fun contains(key: GridRowKey): Boolean =
+        when (key.dataKey) {
+            case Some(val value) -> contains(value)
+            case None -> false
+        }
     fun same(other: GridSelectedRows): Boolean {
         if (keys.size != other.keys.size)
             return false

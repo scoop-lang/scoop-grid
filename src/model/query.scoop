@@ -27,7 +27,8 @@ public class GridQuery public constructor(
     public val filter: GridFilter = GridFilter.All,
     public val quickFilter: String = "",
     public val pagination: GridPagination = GridPagination.Disabled,
-    public val aggregations: Array<GridAggregationSelection> = []
+    public val aggregations: Array<GridAggregationSelection> = [],
+    public val totals: GridTotals = GridTotals()
 ): Equals<GridQuery> {
     init {
         when (pagination) {
@@ -39,18 +40,20 @@ public class GridQuery public constructor(
         }
     }
     public override operator fun equals(other: GridQuery): Boolean =
-        gridCriteriaEqual(this, other) && pagination == other.pagination
+        gridCriteriaEqual(this, other) && pagination == other.pagination && totals == other.totals
 
     public fun withPagination(value: GridPagination): GridQuery =
-        GridQuery(sorting, filter, quickFilter, value, aggregations)
+        GridQuery(sorting, filter, quickFilter, value, aggregations, totals)
     public fun withSorting(value: Array<GridSort>): GridQuery =
-        GridQuery(value, filter, quickFilter, pagination, aggregations)
+        GridQuery(value, filter, quickFilter, pagination, aggregations, totals)
     public fun withFilter(value: GridFilter): GridQuery =
-        GridQuery(sorting, value, quickFilter, pagination, aggregations)
+        GridQuery(sorting, value, quickFilter, pagination, aggregations, totals)
     public fun withQuickFilter(value: String): GridQuery =
-        GridQuery(sorting, filter, value, pagination, aggregations)
+        GridQuery(sorting, filter, value, pagination, aggregations, totals)
     public fun withAggregations(value: Array<GridAggregationSelection>): GridQuery =
-        GridQuery(sorting, filter, quickFilter, pagination, value)
+        GridQuery(sorting, filter, quickFilter, pagination, value, totals)
+    public fun withTotals(value: GridTotals): GridQuery =
+        GridQuery(sorting, filter, quickFilter, pagination, aggregations, value)
 }
 
 internal fun gridCriteriaEqual(left: GridQuery, right: GridQuery): Boolean =

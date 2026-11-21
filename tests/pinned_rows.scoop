@@ -31,13 +31,13 @@ private fun pinModel(source: PinRows, query: GridQuery = GridQuery()): DataGridS
         query
     )
 
-private fun expectPinRows(expected: Array<Long>, source: TableSource<Long>) {
+private fun expectPinRows(expected: Array<Long>, source: GridRowSource<Long>) {
     assertEquals(expected.size, source.count)
     for (at in 0L ..< expected.size) {
         val key = ViewKey.Number(expected[at])
         assertEquals(key, source.keyAt(at))
         assertEquals(Some(at), source.indexOfKey(key))
-        assertEquals(expected[at], source.rowAt(at))
+        assertEquals(expected[at], testGridData(source.rowAt(at)))
     }
 }
 
@@ -77,7 +77,7 @@ private class GridPinnedRowsTest {
         ) {
             val at = rows.indexOfKey(ViewKey.Number(key))!!
             assertEquals(ViewKey.Number(key), rows.keyAt(at))
-            assertEquals(key, rows.rowAt(at))
+            assertEquals(key, testGridData(rows.rowAt(at)))
         }
         assertEquals(ViewKey.Number(1L), rows.keyAt(3L))
         assertEquals(ViewKey.Number(16L), rows.keyAt(18L))
@@ -99,7 +99,7 @@ private class GridPinnedRowsTest {
         assertTrue(ordered === model.result.ordered)
         assertEquals(0L, source.reads)
         expectPinRows([10L, 5L, 4L, 6L, 0L, 7L], model.result.rows)
-        expectPinRows([4L, 5L, 6L, 7L], model.result.pageRows)
+        expectPinRows([4L, 5L, 6L, 7L], GridDataRows(model.result.pageRows))
         assertEquals(12L, model.result.totalRows)
         assertEquals(3L, model.result.pageCount)
         assertEquals(2L, model.result.topCount)

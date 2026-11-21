@@ -13,12 +13,22 @@ internal fun <Row> gridPinResult(
     total: Long,
     pages: Long,
     pins: GridPinnedRows,
-    aggregates: GridAggregations
+    aggregates: GridAggregations,
+    totals: GridTotals = GridTotals()
 ): GridResult<Row> {
     val top = GridPickedRows(ordered, pins.top)
     val bottom = GridPickedRows(ordered, pins.bottom)
     if (top.count == 0L && bottom.count == 0L)
-        return GridResult(page, page, ordered, total, pages, 0L, 0L, aggregates)
+        return GridResult(
+            gridTotalRows(GridDataRows(page), aggregates, totals),
+            page,
+            ordered,
+            total,
+            pages,
+            0L,
+            0L,
+            aggregates
+        )
     val omitted = ArrayList<Long>()
     for (fixed in [top, bottom])
         for (index in 0L ..< fixed.count)
@@ -32,7 +42,12 @@ internal fun <Row> gridPinResult(
             page
         else
             GridUnpinnedRows(page, omitted.toArray())
-    val rows = GridPresentedRows(top, body, bottom)
+    val rows =
+        GridCombinedRows(
+            GridDataRows(top),
+            gridTotalRows(GridDataRows(body), aggregates, totals),
+            GridDataRows(bottom)
+        )
     return GridResult(rows, page, ordered, total, pages, top.count, bottom.count, aggregates)
 }
 
@@ -93,42 +108,5 @@ private class GridUnpinnedRows<Row>(
             None
         else
             Some(at - left)
-    }
-}
-
-private class GridPresentedRows<Row>(
-    private val top: TableSource<Row>,
-    private val body: TableSource<Row>,
-    private val bottom: TableSource<Row>
-): TableSource<Row> {
-    public override val count: Long get() = top.count + body.count + bottom.count
-    private fun row(index: Long): (TableSource<Row>, Long) {
-        gridRequire(index >= 0L && index < count, "grid row index is out of range")
-        return if (index < top.count)
-            (top, index)
-        else
-            if (index - top.count < body.count)
-                (body, index - top.count)
-            else
-                (bottom, index - top.count - body.count)
-    }
-    public override fun keyAt(index: Long): ViewKey {
-        val(source, at) = row(index)
-        return source.keyAt(at)
-    }
-    public override fun rowAt(index: Long): Row {
-        val(source, at) = row(index)
-        return source.rowAt(at)
-    }
-    public override fun indexOfKey(key: ViewKey): Long? {
-        when (val at = top.indexOfKey(key)) {
-            case Some(_) -> return at
-            case None -> {}
-        }
-        when (bottom.indexOfKey(key)) {
-            case Some(val at) -> return Some(top.count + body.count + at)
-            case None -> {}
-        }
-        return body.indexOfKey(key)?.plus(top.count)
     }
 }

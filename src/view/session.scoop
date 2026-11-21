@@ -39,7 +39,7 @@ internal class GridSession<Row>: GridMount {
     private var owner: ComponentScope? = None
     private var model: DataGridState<Row>? = None
     val currentModel: DataGridState<Row>? get() = model
-    private val rows: TableSource<Row>? get() = model?.result?.rows
+    private val rows: GridRowSource<Row>? get() = model?.result?.rows
     private var columns: GridColumnsPlan<Row>? = None
     private var spanColumns: GridSpanColumns? = None
     private var columnSpans: ((Row) -> Array<GridColumnSpan>)? = None
@@ -178,7 +178,21 @@ internal class GridSession<Row>: GridMount {
             case Some(val value) -> value.rowSelection != GridRowSelectionMode.Disabled
             case None -> false
         }
-    fun isRowSelected(key: ViewKey): Boolean = model?.isRowSelected(key) ?: false
+    fun isRowSelected(key: GridRowKey): Boolean =
+        when (key.dataKey) {
+            case Some(val value) -> model?.isRowSelected(value) ?: false
+            case None -> false
+        }
+    fun setRowSelected(key: GridRowKey, value: Boolean, extend: Boolean): GridRowActionResult =
+        when (key.dataKey) {
+            case Some(val row) -> setRowSelected(row, value, extend)
+            case None -> GridRowActionResult.Rejected("当前结果行不可选择")
+        }
+    fun pinRow(key: GridRowKey, pin: GridRowPin): GridRowActionResult =
+        when (key.dataKey) {
+            case Some(val row) -> pinRow(row, pin)
+            case None -> GridRowActionResult.Rejected("当前结果行不可固定")
+        }
     public override fun setRowSelected(
         key: ViewKey,
         value: Boolean,
@@ -358,7 +372,7 @@ internal class GridSession<Row>: GridMount {
         val target = next!!
         if (extending) {
             val current = model ?: return false
-            val end = GridCellAddress(source.keyAt(target.row), plan.columns[target.column].id)
+            val end = GridCellAddress(source.rowKeyAt(target.row), plan.columns[target.column].id)
             if (
                 current.setCellRange(Some(GridCellRange(current.cellRange?.anchor ?: address, end)))
             )
@@ -366,7 +380,8 @@ internal class GridSession<Row>: GridMount {
             return true
         }
         if (target.row != row || target.column != column) {
-            val address = GridCellAddress(source.keyAt(target.row), plan.columns[target.column].id)
+            val address =
+                GridCellAddress(source.rowKeyAt(target.row), plan.columns[target.column].id)
             editing.leave {
                 model?.clearCellRange()
                 restore(address, target.row)
@@ -386,7 +401,7 @@ internal class GridSession<Row>: GridMount {
         val focus = bodyFocus ?: return None
         val row = focus.pendingItem ?: return None
         val address = intent ?: return None
-        return if (address.row == row)
+        return if (address.row.viewKey == row)
             Some(address)
         else
             None
@@ -553,7 +568,10 @@ internal class GridSession<Row>: GridMount {
         val at = columns.indexOf(address.column) ?: return None
         return Some(
             when (columnSpans) {
-                case Some(val resolve) -> columns.resolve(resolve(source.rowAt(row))).span(at)
+                case Some(val resolve) -> when (source.rowAt(row)) {
+                    case Data(val value, _) -> columns.resolve(resolve(value)).span(at)
+                    case Total(_) -> GridCellSpan(at)
+                }
                 case None -> GridCellSpan(at)
             }
         )
@@ -594,7 +612,7 @@ internal class GridSession<Row>: GridMount {
                     case None -> cells[target]?.handle
                 }
             }
-        val accepted = focus.requestFocus(target.row, select)
+        val accepted = focus.requestFocus(target.row.viewKey, select)
         if (!accepted)
             intent = None
         return accepted
@@ -610,12 +628,12 @@ internal class GridSession<Row>: GridMount {
         }
         val at = source.indexOfKey(address.row) ?: min(index, source.count - 1L)
         if (model?.visibleColumn(address.column) ?: false) {
-            requestCell(GridCellAddress(source.keyAt(at), address.column))
+            requestCell(GridCellAddress(source.rowKeyAt(at), address.column))
             return
         }
         for (column in plan.columns)
             if (model?.visibleColumn(column.id) ?: false) {
-                requestCell(GridCellAddress(source.keyAt(at), column.id))
+                requestCell(GridCellAddress(source.rowKeyAt(at), column.id))
                 return
             }
         entry?.requestFocus()

@@ -57,17 +57,18 @@ internal fun <Row> gridMenuCommands(input: GridMenuProps<Row>): Array<GridMenuCo
                 result.add(GridMenuCommand.ClearRange)
             if (input.editable)
                 result.add(GridMenuCommand.Edit)
-            if (model.isRowSelected(address.row))
+            val row = address.row.dataKey ?: return result.toArray()
+            if (model.isRowSelected(row))
                 result.add(GridMenuCommand.DeselectRow)
             else
-                if (model.isRowSelectable(address.row))
+                if (model.isRowSelectable(row))
                     result.add(GridMenuCommand.SelectRow)
             val pins = model.pinnedRows
-            if (!pins.top.contains(address.row))
+            if (!pins.top.contains(row))
                 result.add(GridMenuCommand.PinTop)
-            if (!pins.bottom.contains(address.row))
+            if (!pins.bottom.contains(row))
                 result.add(GridMenuCommand.PinBottom)
-            if (pins.top.contains(address.row) || pins.bottom.contains(address.row))
+            if (pins.top.contains(row) || pins.bottom.contains(row))
                 result.add(GridMenuCommand.UnpinRow)
         }
     }

@@ -36,7 +36,7 @@ internal class GridNavigationProbe(private val editing: GridEditingProbe) {
             case Some(val address) -> {
                 val row =
                     when (address.row) {
-                        case Number(val value) -> value.toString()
+                        case Data(ViewKey.Number(val value)) -> value.toString()
                         else -> "keyed"
                     }
                 row + "/" + address.column.value

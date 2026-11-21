@@ -173,7 +173,7 @@ internal fun ColumnsProbe.inspectReorder() {
         }
         case 157 -> {
             movePrefix(["c0", "c2", "c1", "c3", "c4"])
-            assertEquals(1L, model.result.rows.rowAt(0L))
+            assertEquals(1L, nativeGridData(model.result.rows.rowAt(0L)))
         }
         case 162 -> moveUnchanged()
         case 167 -> moveUnchanged()

@@ -144,7 +144,7 @@ internal class ColumnsProbe: Closeable {
                     Array<TableRecord<Long>>(before.count) {
                         index -> TableRecord(
                             before.keyAt(index),
-                            if (before.keyAt(index) == change.address.row)
+                            if (before.keyAt(index) == change.address.row.dataKey!!)
                                 change.value
                             else
                                 before.rowAt(index)
@@ -297,3 +297,9 @@ internal class ColumnsProbe: Closeable {
         frames?.close()
     }
 }
+
+internal fun <Row> nativeGridData(row: GridRow<Row>): Row =
+    when (row) {
+        case Data(val value, _) -> value
+        case Total(_) -> fail(Some("expected a business record"))
+    }

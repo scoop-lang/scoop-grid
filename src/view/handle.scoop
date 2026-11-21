@@ -15,9 +15,10 @@ public enum GridCopyResult {
     Copied, Rejected(String)
 }
 
-public struct GridCellAddress(val row: ViewKey, val column: GridColumnId): Equals<
+public struct GridCellAddress(val row: GridRowKey, val column: GridColumnId): Equals<
     GridCellAddress
 >, Hash {
+    public constructor(row: ViewKey, column: GridColumnId): this(GridRowKey.Data(row), column) {}
     public override operator fun equals(other: GridCellAddress): Boolean =
         row == other.row && column == other.column
     public override fun hash(): Long = row.hash() xor column.hash()
@@ -107,7 +108,10 @@ public class DataGridHandle public constructor() {
     }
     public fun beginEdit(address: GridCellAddress): Boolean {
         guard.checkMutation()
-        gridRequire(address.row != ViewKey.Position, "grid editing requires an explicit row key")
+        gridRequire(
+            address.row.dataKey != Some(ViewKey.Position),
+            "grid editing requires an explicit row key"
+        )
         return target?.beginEdit(address) ?: false
     }
     public fun commitEdit(): GridEditAttempt {
@@ -120,12 +124,18 @@ public class DataGridHandle public constructor() {
     }
     public fun pasteCell(address: GridCellAddress, text: String): GridPasteResult {
         guard.checkMutation()
-        gridRequire(address.row != ViewKey.Position, "grid pasting requires an explicit row key")
+        gridRequire(
+            address.row.dataKey != Some(ViewKey.Position),
+            "grid pasting requires an explicit row key"
+        )
         return target?.pasteCell(address, text) ?: GridPasteResult.Rejected("网格未挂载")
     }
     public fun focusCell(address: GridCellAddress): Boolean {
         guard.checkMutation()
-        gridRequire(address.row != ViewKey.Position, "grid focus requires an explicit row key")
+        gridRequire(
+            address.row.dataKey != Some(ViewKey.Position),
+            "grid focus requires an explicit row key"
+        )
         return target?.focus(address) ?: false
     }
     public fun cancelFocus() {

@@ -36,7 +36,7 @@ internal class GridEditInteractionProbe(private val probe: GridEditingProbe) {
             }
             case 49 -> if (probe.outside.hasFocus) {
                 assertEquals(None, handle.editingCell)
-                assertEquals("blur", probe.model.result.rows.rowAt(1L).name)
+                assertEquals("blur", nativeGridData(probe.model.result.rows.rowAt(1L)).name)
                 assertTrue(handle.beginEdit(probe.address(3L, "amount")))
                 probe.phase = 50
             }

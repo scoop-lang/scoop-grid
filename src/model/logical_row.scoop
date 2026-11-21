@@ -1,0 +1,127 @@
+package scoop.grid
+
+import scoop.math.BigDecimal
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+public enum GridTotalKey {
+    AllFiltered
+}
+
+public enum GridRowKey: Equals<GridRowKey>, Hash {
+    Data(ViewKey), Total(GridTotalKey)
+    public override operator fun equals(other: GridRowKey): Boolean =
+        when ((this, other)) {
+            case(Data(val a), Data(val b)) -> a == b
+            case(Total(val a), Total(val b)) -> a == b
+            else -> false
+        }
+    public override fun hash(): Long =
+        when (this) {
+            case Data(val key) -> key.hash() xor 1L
+            case Total(_) -> 2L
+        }
+    public val viewKey: ViewKey get() =
+        when (this) {
+            case Data(val key) -> when (key) {
+                case Number(_) -> key
+                case Text(val value) -> ViewKey.Text(f"d${value}")
+                case Position -> throw IllegalArgumentException(
+                    Some("grid row requires an explicit key")
+                )
+            }
+            case Total(GridTotalKey.AllFiltered) -> ViewKey.Text("t:all")
+        }
+    public val dataKey: ViewKey? get() =
+        when (this) {
+            case Data(val key) -> Some(key)
+            case Total(_) -> None
+        }
+}
+
+public enum GridTotalPlacement {
+    Hidden, Before, After
+}
+
+public struct GridTotals(
+    val placement: GridTotalPlacement = GridTotalPlacement.Hidden,
+    val label: String = "总计"
+): Equals<GridTotals> {
+    public override operator fun equals(other: GridTotals): Boolean =
+        placement == other.placement && label == other.label
+}
+
+public class GridTotalRow internal constructor(
+    public val key: GridTotalKey,
+    public val label: String,
+    public val aggregates: GridAggregations
+)
+
+/** Metadata access never materializes a business record. */
+public enum GridRowInfo {
+    Data(ViewKey), Total(GridTotalRow)
+    public val key: GridRowKey get() =
+        when (this) {
+            case Data(val key) -> GridRowKey.Data(key)
+            case Total(val total) -> GridRowKey.Total(total.key)
+        }
+    public val dataKey: ViewKey? get() = key.dataKey
+    public val label: String? get() =
+        when (this) {
+            case Data(_) -> None
+            case Total(val total) -> Some(total.label)
+        }
+}
+
+public enum GridRow<Row> {
+    Data(Row, ViewKey), Total(GridTotalRow)
+    public val info: GridRowInfo get() =
+        when (this) {
+            case Data(_, val key) -> GridRowInfo.Data(key)
+            case Total(val total) -> GridRowInfo.Total(total)
+        }
+    public val key: GridRowKey get() = info.key
+    public fun text(column: GridColumn<Row>, labelColumn: GridColumnId? = None): String? =
+        when (this) {
+            case Data(val row, _) -> column.text(row)
+            case Total(val total) -> Some(
+                when (total.aggregates.total(column.id)) {
+                    case Some(GridAggregateDisplay.Value(val text)) -> text
+                    case Some(GridAggregateDisplay.Missing) -> ""
+                    case Some(GridAggregateDisplay.Failed(val message)) -> message
+                    case None -> if (labelColumn == Some(column.id))
+                        total.label
+                    else
+                        ""
+                }
+            )
+        }
+    public fun numericValue(column: GridColumn<Row>): BigDecimal? =
+        when (this) {
+            case Data(val row, _) -> column.numericValue(row)
+            case Total(val total) -> total.aggregates.numericTotal(column.id)
+        }
+}
+
+public interface GridRowSource<Row>: TableSource<GridRow<Row>> {
+    public fun infoAt(index: Long): GridRowInfo
+    public fun rowKeyAt(index: Long): GridRowKey = infoAt(index).key
+    public fun indexOfKey(key: GridRowKey): Long? =
+        if (key.dataKey == Some(ViewKey.Position))
+            None
+        else
+            indexOfKey(key.viewKey)
+}
+
+internal fun <Row> gridRowLabelColumn(
+    columns: Array<GridColumn<Row>>,
+    aggregates: GridAggregations
+): GridColumnId? {
+    for (column in columns)
+        if (column.exportable)
+            when (aggregates.total(column.id)) {
+                case None -> return Some(column.id)
+                case Some(_) -> {}
+            }
+    return None
+}

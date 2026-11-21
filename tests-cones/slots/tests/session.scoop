@@ -78,7 +78,7 @@ internal class SlotsProbe: Closeable {
             Array<TableRecord<Long>>(100L) { index -> TableRecord(ViewKey.Number(index), index) }
         )
     val model = DataGridState(records, columns(), onQueryChange = Some { _ -> queries += 1 })
-    var rows: TableSource<Long>? = None
+    var rows: GridRowSource<Long>? = None
     var scrollBefore = Point(0.0, 0.0)
     var gridSize = Size(0.0, 0.0)
     var frame: ComponentScope? = None
