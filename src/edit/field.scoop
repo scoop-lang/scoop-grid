@@ -32,6 +32,6 @@ internal fun gridEditorSemantics(options: GridEditorOptions): ComponentSemantics
             if (options.submitting)
                 Some(options.savingText)
             else
-                options.error,
+                None,
         error = options.error
     )

@@ -2,7 +2,7 @@
 
 基于 Scoop 原生 UI 的独立 DataGrid 库，公开包为 `scoop.grid`。本阶段范围见 [设计](docs/DESIGN.md)，实际交付与验证见 [进度](docs/PROGRESS.md)。
 
-本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
+本库尚未发布版本。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。本机规模、耗时与资源结果见 [性能记录](docs/PERFORMANCE.md)，其中明确区分惰性视口与完整本地查询。
 
 已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、透视、按层级展开、小计与总计，以及普通或嵌套主从详情、外部分页／区间加载和未知总数。公开合同见 [SPEC.md](docs/SPEC.md)。模型用法例如：
 
@@ -171,6 +171,8 @@ scoop test --release .
 
 [示例](examples/basic/src/main.scoop) 的名称和金额提供完整的取值、编辑、同步校验及不可变数据替换用法。原生回归分别覆盖受控文本事务和真实系统拼音输入；系统候选取消、选词后提交已经通过，输入源会恢复。
 
+十万行示例保留完整查询、列工具、编辑与选择功能，查找栏旁的主题按钮循环切换 Shadcn、Material、Fluent 和 macOS，另一个按钮切换浅色／深色。切换使用现有 ThemeSource，不重建模型或活动编辑器；非法草稿和错误提示会保留，修正后继续保存。
+
 运行 [十万行示例](examples/basic/src/main.scoop) 与本机窗口回归：
 
 ```sh
@@ -178,6 +180,8 @@ scoop run --release examples/basic
 scoop run --release examples/editors
 scoop run --release examples/tree
 scoop run --release examples/pivot
+scoop run --release examples/details
+scoop run --release examples/external
 scoop check --tests --release tests-cones/window
 scoop test --release tests-cones/window
 scoop check --tests --release tests-cones/controls
@@ -216,9 +220,17 @@ scoop check --tests --release tests-cones/tree
 scoop test --release tests-cones/tree
 scoop check --tests --release tests-cones/pivot
 scoop test --release tests-cones/pivot
+scoop check --tests --release tests-cones/details
+scoop test --release tests-cones/details
+scoop check --tests --release tests-cones/external
+scoop test --release tests-cones/external
+scoop check --tests --release tests-cones/performance
+scoop test --release tests-cones/performance
 ```
 
-原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合，`pinned` 覆盖顶部／底部固定、分页去重、筛选／删除、可变高度、原生身份与编辑保留，以及零正文和三段内容测宽。
+模型、布局及只读无障碍元数据检查不需要测试窗口取得系统焦点。真实键盘、系统输入法组合输入、窗口切换及焦点恢复阶段需要已解锁的同一登录桌面和正常的窗口激活；不能用无焦点的结果代替这些检查。原生窗口测试串行运行，每个 Cone 在独立进程里运行一个 Application。
+
+`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合，`pinned` 覆盖顶部／底部固定、分页去重、筛选／删除、可变高度、原生身份与编辑保留，以及零正文和三段内容测宽。
 
 `spans` 覆盖跨列锚点与导航、远端原生定位、规则变化、只读编辑限制，以及固定行列、自动行高、内容测宽、多级表头和零宽成员的组合。
 
@@ -227,6 +239,10 @@ scoop test --release tests-cones/pivot
 `slots` 覆盖工具栏、底栏、空状态、加载和错误 View 的几何、身份、优先级与 busy，网格禁用期间的真实按钮、零高度焦点、编辑草稿、外部焦点提交、异步保存和关闭清理。
 
 `aggregation` 覆盖真实列面板选择、全筛选集总计、快速筛选保留聚合、排序／分页复用、编辑拒绝与等待保存、动态文案、数值错误、空结果、清除操作和关闭弹层。
+
+`details` 覆盖详情自然高度、独立输入、嵌套 Grid、弹层、父行折叠与卸载；`external` 覆盖稀疏远处定位、加载焦点、取消、失败重试、原记录保存与未知总数收敛。`performance` 测量一万行管理表、十万行宽表、百万行惰性来源，以及四万条记录的完整排序／分组／透视，检查停帧和关闭释放，不设置机器速度门槛。
+
+四套主题的明暗界面及带错误草稿的主题切换已通过实际界面检查；原生协议、跨进程无障碍客户端和真实系统拼音分别验证。未运行 VoiceOver 操作或专用触摸硬件，触点组合属于受控输入回归。按本阶段要求仅验证本机 macOS。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

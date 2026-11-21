@@ -1,0 +1,68 @@
+package scoop.grid.tests.performance
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+
+internal class PerfScene(
+    private val probe: PerfProbe,
+    private val sample: PerfSample,
+    scope: ComponentScope
+): Component(scope) {
+    public override fun render(): View {
+        val sample = this.sample
+        return element(
+            { mount -> PerfFrame(probe, sample, mount) },
+            [
+                dataGrid(sample.model) {
+                    width = Some(1200.0)
+                    height = 600.0
+                    rowHeight =
+                        if (sample.configuration.controls)
+                            48.0
+                        else
+                            28.0
+                    headerHeight = 32.0
+                    overscan = 56.0
+                    handle = Some(sample.handle)
+                    scroll = Some(sample.scroll)
+                    rowSizing =
+                        if (sample.configuration.contentHeight)
+                            GridRowSizing.Content([GridColumnId("c2"), GridColumnId("c150")])
+                        else
+                            GridRowSizing.Fixed
+                }
+            ]
+        )
+    }
+}
+
+private class PerfFrame(
+    private val probe: PerfProbe,
+    private val sample: PerfSample,
+    scope: ComponentScope
+): Element<MonotonicInstant>(scope) {
+    init {
+        probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        MonotonicInstant
+    > {
+        val started = MonotonicTimeSource.now()
+        val size = constraints.constrain(Size(1200.0, 600.0))
+        context.measureChild(0L, Constraints.tight(size))
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(LayoutMetrics(size), started)
+    }
+    public override fun scene(context: SceneContext, started: MonotonicInstant) {
+        sample.cells.epoch += 1L
+        val epoch = sample.cells.epoch
+        context.children()
+        context.onFrameComplete {
+            completion -> if (completion.submission == FrameSubmission.Accepted)
+                probe.accepted(sample, epoch, elapsedNs(started))
+        }
+    }
+}

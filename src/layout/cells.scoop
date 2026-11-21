@@ -455,11 +455,7 @@ internal class GridCell<Row>(
                         input.text,
                 readOnly = !input.editable,
                 invalid = input.error != None,
-                description =
-                    if (input.error != None)
-                        input.error
-                    else
-                        input.description,
+                description = input.description,
                 automationId =
                     if (input.address == None)
                         Some(input.drag?.target?.automationId() ?: f"grid-header-${input.id.value}")

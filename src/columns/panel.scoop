@@ -473,16 +473,19 @@ public class GridColumnsPanel<Row> public constructor(
                         semantics = gridColumnControl(current.id, "width", labels.widthName(title))
                         onSubmit = { _ -> this @GridColumnsPanel.setWidth() }
                     }
-                ) { grow = 1.0 }
-                add(
+                ) {
+                    basis = FlexBasis.Fixed(0.0)
+                    grow = 1.0
+                }
+                item(
                     columnsButton(labels.apply, { this @GridColumnsPanel.setWidth() }) {
                         enabled = active
                         fonts = input.fonts
                         theme = input.theme
                         semantics = gridColumnControl(current.id, "apply", labels.applyName(title))
                     }
-                )
-                add(
+                ) { shrink = 0.0 }
+                item(
                     columnsButton(labels.restore, { this @GridColumnsPanel.setWidth(true) }) {
                         enabled = active
                         fonts = input.fonts
@@ -491,7 +494,7 @@ public class GridColumnsPanel<Row> public constructor(
                         semantics =
                             gridColumnControl(current.id, "restore", labels.restoreName(title))
                     }
-                )
+                ) { shrink = 0.0 }
                 spacing = 6.0 * appearance.density
             }
             add(

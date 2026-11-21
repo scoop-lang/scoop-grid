@@ -76,7 +76,13 @@ internal fun ExternalWindowProbe.inspect(tag: Int) {
             assertEquals(None, handle.pendingPosition);
             assertEquals(None, handle.focusedCell)
         }
-        case 10 -> retry = !(options?.focus?.hasFocus ?: false)
+        case 10 -> {
+            retry = !(options?.focus?.hasFocus ?: false)
+            if (!retry) {
+                val cell = keep(table!!.cell(50000L, 1L)!!)
+                assertTrue(find(cell, "AXTextField")!!.flag(1))
+            }
+        }
         case 11 -> {
             assertTrue(handle.isSubmitting)
             assertEquals(Some("50001"), model.copyText(Some(remoteAddress(50000L, "amount"))))

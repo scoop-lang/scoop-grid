@@ -6,6 +6,19 @@ import scoop.tests.ui.accessibility.native.NativeNode
 import scoop.tests.window.nativeEditorKey
 import scoop.window.native.*
 
+/** Search only the mounted edit cell, never the virtual table's full row set. */
+internal fun HeightProbe.editorNode(node: NativeNode): NativeNode? {
+    if (node.text(2, Some("AXTextField")))
+        return Some(node)
+    for (index in 0L ..< node.count) {
+        when (val found = editorNode(keep(node.child(index)))) {
+            case Some(_) -> return found
+            case None -> {}
+        }
+    }
+    return None
+}
+
 internal fun HeightProbe.bounds(node: NativeNode, value: Rect) {
     assertTrue(matchesBounds(node, value), Some(f"height frame at ${phase}"))
 }

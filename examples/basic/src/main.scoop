@@ -8,6 +8,9 @@ import scoop.ui.*
 import scoop.ui.component.*
 import scoop.ui.style.*
 import scoop.ui.style.shadcn.shadcnTheme
+import scoop.ui.style.material.materialTheme
+import scoop.ui.style.fluent.fluentTheme
+import scoop.ui.style.macos.macosTheme
 import scoop.window.*
 import scoop.ui.component.button as gridPinButton
 import scoop.ui.component.tabs as gridToolsTabs
@@ -75,6 +78,26 @@ private class GridExample(scope: ComponentScope): Component(scope) {
     private val tool = state<String?>(Some("filters"))
     private val mergeDescriptions = state(true)
     private val savedView = state<GridViewState?>(None)
+    private val themeIndex = state(0)
+    private val dark = state(false)
+    private fun changeTheme(source: ThemeSource, next: Boolean) {
+        if (next)
+            themeIndex.value = (themeIndex.value + 1) % 4
+        else
+            dark.value = !dark.value
+        val mode =
+            if (dark.value)
+                ThemeMode.Dark
+            else
+                ThemeMode.Light
+        source.current.value =
+            when (themeIndex.value) {
+                case 1 -> materialTheme(mode)
+                case 2 -> fluentTheme(mode)
+                case 3 -> macosTheme(mode)
+                else -> shadcnTheme(mode)
+            }
+    }
     private fun saveView() {
         savedView.value = handle.saveViewState()
         lastEdit.value = "已保存当前列、查询、选择和阅读位置"
@@ -338,12 +361,37 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 case Some(_) -> true
                 case None -> false
             }
-        val theme = currentThemeSource().read(scope)
+        val source = currentThemeSource()
+        val theme = source.read(scope)
+        val themeName =
+            when (themeIndex.value) {
+                case 1 -> "Material"
+                case 2 -> "Fluent"
+                case 3 -> "macOS"
+                else -> "Shadcn"
+            }
+        val modeName =
+            if (dark.value)
+                "深色"
+            else
+                "浅色"
         val table =
             column {
                 label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
                 label("拖动选择矩形，Shift＋方向键或点击扩展，Command / Ctrl＋C 复制，Escape 清除")
-                add(gridFind(handle))
+                row {
+                    item(gridFind(handle)) {
+                        basis = FlexBasis.Fixed(0.0)
+                        grow = 1.0
+                    }
+                    item(gridPinButton(themeName, { example.changeTheme(source, true) })) {
+                        shrink = 0.0
+                    }
+                    item(gridPinButton(modeName, { example.changeTheme(source, false) })) {
+                        shrink = 0.0
+                    }
+                    spacing = 8.0
+                }
                 row {
                     add(
                         gridPinButton(

@@ -1,0 +1,163 @@
+package scoop.grid.tests.performance
+
+import scoop.grid.*
+import scoop.platform.time.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class PerfConfig(
+    val name: String,
+    val rows: Long,
+    val columns: Long,
+    val frozen: Boolean = false,
+    val contentHeight: Boolean = false,
+    val controls: Boolean = false,
+    val preallocated: Boolean = false
+)
+
+internal class PerfRow(val index: Long) {
+    val name = f"Record ${index + 1L}"
+    val amount = index * 17L % 10001L
+}
+
+internal class PerfRows(private val configuration: PerfConfig): TableSource<PerfRow> {
+    private val records: Array<PerfRow>? =
+        if (configuration.preallocated)
+            Some(Array<PerfRow>(configuration.rows) { index -> PerfRow(index) })
+        else
+            None
+    var reads = 0L
+    public override val count: Long get() = configuration.rows
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): PerfRow {
+        assertTrue(index >= 0L && index < count)
+        reads += 1L
+        return when (records) {
+            case Some(val values) -> values[index]
+            case None -> PerfRow(index)
+        }
+    }
+}
+
+internal class PerfSample(val configuration: PerfConfig) {
+    private val started = MonotonicTimeSource.now()
+    val rows = PerfRows(configuration)
+    val cells = PerfCells()
+    val model = DataGridState(rows, columns())
+    val originalResult = model.result
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    var setupNs = 0L
+    var firstNs = 0L
+    var visiblePeak = 0L
+    var retainedPeak = 0L
+    val uiTimes = ArrayList<Long>()
+    val latencies = ArrayList<Long>()
+    init {
+        if (configuration.frozen) {
+            model.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))
+            model.setColumnState(
+                GridColumnState(GridColumnId(f"c${configuration.columns - 1L}"), pin = GridPin.End)
+            )
+        }
+        setupNs = elapsedNs(started)
+    }
+    fun capture(epoch: Long) {
+        assertTrue(originalResult === model.result, Some("scrolling reran the query"))
+        var visible = 0L
+        for ((_, record) in cells.live)
+            if (record.visible && record.epoch == epoch)
+                visible += 1L
+        if (visible > visiblePeak)
+            visiblePeak = visible
+        val retained = cells.live.size - visible
+        if (retained > retainedPeak)
+            retainedPeak = retained
+    }
+    private fun columns(): Array<GridColumn<PerfRow>> =
+        Array<GridColumn<PerfRow>>(configuration.columns) {
+            column ->
+            val id = GridColumnId(f"c${column}")
+            val size = TableColumnSize(GridTrack.Fixed(120.0))
+            if (configuration.controls && column == 0L)
+                gridColumn<PerfRow, Boolean>(
+                    id,
+                    "Selected",
+                    { row -> row.index % 2L == 0L },
+                    gridBooleanValues(),
+                    size,
+                    cell =
+                        Some {
+                            row -> cells.view(
+                                row.index,
+                                column,
+                                checkbox(state(row.index % 2L == 0L).binding())
+                            )
+                        }
+                )
+            else
+                if (configuration.controls && column == 1L)
+                    gridColumn<PerfRow, Long>(
+                        id,
+                        "Action",
+                        { row -> row.index },
+                        gridLongValues(),
+                        size,
+                        cell =
+                            Some {
+                                row -> cells.view(
+                                    row.index,
+                                    column,
+                                    button("Open", { cells.actions += 1L })
+                                )
+                            }
+                    )
+                else
+                    if (column == 2L || column == 150L)
+                        gridColumn<PerfRow, String>(
+                            id,
+                            f"Name ${column}",
+                            { row -> row.name },
+                            gridTextValues(),
+                            size,
+                            cell =
+                                Some {
+                                    row ->
+                                    val caption =
+                                        if (configuration.contentHeight && row.index % 3L != 0L)
+                                            f"${row.name}\nSecond line\nDetails"
+                                        else
+                                            row.name
+                                    cells.view(row.index, column, label(caption))
+                                }
+                        )
+                    else
+                        gridColumn<PerfRow, Long>(
+                            id,
+                            f"Value ${column}",
+                            { row -> row.amount + column },
+                            gridLongValues(),
+                            size,
+                            cell =
+                                Some {
+                                    row -> cells.view(
+                                        row.index,
+                                        column,
+                                        label(f"${row.amount + column}")
+                                    )
+                                }
+                        )
+        }
+}
+
+internal fun elapsedNs(start: MonotonicInstant): Long =
+    (MonotonicTimeSource.now() - start).inWholeNanoseconds

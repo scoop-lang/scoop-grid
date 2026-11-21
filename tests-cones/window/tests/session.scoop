@@ -119,7 +119,7 @@ internal class GridWindowProbe {
             else -> {}
         }
     }
-    fun advance(active: ActiveApplication) {
+    fun advance(active: ActiveApplication, frame: ComponentScope) {
         when (phase) {
             case - 1 -> {
                 phase = -2
@@ -127,7 +127,13 @@ internal class GridWindowProbe {
                     active.proxy().post {
                         _ ->
                         assertTrue(sendSurfaceScroll(window!!, 240.0, 150.0, -4, 0))
-                        phase = 0
+                        assertTrue(
+                            active.proxy().post {
+                                _ ->
+                                phase = 0
+                                frame.requestFrame()
+                            }
+                        )
                     }
                 )
             }
@@ -262,7 +268,7 @@ private class WindowFrame(
         context.children()
         context.onFrameComplete {
             frame -> if (frame.submission == FrameSubmission.Accepted)
-                probe.advance(active)
+                probe.advance(active, scope)
         }
     }
 }

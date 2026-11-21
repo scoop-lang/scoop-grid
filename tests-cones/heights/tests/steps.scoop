@@ -190,12 +190,15 @@ internal fun HeightProbe.inspect(tag: Int) {
                 priorHeight = rowHeights[1L]!!
                 assertTrue(retained!!.same(cell(1L, 24L)))
                 assertFalse(live.contains(heightAddress(1L, 24L)))
+                assertTrue(editorNode(retained!!)!!.flag(1))
+                assertTrue(editorNode(retained!!)!!.text(5, None))
             }
         }
         case 18 -> {
             assertTrue(handle.editError != None);
             assertEquals(priorHeight, rowHeights[1L]!!);
-            assertTrue(retained!!.same(cell(1L, 24L)))
+            assertTrue(retained!!.same(cell(1L, 24L)));
+            assertTrue(editorNode(retained!!)!!.text(5, handle.editError))
         }
         case 19 -> {
             assertEquals(None, handle.editingCell);

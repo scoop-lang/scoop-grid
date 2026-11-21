@@ -1,0 +1,85 @@
+package scoop.grid.tests.performance
+
+import scoop.grid.*
+import scoop.platform.time.*
+import scoop.test.*
+
+internal fun measureQueries() {
+    val rows = PerfRows(PerfConfig("queries", 40000L, 5L, preallocated = true))
+    val region = GridColumnId("region")
+    val team = GridColumnId("team")
+    val year = GridColumnId("year")
+    val quarter = GridColumnId("quarter")
+    val amount = GridColumnId("amount")
+    val columns =
+        [
+            gridColumn<PerfRow, Long>(
+                region,
+                "Region",
+                { row -> row.index % 16L },
+                gridLongValues(),
+                groupable = true
+            ),
+            gridColumn<PerfRow, Long>(
+                team,
+                "Team",
+                { row -> row.index / 16L % 8L },
+                gridLongValues(),
+                groupable = true
+            ),
+            gridColumn<PerfRow, Long>(
+                year,
+                "Year",
+                { row -> 2024L + row.index / 128L % 10L / 4L },
+                gridLongValues(),
+                pivotable = true
+            ),
+            gridColumn<PerfRow, Long>(
+                quarter,
+                "Quarter",
+                { row -> row.index / 128L % 10L % 4L + 1L },
+                gridLongValues(),
+                pivotable = true
+            ),
+            gridColumn<PerfRow, Long>(
+                amount,
+                "Amount",
+                { row -> row.amount },
+                gridLongValues(),
+                aggregations = [gridSumLongAggregation()]
+            )
+        ]
+    val started = MonotonicTimeSource.now()
+    val model = DataGridState(rows, columns, expandedRows = GridExpandedRows(true))
+    val constructNs = elapsedNs(started)
+    val sortStart = MonotonicTimeSource.now()
+    model.setQuery(GridQuery([GridSort(amount)]))
+    val sortNs = elapsedNs(sortStart)
+    val groupStart = MonotonicTimeSource.now()
+    model.setQuery(
+        GridQuery(
+            grouping = [region, team],
+            aggregations = [GridAggregationSelection(amount, GridAggregateId("sum"))]
+        )
+    )
+    val groupNs = elapsedNs(groupStart)
+    val groupRows = model.result.rows.count
+    assertEquals(40144L, groupRows)
+    val pivotStart = MonotonicTimeSource.now()
+    model.setQuery(model.query.withPivot(Some(GridPivot([GridSort(year), GridSort(quarter)]))))
+    val pivotNs = elapsedNs(pivotStart)
+    assertEquals(11L, model.columns.size)
+    assertEquals(144L, model.result.rows.count)
+    val restoreStart = MonotonicTimeSource.now()
+    model.setQuery(GridQuery())
+    val restoreNs = elapsedNs(restoreStart)
+    assertEquals(40000L, model.result.rows.count)
+    assertEquals(5L, model.columns.size)
+    println(
+        f"PERF_QUERY rows=40000 region_keys=16 teams_per_region=8 year_quarter_keys=10 measures=1 pivot_columns=11 grouped_display_rows=${
+            groupRows
+        } construct_ms=${ms(constructNs)} sort_ms=${ms(sortNs)} group_ms=${ms(groupNs)} pivot_ms=${
+            ms(pivotNs)
+        } restore_ms=${ms(restoreNs)} row_reads=${rows.reads}"
+    )
+}
