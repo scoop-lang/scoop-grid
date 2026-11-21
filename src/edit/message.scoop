@@ -1,0 +1,84 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+
+internal fun gridEditorMessage(content: View, appearance: GridAppearance, message: String?): View =
+    component(
+        GridEditorMessageProps(content, appearance, message),
+        { props, scope -> GridEditorMessage(props, scope) }
+    )
+
+private class GridEditorMessageProps(
+    val content: View,
+    val appearance: GridAppearance,
+    val message: String?
+)
+
+/** Feedback belongs to the edit without consuming the editor's constrained height. */
+private class GridEditorMessage(
+    private val props: Props<GridEditorMessageProps>,
+    scope: ComponentScope
+): Component(scope) {
+    private val anchor = LayoutAnchor()
+    private val open = binding({ props.value.message != None }, { _ -> Unit })
+    public override fun render(): View {
+        val input = props.value
+        val appearance = input.appearance
+        val density = appearance.density
+        val palette = appearance.theme.tokens.palette
+        val caption =
+            component(
+                LabelProps(
+                    LabelText.Plain(input.message ?: "", None),
+                    Some(appearance.fonts),
+                    Some(appearance.wrapping),
+                    baseStyle = Some(appearance.body.copy { color = palette.popover.foreground }),
+                    semantics = ComponentSemantics(automationId = Some("grid-editor-message"))
+                ),
+                { props, scope -> Label(props, scope) }
+            )
+        val hint =
+            frame(caption) {
+                width = Some(320.0 * density)
+                padding = Some(Insets.all(8.0 * density))
+                style {
+                    background(Some(Paint(palette.popover.background)))
+                    border(Some(Border.all(density, palette.border)))
+                    corners(Corners.all(4.0 * density))
+                    boxShadows(appearance.theme.tokens.effects.floating)
+                }
+            }
+        val target = anchor
+        val popup =
+            portal(open, hint) {
+                placement = OverlayPlacement.Anchored(target, gap = 4.0 * density)
+                anchorVisibility = AnchorVisibility.Hide
+            }
+        return element({ scope -> GridEditorMessageLayout(anchor, scope) }, [input.content, popup])
+    }
+}
+
+private class GridEditorMessageLayout(
+    private val anchor: LayoutAnchor,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    public override fun onMount() {
+        scope.layoutAnchor(anchor)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val content = context.measureChild(0L, constraints)
+        context.placeChild(0L, Point(0.0, 0.0))
+        context.measureChild(1L, Constraints())
+        context.placeChild(1L, Point(0.0, 0.0))
+        return LayoutResult(content, Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.anchor(anchor, Rect(0.0, 0.0, context.size.width, context.size.height))
+        context.children()
+    }
+}

@@ -21,7 +21,8 @@ internal class GridRows<Row>(
     val columnSpans: ((Row) -> Array<GridColumnSpan>)? = None,
     val selection: GridSelectionView<Row>? = None,
     val range: GridCellRangeBounds? = None,
-    val labels: GridLabels = GridLabels()
+    val labels: GridLabels = GridLabels(),
+    val busy: Boolean = false
 ): ItemSource {
     public override val count: Long get() = source.count
     public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
@@ -180,6 +181,7 @@ internal class GridBody<Row>(
         semantics.update(
             SemanticProperties(
                 name = Some(rows.labels.name),
+                busy = rows.busy,
                 enabled = rows.enabled,
                 table = Some(SemanticTableSize(rows.count, rows.columns.columns.size))
             )

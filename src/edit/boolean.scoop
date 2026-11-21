@@ -43,6 +43,7 @@ public class GridBooleanEditor public constructor(
                 focus = FocusOptions(Some(options.focus))
                 enabled = !options.submitting
                 invalid = options.error != None
+                semantics = gridEditorSemantics(options)
                 theme = Some(options.theme)
                 labelTarget = Some(reference)
             }

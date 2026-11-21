@@ -24,10 +24,14 @@ internal fun gridEditorField(
             }
             case None -> {}
         }
-        when (options.error) {
-            case Some(val message) -> error(message)
-            case None -> {}
-        }
-        if (options.submitting)
-            description(options.savingText)
     }
+
+internal fun gridEditorSemantics(options: GridEditorOptions): ComponentSemantics =
+    ComponentSemantics(
+        description =
+            if (options.submitting)
+                Some(options.savingText)
+            else
+                options.error,
+        error = options.error
+    )

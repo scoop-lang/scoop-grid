@@ -98,7 +98,14 @@ public class DataGrid<Row> public constructor(
                 input.columnSpans,
                 selection,
                 input.state.cellRangeBounds,
-                input.labels
+                input.labels,
+                when (input.error) {
+                    case Some(_) -> false
+                    case None -> when (input.loading) {
+                        case Some(_) -> true
+                        case None -> false
+                    }
+                }
             )
         val header =
             GridHeaderCells(
@@ -116,25 +123,33 @@ public class DataGrid<Row> public constructor(
                 case Some(val address) -> Some(address)
                 case None -> session.focused
             }
-        return element(
-            GridRootProps(
-                input,
-                layout,
-                rows,
-                input.scroll ?: ownScroll,
-                session,
-                source,
-                previousCell
-            ),
-            { props, scope -> GridRoot(props, scope) },
-            [
-                lazyElement(header, { scope -> GridHeader(scope) }),
-                lazyElement(
+        val viewport =
+            element(
+                GridRootProps(
+                    input,
+                    layout,
                     rows,
-                    GridBodyProps(rows, session),
-                    { props, scope -> GridBody(props, scope) }
-                )
-            ]
+                    input.scroll ?: ownScroll,
+                    session,
+                    source,
+                    previousCell
+                ),
+                { props, scope -> GridRoot(props, scope) },
+                [
+                    lazyElement(header, { scope -> GridHeader(scope) }),
+                    lazyElement(
+                        rows,
+                        GridBodyProps(rows, session),
+                        { props, scope -> GridBody(props, scope) }
+                    )
+                ]
+            )
+        return gridFrame(
+            input,
+            viewport,
+            layout.appearance.density,
+            input.headerHeight * layout.headers.levels.toDouble() * layout.appearance.density,
+            rows.count == 0L
         )
     }
 }

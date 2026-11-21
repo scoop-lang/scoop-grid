@@ -87,6 +87,7 @@ public class GridChoiceEditor<T: Equals<T>> public constructor(
                     content,
                     enabled = !options.submitting,
                     invalid = options.error != None,
+                    semantics = gridEditorSemantics(options),
                     focus = FocusOptions(Some(options.focus)),
                     labelTarget = Some(reference),
                     fonts = Some(options.fonts),

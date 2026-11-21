@@ -11,7 +11,8 @@ internal class GridHeaderResizeProps<Row>(
     val session: GridSession<Row>,
     val content: View,
     val enabled: Boolean,
-    val theme: ThemeSource
+    val theme: ThemeSource,
+    val labels: GridLabels
 )
 
 internal class GridHeaderResize<Row>(
@@ -87,7 +88,10 @@ internal class GridHeaderResize<Row>(
                     case Some(val states) -> if (
                         model === input.model && states === model.columnState
                     )
-                        message
+                        when (message) {
+                            case Some(val text) -> Some(input.labels.error(text))
+                            case None -> None
+                        }
                     else
                         None
                     case None -> None
@@ -106,7 +110,7 @@ internal class GridHeaderResize<Row>(
                 theme = Some(input.theme)
                 semantics =
                     ComponentSemantics(
-                        name = Some(f"调整 ${input.column.title} 列宽"),
+                        name = Some(input.labels.resizeColumn(input.column.title)),
                         automationId = Some(f"grid-resize-${input.column.id.value}"),
                         description = currentError,
                         error = currentError

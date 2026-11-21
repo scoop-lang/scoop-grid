@@ -8,5 +8,6 @@ public class GridLabels public constructor(
     public val moveColumnHelp: String = "拖动调整列顺序；也可使用列工具前移或后移",
     public val moveGroupHelp: String = "拖动调整整组顺序；也可使用列工具中的组移动按钮",
     public val saving: String = "正在保存…",
-    public val error: (String) -> String = { message -> message }
+    public val error: (String) -> String = { message -> message },
+    public val resizeColumn: (String) -> String = { title -> f"调整 ${title} 列宽" }
 )

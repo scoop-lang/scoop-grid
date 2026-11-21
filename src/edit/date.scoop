@@ -63,6 +63,7 @@ public class GridDateEditor public constructor(
                 theme = Some(options.theme)
                 readOnly = options.submitting
                 invalid = options.error != None
+                semantics = gridEditorSemantics(options)
                 placeholder = editor.labels.datePlaceholder
                 calendarButtonSemantics =
                     ComponentSemantics(name = Some(editor.labels.calendarName))

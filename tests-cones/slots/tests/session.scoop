@@ -1,0 +1,268 @@
+package scoop.grid.tests.slots
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridSlotsWindowTest {
+    @Test
+    fun `ordinary slots preserve the viewport and stay outside its input boundary`() {
+        val probe = SlotsProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertEquals(2, probe.queries)
+            assertEquals(1, probe.submissions)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            reportSlotsFailure(error)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+private fun reportSlotsFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        reportSlotsFailure(error.primaryFailure)
+        reportSlotsFailure(error.cleanupFailure)
+    } else
+        if (error is AssertionFailure) {
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        } else
+            if (error is Exception) {
+                error.printStackTrace()
+            }
+}
+
+internal class SlotsProbe: Closeable {
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val toolbarFocus = FocusHandle()
+    val toolbarShown = state(false)
+    val footerShown = state(false)
+    val loading = state(false)
+    val failed = state(false)
+    val enabled = state(true)
+    val height = state(320.0)
+    val direction = state(LayoutDirection.Ltr)
+    val labels = state(GridLabels())
+    var editor: GridTextEditor<Long>? = None
+    var activeOptions: GridEditorOptions? = None
+    var originalEditor: GridTextEditor<Long>? = None
+    var pending: GridCommit<Long>? = None
+    var queries = 0
+    var submissions = 0
+    var toolbarClicks = 0
+    var footerClicks = 0
+    var retries = 0
+    val records =
+        TableRows(
+            Array<TableRecord<Long>>(100L) { index -> TableRecord(ViewKey.Number(index), index) }
+        )
+    val model = DataGridState(records, columns(), onQueryChange = Some { _ -> queries += 1 })
+    var rows: TableSource<Long>? = None
+    var scrollBefore = Point(0.0, 0.0)
+    var gridSize = Size(0.0, 0.0)
+    var frame: ComponentScope? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var view: Ptr<Unit>? = None
+    var root: NativeNode? = None
+    var table: NativeNode? = None
+    var header: NativeNode? = None
+    var resize: NativeNode? = None
+    var cell: NativeNode? = None
+    var toolbar: NativeNode? = None
+    var footer: NativeNode? = None
+    var status: NativeNode? = None
+    var empty: NativeNode? = None
+    var calls: NativeCalls? = None
+    var active: ActiveApplication? = None
+    var phase = 0
+    var waiting = false
+    var retry = false
+    var finished = false
+    private val retained = ArrayList<NativeNode>()
+    val focused: Boolean get() = activeOptions?.focus?.hasFocus ?: false
+    val diagnostic: String get() =
+        f"slots phase=${phase}, waiting=${waiting}, retry=${retry}, focus=${focused}, pending=${
+            handle.isPending
+        }, rows=${model.result.rows.count}, queries=${queries}, submissions=${
+            submissions
+        }, toolbarFocus=${toolbarFocus.hasFocus}, cellFocus=${
+            handle.focusedCell == Some(address(2L))
+        }, editing=${handle.editingCell == Some(address(2L))}, error=${
+            handle.editError ?: "none"
+        }, editorPending=${activeOptions?.focus?.isPending ?: false}"
+    init {
+        model.setColumnState(GridColumnState(GridColumnId("value"), pin = GridPin.Start))
+    }
+    private fun columns(): Array<GridColumn<Long>> {
+        val probe = this
+        return [
+            gridColumn<Long, Long>(
+                GridColumnId("value"),
+                "Value",
+                { value -> value },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(160.0)),
+                edit =
+                    Some(
+                        gridEdit<Long, Long>(
+                            {
+                                value ->
+                                val editor = gridLongEditor(value)
+                                probe.editor = Some(editor)
+                                SlotsEditor(editor, probe)
+                            },
+                            {
+                                _, completion ->
+                                probe.submissions += 1
+                                probe.pending = Some(completion)
+                            }
+                        )
+                    )
+            ),
+            gridColumn<Long, Long>(
+                GridColumnId("other"),
+                "Other",
+                { value -> value + 1000L },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(480.0))
+            )
+        ]
+    }
+    fun address(row: Long): GridCellAddress =
+        GridCellAddress(ViewKey.Number(row), GridColumnId("value"))
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                active = Some(application)
+                application.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
+                )
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid view slots"
+                            size = LogicalSize(640.0, 360.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> SlotsScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> {
+                                    view = Some(pointer)
+                                    root = Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                                }
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(application.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(Some(diagnostic))
+            else -> {}
+        }
+    }
+    fun accepted() {
+        if (finished || waiting || !(window?.isFocused ?: false))
+            return
+        when (calls) {
+            case None -> return
+            case Some(_) -> {}
+        }
+        waiting = true
+        retry = false
+        when (phase) {
+            case 9 -> calls!!.post(toolbar!!, phase)
+            case 11 -> calls!!.post(status!!, phase)
+            case 16 -> calls!!.post(empty!!, phase)
+            case 21 -> calls!!.post(header!!, phase, 2)
+            case 30 -> calls!!.post(footer!!, phase)
+            else -> calls!!.post(root!!, phase, 20)
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        retained.add(node)
+        return node
+    }
+    fun named(id: String): NativeNode =
+        keep(root!!.find(id) ?: fail(Some(f"missing ${id} at ${phase}")))
+    fun currentTable(): NativeNode {
+        @Unsafe
+        {
+            return keep(NativeNode(nativeSlotsTable(view!!)!!))
+        }
+    }
+    fun busy(): Boolean {
+        @Unsafe
+        {
+            return nativeSlotsBusy(view!!)
+        }
+    }
+    fun bounds(node: NativeNode, x: Double, y: Double, width: Double, height: Double) {
+        @Unsafe
+        {
+            assertTrue(node.frame(view!!, x, y, width, height), Some(f"frame at ${phase}"))
+        }
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in retained)
+            node.close()
+    }
+}
+
+private class SlotsEditor(
+    private val editor: GridTextEditor<Long>,
+    private val probe: SlotsProbe
+): GridEditor<Long> {
+    public override val composing: Boolean get() = editor.composing
+    public override fun candidate(): GridCandidate<Long> = editor.candidate()
+    public override fun importText(text: String): String? = editor.importText(text)
+    public override fun cancelComposition() {
+        editor.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        probe.activeOptions = Some(options)
+        return editor.view(options)
+    }
+}
+
+@Extern(name = "scoop_grid_slots_table")
+private fun nativeSlotsTable(view: Ptr<Unit>): Ptr<Unit>?
+
+@Extern(name = "scoop_grid_slots_busy")
+private fun nativeSlotsBusy(view: Ptr<Unit>): Boolean

@@ -159,7 +159,7 @@ internal class GridHeaderCells<Row>(
             session,
             GridMenuTarget.Column(column.id),
             component(
-                GridHeaderResizeProps(model, column, session, content, enabled, theme),
+                GridHeaderResizeProps(model, column, session, content, enabled, theme, labels),
                 { props, scope -> GridHeaderResize(props, scope) }
             ),
             enabled,

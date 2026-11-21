@@ -26,7 +26,12 @@ public class DataGridProps<Row> public constructor(
     public val onCopyResult: (GridCopyResult) -> Unit = { _ -> Unit },
     public val touchCellSelection: Boolean = false,
     public val contextMenus: GridMenuOptions? = Some(GridMenuOptions()),
-    public val labels: GridLabels = GridLabels()
+    public val labels: GridLabels = GridLabels(),
+    public val toolbar: View? = None,
+    public val footer: View? = None,
+    public val empty: View? = None,
+    public val loading: View? = None,
+    public val error: View? = None
 ) {
     init {
         gridRequire(height.isFinite() && height >= 0.0, "invalid grid height")
@@ -69,6 +74,11 @@ public class DataGridBuilder<Row> internal constructor() {
     public var touchCellSelection: Boolean = false
     public var contextMenus: GridMenuOptions? = Some(GridMenuOptions())
     public var labels: GridLabels = GridLabels()
+    public var toolbar: View? = None
+    public var footer: View? = None
+    public var empty: View? = None
+    public var loading: View? = None
+    public var error: View? = None
     public var key: ViewKey = ViewKey.Position
     internal fun snapshot(state: DataGridState<Row>): DataGridProps<Row> =
         DataGridProps(
@@ -93,7 +103,12 @@ public class DataGridBuilder<Row> internal constructor() {
             onCopyResult,
             touchCellSelection,
             contextMenus,
-            labels
+            labels,
+            toolbar,
+            footer,
+            empty,
+            loading,
+            error
         )
 }
 

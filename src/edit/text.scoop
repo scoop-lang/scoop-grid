@@ -37,11 +37,7 @@ public class GridTextEditor<T> public constructor(
                 fonts = Some(options.fonts)
                 theme = Some(options.theme)
                 invalid = options.error != None
-                description =
-                    if (options.submitting)
-                        options.savingText
-                    else
-                        options.error ?: ""
+                semantics = gridEditorSemantics(options)
                 readOnly = options.submitting
                 onSubmit = { _ -> options.onSubmit() }
                 onEdited = { _ -> options.onEdited() }

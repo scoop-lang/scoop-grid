@@ -46,6 +46,10 @@ scoop test --release .
 
 内置编辑器可传 `labels = GridEditorLabels(...)`，例如 `gridLongEditor(value, GridEditorLabels(invalidInteger = "Use an integer"))`；它在创建草稿时捕获提示，不改变实际值或解析规则。日期编辑器与筛选面板通过各自 Labels 的 `calendarLocale` 复用 `CalendarLocale` 的月／星期／数字／日期及前后翻月名称；日期文字仍使用严格的 YYYY-MM-DD。布尔显示文字可改，导入仍接受 true／false、1／0 和“是”／“否”。
 
+编辑错误和保存提示显示在单元格旁，不占用输入框的行内高度。提示保留真实控件的错误语义，不取得焦点，编辑结束时随会话清理。
+
+网格的 `toolbar`、`footer`、`empty`、`loading` 和 `error` 接受普通 View，例如 `toolbar = Some(gridQuickFilter(model))`、`footer = Some(gridStatusBar(model))`。外框 `height` 包含这些内容，表头和正文使用剩余空间。应用按当前状态提供加载或错误 View，错误优先；没有记录且没有其他状态时，空状态在表头下方居中显示。更换插槽保留同一个网格及草稿，重试和工具栏按钮位于网格的禁用域之外。十万行示例把快速筛选、分页、状态栏和清除筛选的空状态接入相应插槽。
+
 原生无障碍支持按行列读取离屏值，以及明确的 Realize／Reveal／Focus。读取不创建 View；显露使用表头和冻结区扣除后的实际空间，RTL 沿逻辑 Start／End 解析。`pendingCell`、`isPending` 与 `cancelFocus()` 同样覆盖原生焦点请求。
 
 `DataGridState(..., rowSelection = GridRowSelectionMode.Multiple)` 启用业务行多选，`Single` 启用单选，默认 `Disabled`。首个可见业务列显示 Checkbox，Shift＋点击按当前结果顺序扩展行范围；浏览格的 Shift＋Space 切换该行。多选表头的三态 Checkbox 只选择当前页的合格记录，不包含额外固定行。`selectable = Some { row -> ... }` 可限定不可变记录的选择资格；`selectionCheckboxes = false` 隐藏控件，保留选中底色和原生行选择动作。
@@ -167,6 +171,8 @@ scoop check --tests --release tests-cones/selection
 scoop test --release tests-cones/selection
 scoop check --tests --release tests-cones/range
 scoop test --release tests-cones/range
+scoop check --tests --release tests-cones/slots
+scoop test --release tests-cones/slots
 ```
 
 原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合，`pinned` 覆盖顶部／底部固定、分页去重、筛选／删除、可变高度、原生身份与编辑保留，以及零正文和三段内容测宽。
@@ -174,6 +180,8 @@ scoop test --release tests-cones/range
 `spans` 覆盖跨列锚点与导航、远端原生定位、规则变化、只读编辑限制，以及固定行列、自动行高、内容测宽、多级表头和零宽成员的组合。
 
 `selection` 覆盖业务行选择与 Checkbox、原生选择、编辑提交及模型生命周期；`range` 覆盖唯一矩形的键盘／点击／拖动扩展、两轴边缘滚动与停帧、触点选择模式、系统菜单和快捷键复制、离屏语义、RTL、结构变化、内部按钮、真实编辑器、查找控件／循环／离屏定位／组合输入及失败原子性。系统输入回归在本机通过正常的 macOS 应用启动入口运行，保留真实窗口焦点条件；纯模型测试不依赖窗口焦点。
+
+`slots` 覆盖工具栏、底栏、空状态、加载和错误 View 的几何、身份、优先级与 busy，网格禁用期间的真实按钮、零高度焦点、编辑草稿、外部焦点提交、异步保存和关闭清理。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

@@ -38,20 +38,27 @@ internal class GridDataCell<Row>(
             }
         val child =
             when (edit) {
-                case Some(val active) -> active.draft.view(
-                    GridEditorOptions(
-                        active.focus,
-                        appearance.fonts,
-                        input.session.theme!!,
-                        error,
-                        active.submitting,
-                        { input.session.editing.submitFrom(active) },
-                        { input.session.editing.cancelFrom(active) },
-                        { input.session.editing.clearError(active) },
-                        { key -> input.session.editing.navigateFrom(active, key) },
-                        { input.session.editing.focusSettled(active) },
-                        input.labels.saving
-                    )
+                case Some(val active) -> gridEditorMessage(
+                    active.draft.view(
+                        GridEditorOptions(
+                            active.focus,
+                            appearance.fonts,
+                            input.session.theme!!,
+                            error,
+                            active.submitting,
+                            { input.session.editing.submitFrom(active) },
+                            { input.session.editing.cancelFrom(active) },
+                            { input.session.editing.clearError(active) },
+                            { key -> input.session.editing.navigateFrom(active, key) },
+                            { input.session.editing.focusSettled(active) },
+                            input.labels.saving
+                        )
+                    ),
+                    appearance,
+                    if (active.submitting)
+                        Some(input.labels.saving)
+                    else
+                        error
                 )
                 case None -> input.column.cell(
                     input.row,

@@ -11,6 +11,7 @@ import scoop.ui.style.shadcn.shadcnTheme
 import scoop.window.*
 import scoop.ui.component.button as gridPinButton
 import scoop.ui.component.tabs as gridToolsTabs
+import scoop.ui.component.column as gridSlotColumn
 
 private class SampleRow(val id: Long, val name: String, val amount: Long)
 
@@ -283,7 +284,6 @@ private class GridExample(scope: ComponentScope): Component(scope) {
             column {
                 label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
                 label("拖动选择矩形，Shift＋方向键或点击扩展，Command / Ctrl＋C 复制，Escape 清除")
-                add(gridQuickFilter(model) { this.handle = Some(handle) })
                 add(gridFind(handle))
                 row {
                     add(
@@ -326,7 +326,25 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 )
                 add(
                     dataGrid(model) {
-                        height = 380.0
+                        height = 500.0
+                        toolbar = Some(gridQuickFilter(model) { this.handle = Some(handle) })
+                        footer =
+                            Some(
+                                gridSlotColumn {
+                                    add(gridPager(model) { this.handle = Some(handle) })
+                                    add(gridStatusBar(model))
+                                    spacing = 4.0
+                                }
+                            )
+                        empty =
+                            Some(
+                                gridSlotColumn {
+                                    label("没有匹配的记录")
+                                    button("清除筛选", { model.setQuery(GridQuery()) })
+                                    spacing = 8.0
+                                    alignment = CrossAlignment.Center
+                                }
+                            )
                         rowHeight = 48.0
                         rowSizing = GridRowSizing.Content([GridColumnId("name")])
                         columnSpans =
@@ -365,7 +383,6 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                             }
                     }
                 )
-                add(gridPager(model) { this.handle = Some(handle) })
                 row {
                     alignment = CrossAlignment.Center
                     spacing = 8.0
@@ -408,7 +425,6 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                         }
                     )
                 }
-                add(gridStatusBar(model))
                 label(handle.editError ?: lastEdit.value)
             }
         val content =

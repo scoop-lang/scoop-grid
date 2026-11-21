@@ -258,6 +258,7 @@ internal fun ColumnsProbe.inspectResize() {
         case 117 -> resizeWidth("c1", Some(125.0))
         case 118 -> {
             resizeWidth("c1", None)
+            assertTrue(resizeFrame(identified("grid-resize-c1"), Rect(640.0, 16.0, 8.0, 24.0)))
             val previous = resizePrevious!!
             assertEquals(None, previous.columnState[1L].width)
             assertEquals(Some(120.0), previous.columnState[0L].width)
