@@ -1,0 +1,65 @@
+package scoop.grid
+
+/** Dimensions use source column identities and typed value ordering. */
+public class GridPivot public constructor(
+    public val dimensions: Array<GridSort> = [],
+    public val label: String = "行分组"
+): Equals<GridPivot> {
+    public override operator fun equals(other: GridPivot): Boolean =
+        gridArrayEqual(dimensions, other.dimensions) && label == other.label
+    internal val columns: Array<GridColumnId> =
+        Array<GridColumnId>(dimensions.size) { at -> dimensions[at].column }
+}
+
+/** A result metric is identified by values and operation, independently of its title. */
+public class GridPivotColumnKey public constructor(
+    public val dimensions: Array<GridGroupPart>,
+    public val metric: GridAggregationSelection
+): Equals<GridPivotColumnKey>, Hash {
+    init {
+        gridRequire(metric.column.isSource, "pivot metric requires a source column")
+    }
+    public override operator fun equals(other: GridPivotColumnKey): Boolean =
+        gridArrayEqual(dimensions, other.dimensions) && metric == other.metric
+    public override fun hash(): Long {
+        var value = metric.column.hash() xor metric.operation.hash()
+        for (part in dimensions)
+            value = (value shl 7) xor (value ushr 57) xor part.hash()
+        return value
+    }
+    internal val encoded: String = gridPivotColumnEncoding(dimensions, metric)
+}
+
+private fun gridPivotColumnEncoding(
+    dimensions: Array<GridGroupPart>,
+    metric: GridAggregationSelection
+): String {
+    val path = gridEncodeGroupPath(dimensions)
+    return f"${path.byteLength}:${path}${metric.column.value.byteLength}:${metric.column.value}${
+        metric.operation.value.byteLength
+    }:${metric.operation.value}"
+}
+
+public enum GridColumnKey: Equals<GridColumnKey>, Hash {
+    Source(String), Pivot(GridPivotColumnKey), PivotLabel
+    public override operator fun equals(other: GridColumnKey): Boolean =
+        when ((this, other)) {
+            case(Source(val a), Source(val b)) -> a == b
+            case(Pivot(val a), Pivot(val b)) -> a == b
+            case(PivotLabel, PivotLabel) -> true
+            else -> false
+        }
+    public override fun hash(): Long =
+        when (this) {
+            case Source(val value) -> value.hash() xor 1L
+            case Pivot(val value) -> value.hash() xor 2L
+            case PivotLabel -> 3L
+        }
+}
+
+internal fun gridPivotDimensionsEqual(a: GridPivot?, b: GridPivot?): Boolean =
+    when ((a, b)) {
+        case(None, None) -> true
+        case(Some(val left), Some(val right)) -> gridArrayEqual(left.dimensions, right.dimensions)
+        else -> false
+    }

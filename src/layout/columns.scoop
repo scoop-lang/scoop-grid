@@ -26,12 +26,16 @@ internal class GridColumnsPlan<Row>(
             endStart
         )
     private val lookup = HashMap<GridColumnId, Long>()
+    private val viewLookup = HashMap<ViewKey, Long>()
     private var cached: GridColumnLayout? = None
     init {
-        for (index in 0L ..< columns.size)
+        for (index in 0L ..< columns.size) {
             lookup.put(columns[index].id, index)
+            viewLookup.put(columns[index].id.viewKey, index)
+        }
     }
     fun indexOf(id: GridColumnId): Long? = lookup[id]
+    fun indexOfViewKey(key: ViewKey): Long? = viewLookup[key]
     fun resolve(width: Double): GridColumnLayout {
         val result = assembled.tracks.resolve(width)
         when (cached) {

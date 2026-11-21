@@ -27,11 +27,28 @@ public class GridCsvOptions public constructor(
 internal fun <Row> gridExportCsv(
     snapshot: GridComputed<Row>,
     states: Array<GridColumnState>,
+    sourceStates: Array<GridColumnState>,
     selection: GridSelectedRows,
     options: GridCsvOptions
 ): String {
+    val records = options.data == GridExportData.Records
+    gridRequire(
+        records || !snapshot.pivotMode || options.scope != GridExportScope.SelectedRows,
+        "selected business rows require record export in pivot mode"
+    )
+    val definitions =
+        if (records)
+            snapshot.columns
+        else
+            snapshot.displayColumns
     val columns = ArrayList<GridColumn<Row>>()
-    val ordered = gridOrderedColumnStates(states)
+    val ordered =
+        gridOrderedColumnStates(
+            if (records)
+                sourceStates
+            else
+                states
+        )
     when (options.columns) {
         case Some(val ids) -> {
             val lookup = HashMap<GridColumnId, GridColumnState>()
@@ -44,12 +61,12 @@ internal fun <Row> gridExportCsv(
                     lookup[id] ?:
                         throw IllegalArgumentException(Some(f"unknown export column: ${id.value}"))
                 if (entry.visible || options.includeHiddenColumns)
-                    columns.add(snapshot.columns.get(id))
+                    columns.add(definitions.get(id))
             }
         }
         case None -> for (entry in ordered)
             if (entry.visible || options.includeHiddenColumns)
-                columns.add(snapshot.columns.get(entry.id))
+                columns.add(definitions.get(entry.id))
     }
     return gridCsv(
         gridExportRows(snapshot, selection, options),
@@ -110,6 +127,19 @@ private fun <Row> gridExportRows(
             else
                 GridTotals()
         )
+    when (snapshot.pivot) {
+        case Some(val pivot) -> if (displayed) {
+            val(result, _) =
+                gridPresentPivot(
+                    pivot,
+                    query,
+                    snapshot.expanded,
+                    includeGroups = options.includeGroups
+                )
+            return result.rows
+        }
+        case None -> {}
+    }
     val result =
         when (tree) {
             case Some(val value) -> {

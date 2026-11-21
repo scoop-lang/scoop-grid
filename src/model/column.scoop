@@ -20,6 +20,7 @@ public interface GridColumn<Row> {
     public val editing: GridColumnEditing<Row>?
     public val aggregations: Array<GridColumnAggregation<Row>> get() = []
     public val grouping: GridColumnGrouping<Row>? get() = None
+    public val pivoting: GridColumnGrouping<Row>? get() = None
     public fun cell(
         row: Row,
         fonts: FontCollection? = None,
@@ -52,7 +53,8 @@ public fun <Row, T> gridColumn(
     missingLast: Boolean = true,
     edit: GridEditSpec<Row, T>? = None,
     aggregations: Array<GridAggregation<T>> = [],
-    groupable: Boolean = false
+    groupable: Boolean = false,
+    pivotable: Boolean = false
 ): GridColumn<Row> =
     TypedGridColumn(
         id,
@@ -67,7 +69,8 @@ public fun <Row, T> gridColumn(
         missingLast,
         edit,
         aggregations,
-        groupable
+        groupable,
+        pivotable
     )
 
 private class TypedGridColumn<Row, T>(
@@ -83,11 +86,17 @@ private class TypedGridColumn<Row, T>(
     public override val missingLast: Boolean,
     edit: GridEditSpec<Row, T>?,
     operations: Array<GridAggregation<T>>,
-    groupable: Boolean
+    groupable: Boolean,
+    pivotable: Boolean
 ): GridColumn<Row> {
     public override val valueKind: GridValueKind? get() = Some(values.kind)
     public override val grouping: GridColumnGrouping<Row>? =
         if (groupable)
+            Some(TypedGridGrouping(value, values))
+        else
+            None
+    public override val pivoting: GridColumnGrouping<Row>? =
+        if (pivotable)
             Some(TypedGridGrouping(value, values))
         else
             None

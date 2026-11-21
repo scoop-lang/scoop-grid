@@ -11,6 +11,40 @@ public enum GridRowSizing<Row> {
     Fixed, Explicit(val height: (Row) -> Double), Content(val columns: Array<GridColumnId>)
 }
 
+internal fun <Row> gridResultRowSizing(
+    model: DataGridState<Row>,
+    mode: GridRowSizing<Row>
+): GridRowSizing<Row> {
+    val selected =
+        when (mode) {
+            case Content(val columns) -> columns
+            else -> return mode
+        }
+    gridRequire(selected.size > 0L, "automatic row height requires a column")
+    val seen = HashSet<GridColumnId>()
+    val active = ArrayList<GridColumnId>()
+    val pivoting = model.pivot != None
+    for (id in selected) {
+        gridRequire(seen.add(id), "duplicate automatic row height column")
+        if (id.isSource) {
+            model.sourceColumn(id)
+            if (!pivoting)
+                active.add(id)
+        } else {
+            when (model.findColumn(id)) {
+                case Some(_) -> active.add(id)
+                case None -> {}
+            }
+        }
+    }
+    if (active.size == selected.size)
+        return mode
+    return if (active.size == 0L)
+        GridRowSizing.Fixed
+    else
+        GridRowSizing.Content(active.toArray())
+}
+
 internal fun <Row> gridSameRowSizing(left: GridRowSizing<Row>, right: GridRowSizing<Row>): Boolean {
     return when ((left, right)) {
         case(Fixed, Fixed) -> true

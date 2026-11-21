@@ -34,7 +34,7 @@ internal fun <Row> gridColumnGroupingControl(
             Choice(
                 ViewKey.Text(metric.column.value),
                 GridGroupSortBy.Aggregate(metric.column),
-                labels.metric(model.column(metric.column).title)
+                labels.metric(model.sourceColumn(metric.column).title)
             )
         )
     return column {

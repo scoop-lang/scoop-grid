@@ -16,8 +16,11 @@ internal class GridComputed<Row>(
     val filtered: TableSource<Row>,
     val expanded: GridExpandedRows,
     val groups: GridGrouped<Row>? = None,
-    val tree: GridTreeComputed<Row>? = None
+    val tree: GridTreeComputed<Row>? = None,
+    val pivot: GridPivoted<Row>? = None
 ) {
+    val displayColumns: GridColumns<Row> get() = pivot?.schema?.columns ?: columns
+    val pivotMode: Boolean get() = query.pivot != None
     val treeData: GridTreeData<Row>? get() = tree?.topology?.definition
     val treeMode: Boolean get() =
         when (tree) {
@@ -40,8 +43,8 @@ internal fun <Row> gridCompute(
         when (treeData) {
             case Some(val definition) -> {
                 gridRequire(
-                    query.grouping.size == 0L,
-                    "tree data and row grouping are mutually exclusive"
+                    query.grouping.size == 0L && query.pivot == None,
+                    "tree data, row grouping and pivot require separate modes"
                 )
                 Some(
                     when (val old = previous?.tree ?: None) {
@@ -74,6 +77,7 @@ internal fun <Row> gridCompute(
             filterCache = Some(old.filtered)
             if (
                 !old.treeMode &&
+                    !old.pivotMode &&
                     old.query.grouping.size ==
                     0L &&
                     gridArrayEqual(old.query.sorting, query.sorting)
@@ -81,6 +85,7 @@ internal fun <Row> gridCompute(
                 orderCache = Some(old.result.ordered)
             if (
                 !old.treeMode &&
+                    !old.pivotMode &&
                     old.query.grouping.size ==
                     0L &&
                     gridArrayEqual(old.query.aggregations, query.aggregations)
@@ -111,6 +116,25 @@ internal fun <Row> gridCompute(
         case None -> {}
     }
     val expansion = expanded.forGrouping(query.grouping)
+    when (query.pivot) {
+        case Some(_) -> {
+            val pivot = gridComputePivot(filtered, columns, query, previous?.pivot ?: None)
+            val(result, resolved) = gridPresentPivot(pivot, query, expansion, previous)
+            return GridComputed(
+                source,
+                columns,
+                resolved,
+                result,
+                pins,
+                filtered,
+                expansion,
+                pivot.groups,
+                None,
+                Some(pivot)
+            )
+        }
+        case None -> {}
+    }
     if (query.grouping.size > 0L) {
         val groups = gridComputeGroups(filtered, columns, query, previous?.groups ?: None)
         val(result, resolved) =
@@ -134,6 +158,7 @@ internal fun <Row> gridCompute(
         when (previous) {
             case Some(val old) -> if (
                 !old.treeMode &&
+                    !old.pivotMode &&
                     old.query.grouping.size ==
                     0L &&
                     old.result.ordered ===
@@ -235,7 +260,7 @@ private fun <Row> gridLocalFilter(
     return GridOrderedRows(source, indices.toArray())
 }
 
-private fun <Row> gridLocalOrder(
+internal fun <Row> gridLocalOrder(
     source: TableSource<Row>,
     columns: GridColumns<Row>,
     sorts: Array<GridSort>

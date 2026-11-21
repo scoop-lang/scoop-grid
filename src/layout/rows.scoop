@@ -149,7 +149,7 @@ internal class GridRows<Row>(
                             index ->
                             val column = columns.columns[index]
                             SemanticGridColumn(
-                                SemanticItemKey.Text(column.id.value),
+                                SemanticItemKey.Text(column.id.encoded),
                                 Some(column.title)
                             )
                         },

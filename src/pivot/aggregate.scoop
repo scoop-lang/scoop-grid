@@ -1,0 +1,93 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.math.BigDecimal
+import scoop.ui.component.TableSource
+
+/** Only intersections that contain records receive accumulator positions. */
+internal class GridPivotAggregated(
+    val source: GridAggregations,
+    val byCombination: Array<HashMap<Long, Long>>
+)
+
+internal fun <Row> gridPivotAggregate(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    rowGroups: GridGroupTopology<Row>?,
+    pivotGroups: GridGroupTopology<Row>?,
+    selections: Array<GridAggregationSelection>
+): GridPivotAggregated {
+    val runs = gridAggregateRuns(columns, selections)
+    val baseCount = (rowGroups?.nodes?.size ?: 0L) + 1L
+    val combinations =
+        Array<HashMap<Long, Long>>(pivotGroups?.nodes?.size ?: 1L) { _ -> HashMap<Long, Long>() }
+    for (run in runs)
+        for (group in 0L ..< baseCount)
+            run.ensure(group)
+    when (pivotGroups) {
+        case None -> for (group in 0L ..< baseCount)
+            combinations[0L].put(group, group)
+        case Some(_) -> {}
+    }
+    var next = baseCount
+    for (index in 0L ..< source.count) {
+        val ancestry =
+            when (rowGroups) {
+                case Some(val topology) -> topology.nodes[topology.leaves[index]].ancestry
+                case None -> [0L]
+            }
+        val combination =
+            when (pivotGroups) {
+                case Some(val topology) -> topology.leaves[index]
+                case None -> 0L
+            }
+        val slots = combinations[combination]
+        val targets = ArrayList<Long>()
+        for (group in ancestry) {
+            targets.add(group)
+            val at =
+                when (slots[group]) {
+                    case Some(val found) -> found
+                    case None -> {
+                        gridRequire(next < Long.MAX_VALUE, "pivot accumulator count overflow")
+                        val found = next
+                        next += 1L
+                        slots.put(group, found)
+                        for (run in runs)
+                            run.ensure(found)
+                        found
+                    }
+                }
+            if (at != group)
+                targets.add(at)
+        }
+        val row = source.rowAt(index)
+        val positions = targets.toArray()
+        for (run in runs)
+            run.addGroups(positions, row)
+    }
+    return GridPivotAggregated(gridFinishAggregates(selections, runs), combinations)
+}
+
+internal class GridPivotAggregateValues(
+    private val source: GridAggregateValues,
+    private val positions: HashMap<Long, Long>
+): GridAggregateValues {
+    public override fun display(group: Long): GridAggregateDisplay =
+        when (positions[group]) {
+            case Some(val index) -> source.display(index)
+            case None -> GridAggregateDisplay.Missing
+        }
+    public override fun number(group: Long): BigDecimal? =
+        when (positions[group]) {
+            case Some(val index) -> source.number(index)
+            case None -> None
+        }
+    public override fun compare(left: Long, right: Long): Long =
+        when ((positions[left], positions[right])) {
+            case(Some(val a), Some(val b)) -> source.compare(a, b)
+            case(Some(_), None) -> -1L
+            case(None, Some(_)) -> 1L
+            case(None, None) -> 0L
+        }
+}

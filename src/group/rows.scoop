@@ -20,7 +20,8 @@ internal class GridGroupedRows<Row>(
     roots: Array<Long>,
     private val expanded: GridExpandedRows,
     private val totals: GridTotals,
-    includeGroups: Boolean = true
+    includeGroups: Boolean = true,
+    private val includeRecords: Boolean = true
 ): GridRowSource<Row> {
     private val segments = ArrayList<GridGroupSegment>()
     private val ends = ArrayList<Long>()
@@ -41,7 +42,10 @@ internal class GridGroupedRows<Row>(
                         positions.put(key.viewKey, length)
                         append(GridGroupSegment.Header(index), 1L)
                     }
-                    if (!expanded.contains(key))
+                    if (
+                        (!includeRecords && groups.order.children[index].size == 0L) ||
+                            !expanded.contains(key)
+                    )
                         continue
                     if (totals.placement == GridTotalPlacement.Before)
                         appendTotal(index)
@@ -116,7 +120,10 @@ internal class GridGroupedRows<Row>(
                             None
                         else
                             Some(GridRowKey.Group(groups.descriptions[node.parent].path)),
-                        Some(expanded.contains(GridRowKey.Group(node.path)))
+                        if (includeRecords || groups.order.children[group].size > 0L)
+                            Some(expanded.contains(GridRowKey.Group(node.path)))
+                        else
+                            None
                     )
                 )
             }

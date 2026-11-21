@@ -118,7 +118,7 @@ private fun <Row> gridCompareGroupValue(
                         -1L
                 if (missingA)
                     return 0L
-                column.grouping!!.compare(
+                topology.values[depth].compare(
                     topology.source.rowAt(a.representative),
                     topology.source.rowAt(b.representative)
                 )

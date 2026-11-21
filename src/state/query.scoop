@@ -75,7 +75,8 @@ internal fun <Row> gridRestoreQuery(
         grouping,
         groupSorting,
         saved.groupTotals,
-        saved.treeTotals
+        saved.treeTotals,
+        gridRestorePivot(saved.pivot, columns, aggregations.toArray(), treeMode, issues)
     )
 }
 
@@ -141,4 +142,32 @@ private fun <Row> gridRestoreFilterChildren(
         else
             GridFilter.Or(kept.toArray())
     )
+}
+
+private fun <Row> gridRestorePivot(
+    value: GridPivot?,
+    columns: GridColumns<Row>,
+    aggregations: Array<GridAggregationSelection>,
+    treeMode: Boolean,
+    issues: ArrayList<GridRestoreIssue>
+): GridPivot? {
+    val pivot = value ?: return None
+    if (treeMode || aggregations.size == 0L) {
+        issues.add(GridRestoreIssue(GridStatePart.Pivot, "树模式或缺少有效度量，透视已关闭"))
+        return None
+    }
+    val seen = HashSet<GridColumnId>()
+    val kept = ArrayList<GridSort>()
+    for (dimension in pivot.dimensions) {
+        var allowed = false
+        when (columns.find(dimension.column)?.pivoting ?: None) {
+            case Some(_) -> allowed = true
+            case None -> {}
+        }
+        if (allowed && seen.add(dimension.column))
+            kept.add(dimension)
+        else
+            issues.add(GridRestoreIssue(GridStatePart.Pivot, "透视维度重复、已移除或不允许透视"))
+    }
+    return Some(GridPivot(kept.toArray(), pivot.label))
 }

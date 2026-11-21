@@ -1,0 +1,231 @@
+package scoop.grid.examples.pivot
+
+import scoop.grid.*
+import scoop.graphics.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as pivotColumn
+import scoop.ui.component.scrollArea as pivotScroll
+import scoop.ui.component.frame as pivotFrame
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+
+private struct Sale(
+    val region: String,
+    val team: String,
+    val year: Long,
+    val quarter: Long,
+    val amount: Long,
+    val orders: Long
+)
+
+private class PivotExample(scope: ComponentScope): Component(scope) {
+    private val handle = DataGridHandle()
+    private val rows =
+        TableRows(
+            Array<TableRecord<Sale>>(36L) {
+                at ->
+                val season = at % 6L
+                TableRecord(
+                    ViewKey.Number(at),
+                    Sale(
+                        ["华东", "华北", "华南"][at / 12L],
+                        if (at % 12L < 6L)
+                            "直销"
+                        else
+                            "渠道",
+                        2025L + season / 3L,
+                        season % 3L + 1L,
+                        (at + 1L) * 1200L,
+                        at % 7L + 1L
+                    )
+                )
+            }
+        )
+    private val model =
+        DataGridState(
+            rows,
+            columns(),
+            GridQuery(
+                grouping = [GridColumnId("region"), GridColumnId("team")],
+                aggregations =
+                    [
+                        GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum")),
+                        GridAggregationSelection(GridColumnId("orders"), GridAggregateId("sum"))
+                    ],
+                totals = GridTotals(GridTotalPlacement.After, "全部销售"),
+                groupTotals = GridTotals(GridTotalPlacement.After, "区域小计"),
+                pivot =
+                    Some(
+                        GridPivot(
+                            [GridSort(GridColumnId("year")), GridSort(GridColumnId("quarter"))]
+                        )
+                    )
+            ),
+            expandedRows = GridExpandedRows(true),
+            rowSelection = GridRowSelectionMode.Multiple
+        )
+    init {
+        model.setColumnState(
+            GridColumnState(
+                GridColumnId(GridColumnKey.PivotLabel),
+                width = Some(230.0),
+                pin = GridPin.Start
+            )
+        )
+    }
+
+    private fun columns(): Array<GridColumn<Sale>> =
+        [
+            gridColumn<Sale, String>(
+                GridColumnId("region"),
+                "区域",
+                { row -> row.region },
+                gridTextValues(),
+                groupable = true,
+                pivotable = true
+            ),
+            gridColumn<Sale, String>(
+                GridColumnId("team"),
+                "销售渠道",
+                { row -> row.team },
+                gridTextValues(),
+                groupable = true,
+                pivotable = true
+            ),
+            gridColumn<Sale, Long>(
+                GridColumnId("year"),
+                "年份",
+                { row -> row.year },
+                gridLongValues(),
+                pivotable = true
+            ),
+            gridColumn<Sale, Long>(
+                GridColumnId("quarter"),
+                "季度",
+                { row -> row.quarter },
+                gridLongValues(),
+                pivotable = true
+            ),
+            gridColumn<Sale, Long>(
+                GridColumnId("amount"),
+                "销售额",
+                { row -> row.amount },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(210.0)),
+                aggregations =
+                    [
+                        gridSumLongAggregation(),
+                        gridAverageLongAggregation(),
+                        gridCountAggregation<Long>()
+                    ]
+            ),
+            gridColumn<Sale, Long>(
+                GridColumnId("orders"),
+                "订单数",
+                { row -> row.orders },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(200.0)),
+                aggregations = [gridSumLongAggregation()]
+            )
+        ]
+    public override fun render(): View {
+        val model = this.model
+        val handle = this.handle
+        val filtered = model.query.filter != GridFilter.All
+        val filterTitle: String =
+            if (filtered)
+                "显示全部区域"
+            else
+                "只看华东"
+        val caption =
+            if (model.pivot != None)
+                "销售透视 · 年份 / 季度"
+            else
+                "原始销售记录"
+        val theme = currentThemeSource().read(scope)
+        return styled(
+            row {
+                item(
+                    pivotColumn {
+                        label(caption)
+                        label("透视结果只读；用右侧分析设置调整行分组、维度顺序和聚合方式")
+                        row {
+                            button(
+                                filterTitle,
+                                onClick =
+                                    {
+                                        model.setQuery(
+                                            model.query.withFilter(
+                                                if (filtered)
+                                                    GridFilter.All
+                                                else
+                                                    GridFilter.Column(
+                                                        GridColumnId("region"),
+                                                        GridCondition.Compare(
+                                                            GridComparison.Equal,
+                                                            GridLiteral.Text("华东")
+                                                        )
+                                                    )
+                                            )
+                                        )
+                                    }
+                            )
+                            button(
+                                "展开全部",
+                                onClick = { model.setExpandedRows(GridExpandedRows(true)) }
+                            )
+                            button("收起全部", onClick = { model.setExpandedRows(GridExpandedRows()) })
+                            spacing = 6.0
+                        }
+                        add(
+                            dataGrid(model) {
+                                height = 630.0;
+                                this.handle = Some(handle)
+                            }
+                        )
+                        label(f"${model.result.totalRows} 条匹配记录 · ${model.columns.size} 个结果列")
+                        spacing = 10.0
+                        alignment = CrossAlignment.Stretch
+                    }
+                ) { grow = 1.0 }
+                add(
+                    pivotFrame(
+                        pivotScroll(gridColumnsPanel(model, handle) { height = 120.0 }) {
+                            height = Some(790.0)
+                        }
+                    ) { width = Some(340.0) }
+                )
+                spacing = 18.0
+                padding = Insets.all(16.0)
+                alignment = CrossAlignment.Start
+            }
+        ) { style { background = Some(Paint(theme.tokens.palette.background.background)) } }
+    }
+}
+
+public fun main() {
+    context(ThemeSource(shadcnTheme())) {
+        val application =
+            Application(applicationOptions { lastWindowPolicy = LastWindowPolicy.Exit })
+        UiHost(onRootError = { _, error -> throw error }) {
+            host,
+            active,
+            event -> when (event) {
+                case Resumed -> {
+                    val window =
+                        active.createWindow(
+                            windowAttributes {
+                                title = "Scoop Grid — Pivot"
+                                size = LogicalSize(1440.0, 900.0)
+                            }
+                        )
+                    host.attach(window, { scope -> PivotExample(scope) })
+                }
+                case Window(_, WindowEvent.CloseRequested) -> active.requestExit()
+                else -> {}
+            }
+        }.use { host -> application.run(host) }
+    }
+}

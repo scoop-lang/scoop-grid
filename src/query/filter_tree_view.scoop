@@ -30,7 +30,7 @@ internal class GridFilterUi<Row>(
             { props, scope -> Label(props, scope) }
         )
     fun firstColumn(): GridColumn<Row>? {
-        for (column in input.state.columns)
+        for (column in input.state.sourceColumns)
             if (column.filterable && column.valueKind != None)
                 return Some(column)
         return None
@@ -58,7 +58,7 @@ internal class GridFilterUi<Row>(
     }
     fun columnChoices(): Array<Choice<GridColumnId>> {
         val choices = ArrayList<Choice<GridColumnId>>()
-        for (column in input.state.columns)
+        for (column in input.state.sourceColumns)
             if (column.filterable && column.valueKind != None)
                 choices.add(Choice(ViewKey.Text(column.id.value), column.id, column.title))
         return choices.toArray()

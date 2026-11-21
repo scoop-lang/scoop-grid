@@ -1,0 +1,37 @@
+package scoop.grid
+
+import scoop.graphics.text.*
+import scoop.ui.View
+import scoop.ui.component.TableColumnSize
+
+/** Result fields can only be read through a logical row, never a business record. */
+internal class GridPivotColumn<Row>(
+    public override val id: GridColumnId,
+    public override val title: String,
+    public override val size: TableColumnSize
+): GridColumn<Row> {
+    public override val sortable: Boolean get() = false
+    public override val filterable: Boolean get() = false
+    public override val valueKind: GridValueKind? get() = None
+    public override val exportable: Boolean get() = true
+    public override val missingLast: Boolean get() = true
+    public override val editing: GridColumnEditing<Row>? get() = None
+    public override fun cell(
+        row: Row,
+        fonts: FontCollection?,
+        style: TextStyle?,
+        paragraph: ParagraphStyle?
+    ): View = throw IllegalArgumentException(Some("pivot fields require a logical result row"))
+    public override fun text(row: Row): String? =
+        throw IllegalArgumentException(Some("pivot fields require a logical result row"))
+    public override fun number(row: Row): Double? =
+        throw IllegalArgumentException(Some("pivot fields require a logical result row"))
+    public override fun missing(row: Row): Boolean =
+        throw IllegalArgumentException(Some("pivot fields require a logical result row"))
+    public override fun compare(left: Row, right: Row): Long =
+        throw IllegalArgumentException(Some("pivot fields do not sort business records"))
+    public override fun predicate(condition: GridCondition): (Row) -> Boolean =
+        throw IllegalArgumentException(Some("pivot fields do not filter business records"))
+    public override fun filterValue(row: Row): GridFilterValue =
+        throw IllegalArgumentException(Some("pivot fields have no business record candidates"))
+}

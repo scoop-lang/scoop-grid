@@ -39,17 +39,11 @@ internal class GridRowCells<Row>(
 ): ItemSource {
     public override val count: Long get() = spans.count
     public override fun keyAt(index: Long): ViewKey =
-        ViewKey.Text(columns.columns[spans.columnIndex(index)].id.value)
+        columns.columns[spans.columnIndex(index)].id.viewKey
     public override fun indexOfKey(key: ViewKey): Long? =
-        when (key) {
-            case Text(val value) -> if (value == "")
-                None
-            else
-                when (columns.indexOf(GridColumnId(value))) {
-                    case Some(val index) -> spans.itemIndex(index)
-                    case None -> None
-                }
-            else -> None
+        when (columns.indexOfViewKey(key)) {
+            case Some(val index) -> spans.itemIndex(index)
+            case None -> None
         }
     public override fun build(index: Long): View {
         val columnIndex = spans.columnIndex(index)
@@ -477,7 +471,7 @@ internal class GridCell<Row>(
                                 input.row,
                                 input.column,
                                 columnSpan = input.columnSpan,
-                                columnKey = Some(SemanticItemKey.Text(input.id.value))
+                                columnKey = Some(SemanticItemKey.Text(input.id.encoded))
                             )
                         )
             ),

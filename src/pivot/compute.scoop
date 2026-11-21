@@ -1,0 +1,146 @@
+package scoop.grid
+
+import scoop.ui.component.TableSource
+
+internal class GridPivoted<Row>(
+    val source: TableSource<Row>,
+    val sourceColumns: GridColumns<Row>,
+    val query: GridQuery,
+    val rowTopology: GridGroupTopology<Row>?,
+    val columnTopology: GridGroupTopology<Row>?,
+    val aggregation: GridPivotAggregated,
+    val schema: GridPivotSchema<Row>,
+    val aggregates: GridAggregations,
+    val groups: GridGrouped<Row>?,
+    val ordered: TableSource<Row>
+)
+
+internal fun <Row> gridComputePivot(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    previous: GridPivoted<Row>?
+): GridPivoted<Row> {
+    val pivot = query.pivot!!
+    gridRequire(query.aggregations.size > 0L, "pivot requires at least one aggregation")
+    gridCheckGroupSorting(query)
+    val prior =
+        when (previous) {
+            case Some(val old) -> if (old.source === source && old.sourceColumns === columns)
+                Some(old)
+            else
+                None
+            case None -> None
+        }
+    val rowTopology =
+        if (query.grouping.size == 0L)
+            None
+        else
+            when (prior) {
+                case Some(val old) -> if (gridArrayEqual(old.query.grouping, query.grouping))
+                    old.rowTopology
+                else
+                    Some(gridGroupTopology(source, columns, query.grouping))
+                case None -> Some(gridGroupTopology(source, columns, query.grouping))
+            }
+    val columnTopology =
+        if (pivot.dimensions.size == 0L)
+            None
+        else
+            when (prior) {
+                case Some(val old) -> if (gridArrayEqual(old.query.pivot!!.columns, pivot.columns))
+                    old.columnTopology
+                else
+                    Some(gridGroupTopology(source, columns, pivot.columns, true))
+                case None -> Some(gridGroupTopology(source, columns, pivot.columns, true))
+            }
+    val sameRows = gridSameGroupTopology(prior?.rowTopology ?: None, rowTopology)
+    val sameColumns = gridSameGroupTopology(prior?.columnTopology ?: None, columnTopology)
+    val sameMetrics =
+        when (prior) {
+            case Some(val old) -> gridArrayEqual(old.query.aggregations, query.aggregations)
+            case None -> false
+        }
+    val aggregation =
+        if (sameRows && sameColumns && sameMetrics)
+            prior!!.aggregation
+        else
+            gridPivotAggregate(source, columns, rowTopology, columnTopology, query.aggregations)
+    val schema =
+        when (prior) {
+            case Some(val old) -> if (sameColumns && sameMetrics && old.query.pivot == query.pivot)
+                old.schema
+            else
+                gridPivotSchema(columns, query, columnTopology)
+            case None -> gridPivotSchema(columns, query, columnTopology)
+        }
+    val aggregates =
+        when (prior) {
+            case Some(val old) -> if (old.schema === schema && old.aggregation === aggregation)
+                old.aggregates
+            else
+                gridPivotResultValues(schema, aggregation)
+            case None -> gridPivotResultValues(schema, aggregation)
+        }
+    val groups =
+        when (rowTopology) {
+            case Some(val topology) -> {
+                val previousGroups = prior?.groups ?: None
+                val order =
+                    when (previousGroups) {
+                        case Some(val old) -> if (
+                            sameRows &&
+                                prior!!.aggregation ===
+                                aggregation &&
+                                gridArrayEqual(prior!!.query.sorting, query.sorting) &&
+                                gridArrayEqual(prior!!.query.groupSorting, query.groupSorting)
+                        )
+                            old.order
+                        else
+                            gridOrderGroups(topology, aggregation.source, query)
+                        case None -> gridOrderGroups(topology, aggregation.source, query)
+                    }
+                when (previousGroups) {
+                    case Some(val old) -> if (old.order === order && old.aggregates === aggregates)
+                        Some(old)
+                    else
+                        Some(GridGrouped(topology, aggregates, order, query))
+                    case None -> Some(GridGrouped(topology, aggregates, order, query))
+                }
+            }
+            case None -> None
+        }
+    val ordered =
+        groups?.order?.rows ?:
+            when (prior) {
+                case Some(val old) -> if (
+                    sameRows && gridArrayEqual(old.query.sorting, query.sorting)
+                )
+                    old.ordered
+                else
+                    gridLocalOrder(source, columns, query.sorting)
+                case None -> gridLocalOrder(source, columns, query.sorting)
+            }
+    return GridPivoted(
+        source,
+        columns,
+        query,
+        rowTopology,
+        columnTopology,
+        aggregation,
+        schema,
+        aggregates,
+        groups,
+        ordered
+    )
+}
+
+private fun <Row> gridSameGroupTopology(
+    a: GridGroupTopology<Row>?,
+    b: GridGroupTopology<Row>?
+): Boolean =
+    when ((a, b)) {
+        case(None, None) -> true
+        case(Some(val left), Some(val right)) -> left === right
+        else -> false
+    }

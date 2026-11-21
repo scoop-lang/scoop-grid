@@ -160,7 +160,7 @@ public enum GridRow<Row> {
                         return Some(column.id)
                 when (val preferred = gridRowLabelColumn(columns, group.aggregates)) {
                     case Some(_) -> preferred
-                    case None -> if (columns.size > 0L)
+                    case None -> if (columns.size > 0L && columns[0L].id.isSource)
                         Some(columns[0L].id)
                     else
                         None

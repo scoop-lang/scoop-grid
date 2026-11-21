@@ -9,7 +9,7 @@ import scoop.ui.*
 internal class GridHeaderTarget(val key: GridHeaderKey, val pin: GridPin) {
     fun viewKey(): ViewKey =
         when (key) {
-            case Column(val id) -> ViewKey.Text(f"column:${id.value}")
+            case Column(val id) -> ViewKey.Text(f"column:${id.encoded}")
             case Group(val id) -> ViewKey.Text(f"group:${gridHeaderPin(pin)}:${id.value}")
         }
     fun automationId(): String =

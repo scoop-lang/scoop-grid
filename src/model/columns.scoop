@@ -33,11 +33,15 @@ internal fun gridOrderedColumnStates(values: Array<GridColumnState>): Array<Grid
     return result.toArray()
 }
 
-internal class GridColumns<Row>(val values: Array<GridColumn<Row>>) {
+internal class GridColumns<Row>(val values: Array<GridColumn<Row>>, allowResults: Boolean = false) {
     private val lookup = HashMap<GridColumnId, GridColumn<Row>>()
     init {
         gridRequire(values.size > 0L, "grid requires at least one column")
         for (column in values) {
+            gridRequire(
+                allowResults || column.id.isSource,
+                "source columns require source identities"
+            )
             gridRequire(!lookup.containsKey(column.id), "duplicate grid column id")
             val operations = HashSet<GridAggregateId>()
             for (operation in column.aggregations)

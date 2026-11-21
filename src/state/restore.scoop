@@ -19,7 +19,6 @@ internal fun <Row> gridRestoreView(
     selectable: ((Row) -> Boolean)?
 ): GridRestoredView<Row> {
     val issues = ArrayList<GridRestoreIssue>()
-    val states = gridRestoreColumns(saved.columns, presentation, previous.columns, headers, issues)
     val pins =
         GridPinnedRows(
             gridRestorePins(saved.pinnedRows.top, previous.source, issues),
@@ -45,6 +44,10 @@ internal fun <Row> gridRestoreView(
             expanded,
             previous.treeData
         )
+    val nextHeaders = next.pivot?.schema?.headers ?: headers
+    val defaults = gridReconcileColumns(presentation, next.displayColumns, nextHeaders)
+    val states =
+        gridRestoreColumns(saved.columns, defaults, next.displayColumns, nextHeaders, issues)
     if (next.query.pagination != query.pagination)
         issues.add(GridRestoreIssue(GridStatePart.Pagination, "页码已按恢复后的结果调整"))
     val selected =

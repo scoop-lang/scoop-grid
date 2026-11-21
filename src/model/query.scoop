@@ -38,7 +38,8 @@ public class GridQuery public constructor(
     public val grouping: Array<GridColumnId> = [],
     public val groupSorting: Array<GridGroupSort> = [],
     public val groupTotals: GridTotals = GridTotals(label = "小计"),
-    public val treeTotals: GridTotals = GridTotals(label = "子树小计")
+    public val treeTotals: GridTotals = GridTotals(label = "子树小计"),
+    public val pivot: GridPivot? = None
 ): Equals<GridQuery> {
     init {
         when (pagination) {
@@ -58,7 +59,9 @@ public class GridQuery public constructor(
             groupTotals ==
             other.groupTotals &&
             treeTotals ==
-            other.treeTotals
+            other.treeTotals &&
+            pivot ==
+            other.pivot
 
     public fun withPagination(value: GridPagination): GridQuery =
         GridQuery(
@@ -71,7 +74,8 @@ public class GridQuery public constructor(
             grouping,
             groupSorting,
             groupTotals,
-            treeTotals
+            treeTotals,
+            pivot
         )
     public fun withSorting(value: Array<GridSort>): GridQuery =
         GridQuery(
@@ -84,7 +88,8 @@ public class GridQuery public constructor(
             grouping,
             groupSorting,
             groupTotals,
-            treeTotals
+            treeTotals,
+            pivot
         )
     public fun withFilter(value: GridFilter): GridQuery =
         GridQuery(
@@ -97,7 +102,8 @@ public class GridQuery public constructor(
             grouping,
             groupSorting,
             groupTotals,
-            treeTotals
+            treeTotals,
+            pivot
         )
     public fun withQuickFilter(value: String): GridQuery =
         GridQuery(
@@ -110,7 +116,8 @@ public class GridQuery public constructor(
             grouping,
             groupSorting,
             groupTotals,
-            treeTotals
+            treeTotals,
+            pivot
         )
     public fun withAggregations(value: Array<GridAggregationSelection>): GridQuery =
         GridQuery(
@@ -123,7 +130,8 @@ public class GridQuery public constructor(
             grouping,
             gridSurvivingGroupSorting(groupSorting, grouping, value),
             groupTotals,
-            treeTotals
+            treeTotals,
+            pivot
         )
     public fun withTotals(value: GridTotals): GridQuery =
         GridQuery(
@@ -136,7 +144,8 @@ public class GridQuery public constructor(
             grouping,
             groupSorting,
             groupTotals,
-            treeTotals
+            treeTotals,
+            pivot
         )
     public fun withGrouping(value: Array<GridColumnId>): GridQuery =
         GridQuery(
@@ -149,7 +158,8 @@ public class GridQuery public constructor(
             value,
             gridSurvivingGroupSorting(groupSorting, value, aggregations),
             groupTotals,
-            treeTotals
+            treeTotals,
+            pivot
         )
     public fun withGroupSorting(value: Array<GridGroupSort>): GridQuery =
         GridQuery(
@@ -162,7 +172,8 @@ public class GridQuery public constructor(
             grouping,
             value,
             groupTotals,
-            treeTotals
+            treeTotals,
+            pivot
         )
     public fun withGroupTotals(value: GridTotals): GridQuery =
         GridQuery(
@@ -175,7 +186,8 @@ public class GridQuery public constructor(
             grouping,
             groupSorting,
             value,
-            treeTotals
+            treeTotals,
+            pivot
         )
     public fun withTreeTotals(value: GridTotals): GridQuery =
         GridQuery(
@@ -188,6 +200,21 @@ public class GridQuery public constructor(
             grouping,
             groupSorting,
             groupTotals,
+            value,
+            pivot
+        )
+    public fun withPivot(value: GridPivot?): GridQuery =
+        GridQuery(
+            sorting,
+            filter,
+            quickFilter,
+            pagination,
+            aggregations,
+            totals,
+            grouping,
+            groupSorting,
+            groupTotals,
+            treeTotals,
             value
         )
 }
@@ -197,7 +224,8 @@ internal fun gridCriteriaEqual(left: GridQuery, right: GridQuery): Boolean =
         gridFilterCriteriaEqual(left, right) &&
         gridArrayEqual(left.aggregations, right.aggregations) &&
         gridArrayEqual(left.grouping, right.grouping) &&
-        gridArrayEqual(left.groupSorting, right.groupSorting)
+        gridArrayEqual(left.groupSorting, right.groupSorting) &&
+        gridPivotDimensionsEqual(left.pivot, right.pivot)
 
 internal fun gridFilterCriteriaEqual(left: GridQuery, right: GridQuery): Boolean =
     left.filter == right.filter && left.quickFilter == right.quickFilter

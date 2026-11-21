@@ -59,15 +59,16 @@ public class DataGrid<Row> public constructor(
             fontRevision = fonts.revision
         }
         val layout = plan!!
+        val sizing = gridResultRowSizing(input.state, input.rowSizing)
         val policy =
             when (val previous = rowPolicy) {
                 case Some(val old) -> if (
-                    old.columns === layout && gridSameRowSizing(old.mode, input.rowSizing)
+                    old.columns === layout && gridSameRowSizing(old.mode, sizing)
                 )
                     old
                 else
-                    GridRowPolicy(input.rowSizing, layout)
-                case None -> GridRowPolicy(input.rowSizing, layout)
+                    GridRowPolicy(sizing, layout)
+                case None -> GridRowPolicy(sizing, layout)
             }
         rowPolicy = Some(policy)
         val result = input.state.result

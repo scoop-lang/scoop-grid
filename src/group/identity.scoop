@@ -5,6 +5,7 @@ public class GridGroupPart public constructor(
     public val value: GridLiteral
 ): Equals<GridGroupPart>, Hash {
     init {
+        gridRequire(column.isSource, "group dimensions require source columns")
         when (value) {
             case Number(val number) -> gridRequire(number.isFinite(), "group key must be finite")
             else -> {}
@@ -46,7 +47,7 @@ public class GridGroupPath public constructor(public val parts: Array<GridGroupP
     }
 }
 
-private fun gridEncodeGroupPath(parts: Array<GridGroupPart>): String {
+internal fun gridEncodeGroupPath(parts: Array<GridGroupPart>): String {
     val text = StringBuilder()
     for (part in parts) {
         val value = gridGroupLiteral(part.value)

@@ -23,6 +23,7 @@ internal class GridGroupTopology<Row>(
     val source: TableSource<Row>,
     val columns: GridColumns<Row>,
     val dimensions: Array<GridColumnId>,
+    val values: Array<GridColumnGrouping<Row>>,
     val nodes: Array<GridGroupNode>,
     val roots: Array<Long>,
     val leaves: Array<Long>,
@@ -33,15 +34,22 @@ internal class GridGroupTopology<Row>(
 internal fun <Row> gridGroupTopology(
     source: TableSource<Row>,
     columns: GridColumns<Row>,
-    dimensions: Array<GridColumnId>
+    dimensions: Array<GridColumnId>,
+    pivot: Boolean = false
 ): GridGroupTopology<Row> {
     val seen = HashSet<GridColumnId>()
     val values =
         Array<GridColumnGrouping<Row>>(dimensions.size) {
             index ->
             gridRequire(seen.add(dimensions[index]), "duplicate grouping column")
-            columns.get(dimensions[index]).grouping ?:
-                throw IllegalArgumentException(Some("grid column does not allow grouping"))
+            val column = columns.get(dimensions[index])
+            (
+                if (pivot)
+                    column.pivoting
+                else
+                    column.grouping
+            ) ?:
+                throw IllegalArgumentException(Some("grid column does not allow this dimension"))
         }
     val nodes = ArrayList<GridGroupNode>()
     val roots = ArrayList<Long>()
@@ -112,6 +120,7 @@ internal fun <Row> gridGroupTopology(
         source,
         columns,
         dimensions,
+        values,
         nodes.toArray(),
         roots.toArray(),
         leaves.toArray(),

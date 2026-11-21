@@ -296,6 +296,8 @@ public class GridColumnsPanel<Row> public constructor(
                 { id, visible -> show(id, visible) }
             )
         return column {
+            if (gridHasPivotControls(input.state))
+                add(gridPivotControls(input, active))
             add(
                 columnsButton(labels.fit, { this @GridColumnsPanel.fit() }) {
                     enabled = active
@@ -409,7 +411,7 @@ public class GridColumnsPanel<Row> public constructor(
                 }
             }
             row {
-                key = ViewKey.Text(f"grid-columns-placement-${current.id.value}")
+                key = ViewKey.Text(f"grid-columns-placement-${current.id.encoded}")
                 item(
                     columnsSelect(
                         binding<GridPin?>(
@@ -459,7 +461,7 @@ public class GridColumnsPanel<Row> public constructor(
                 spacing = 6.0 * appearance.density
             }
             row {
-                key = ViewKey.Text(f"grid-columns-width-${current.id.value}")
+                key = ViewKey.Text(f"grid-columns-width-${current.id.encoded}")
                 item(
                     columnsInput(widthDraft) {
                         enabled =

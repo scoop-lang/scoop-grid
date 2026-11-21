@@ -36,12 +36,9 @@ public class DataGridState<Row> public constructor(
         state(
             GridHeaders(Array<GridColumnId>(columns.size) { index -> columns[index].id }, headers)
         )
+    private var sourcePresentation = gridDefaultColumnStates(headerState.value)
     private val presentation =
-        state(
-            Array<GridColumnState>(columns.size) {
-                index -> GridColumnState(headerState.value.leaves[index])
-            }
-        )
+        state(gridDefaultColumnStates(computed.value.pivot?.schema?.headers ?: headerState.value))
     private val observers = ArrayList<GridModelObserver>()
     private val filterCandidates = HashMap<GridColumnId, GridFilterValues>()
     private val selection = state(GridSelectedRows([]))
@@ -232,14 +229,17 @@ public class DataGridState<Row> public constructor(
             gridCompute(old.source, old.columns, query, Some(old), old.pins, old.expanded, value)
         if (computed.value !== old)
             throw IllegalStateException(Some("准备树数据期间模型已更新，请重试"))
-        computed.value = next
+        publishComputed(next)
         clearCellRange()
         notify(old.query, next.query)
     }
     internal fun canExpand(key: GridRowKey): Boolean {
         return when (key) {
-            case Group(val path) -> computed.value.groups?.topology?.paths?.containsKey(path) ?:
-                false
+            case Group(val path) -> {
+                val groups = computed.value.groups ?: return false
+                val at = groups.topology.paths[path] ?: return false
+                !computed.value.pivotMode || groups.order.children[at].size > 0L
+            }
             case Data(val business) -> {
                 val tree = computed.value.tree ?: return false
                 val node = tree.topology.positions[business] ?: return false
@@ -283,7 +283,7 @@ public class DataGridState<Row> public constructor(
             )
         if (computed.value !== old)
             throw IllegalStateException(Some("准备展开期间模型已更新，请重试"))
-        computed.value = next
+        publishComputed(next)
         clearCellRange()
         changed()
     }
@@ -394,10 +394,12 @@ public class DataGridState<Row> public constructor(
         val bounds = gridCellRangeBounds(range, snapshot.result.rows, order) ?: return None
         val columns =
             Array<GridColumn<Row>>(bounds.lastColumn - bounds.firstColumn + 1L) {
-                index -> snapshot.columns.get(order.idAt(bounds.firstColumn + index))
+                index -> snapshot.displayColumns.get(order.idAt(bounds.firstColumn + index))
             }
         val visible =
-            Array<GridColumn<Row>>(order.count) { at -> snapshot.columns.get(order.idAt(at)) }
+            Array<GridColumn<Row>>(order.count) {
+                at -> snapshot.displayColumns.get(order.idAt(at))
+            }
         return Some(gridCopyText(snapshot.result.rows, columns, bounds, includeHeaders, visible))
     }
     public val query: GridQuery get() = computed.value.query
@@ -411,7 +413,7 @@ public class DataGridState<Row> public constructor(
         val snapshot = computed.value
         return gridFindCell(
             snapshot.result.rows,
-            snapshot.columns,
+            snapshot.displayColumns,
             columnState,
             text,
             after,
@@ -421,11 +423,22 @@ public class DataGridState<Row> public constructor(
         )
     }
     public fun exportCsv(options: GridCsvOptions = GridCsvOptions()): String =
-        gridExportCsv(computed.value, columnState, selectedRows, options)
+        gridExportCsv(
+            computed.value,
+            columnState,
+            if (computed.value.pivotMode)
+                sourcePresentation
+            else
+                columnState,
+            selectedRows,
+            options
+        )
     public fun rangeStatistics(): GridRangeStatistics? {
         val snapshot = computed.value
         val range = cellRange ?: return None
-        return Some(gridRangeStatistics(snapshot.result.rows, snapshot.columns, columnState, range))
+        return Some(
+            gridRangeStatistics(snapshot.result.rows, snapshot.displayColumns, columnState, range)
+        )
     }
     public fun saveViewState(
         readingPosition: GridReadingPosition? = None,
@@ -464,8 +477,8 @@ public class DataGridState<Row> public constructor(
         )
             throw IllegalStateException(Some("准备恢复期间模型已更新，请重试"))
         val next = restored.report.state
-        computed.value = restored.computed
-        if (!gridArrayEqual(priorColumns, next.columns))
+        publishComputed(restored.computed)
+        if (!gridArrayEqual(presentation.value, next.columns))
             presentation.value = next.columns
         selection.value = restored.selection
         rangeSelection.value = next.cellRange
@@ -477,14 +490,19 @@ public class DataGridState<Row> public constructor(
     }
     public val result: GridResult<Row> get() = computed.value.result
     public val pinnedRows: GridPinnedRows get() = computed.value.pins
-    public val columns: Array<GridColumn<Row>> get() = computed.value.columns.values
+    public val columns: Array<GridColumn<Row>> get() = computed.value.displayColumns.values
+    public val sourceColumns: Array<GridColumn<Row>> get() = computed.value.columns.values
+    public fun sourceColumn(id: GridColumnId): GridColumn<Row> = computed.value.columns.get(id)
+    public val pivot: GridPivot? get() = query.pivot
+    public fun setPivot(value: GridPivot?) = setQuery(query.withPivot(value))
     public val columnState: Array<GridColumnState> get() = presentation.value
-    public val headers: Array<GridHeaderNode> get() = headerState.value.values
-    internal val headerTree: GridHeaders get() = headerState.value
-    public fun column(id: GridColumnId): GridColumn<Row> = computed.value.columns.get(id)
+    public val headers: Array<GridHeaderNode> get() = headerTree.values
+    internal val headerTree: GridHeaders get() =
+        computed.value.pivot?.schema?.headers ?: headerState.value
+    public fun column(id: GridColumnId): GridColumn<Row> = computed.value.displayColumns.get(id)
     public fun filterValues(id: GridColumnId): GridFilterValues {
         computed.checkMutation()
-        val definition = column(id)
+        val definition = sourceColumn(id)
         gridRequire(definition.filterable, "grid column is not filterable")
         when (filterCandidates[id]) {
             case Some(val values) -> return values
@@ -502,7 +520,11 @@ public class DataGridState<Row> public constructor(
         }
     }
     internal val source: TableSource<Row> get() = computed.value.source
-    internal fun findColumn(id: GridColumnId): GridColumn<Row>? = computed.value.columns.find(id)
+    internal fun findColumn(id: GridColumnId): GridColumn<Row>? =
+        when (val column = computed.value.displayColumns.find(id)) {
+            case Some(_) -> column
+            case None -> computed.value.columns.find(id)
+        }
     internal fun visibleColumn(id: GridColumnId): Boolean {
         for (column in presentation.value)
             if (column.id == id)
@@ -549,7 +571,7 @@ public class DataGridState<Row> public constructor(
             )
         if (computed.value !== old)
             throw IllegalStateException(Some("准备查询期间模型已更新，请重试"))
-        computed.value = next
+        publishComputed(next)
         if (
             !gridCriteriaEqual(old.query, next.query) ||
                 old.query.pagination !=
@@ -585,7 +607,7 @@ public class DataGridState<Row> public constructor(
         return None
     }
     public fun setAggregation(column: GridColumnId, operation: GridAggregateId?) {
-        val definition = this.column(column)
+        val definition = this.sourceColumn(column)
         when (operation) {
             case Some(val id) -> when (gridFindAggregation(definition, id)) {
                 case Some(_) -> {}
@@ -655,7 +677,7 @@ public class DataGridState<Row> public constructor(
         if (computed.value !== old)
             throw IllegalStateException(Some("准备数据期间模型已更新，请重试"))
         filterCandidates.clear()
-        computed.value = next
+        publishComputed(next)
         if (!keepRange)
             clearCellRange()
         publishSelection(kept)
@@ -674,7 +696,7 @@ public class DataGridState<Row> public constructor(
         val old = computed.value
         val nextColumns = GridColumns(values)
         val ids = Array<GridColumnId>(values.size) { index -> values[index].id }
-        val nextHeaders = GridHeaders(ids, Some(headers ?: headerTree.surviving(ids)))
+        val nextHeaders = GridHeaders(ids, Some(headers ?: headerState.value.surviving(ids)))
         val sorting = ArrayList<GridSort>()
         for (sort in old.query.sorting)
             if (nextColumns.contains(sort.column))
@@ -693,7 +715,8 @@ public class DataGridState<Row> public constructor(
                 grouping,
                 gridSurvivingGroupSorting(old.query.groupSorting, grouping, aggregations),
                 old.query.groupTotals,
-                old.query.treeTotals
+                old.query.treeTotals,
+                gridSurvivingPivot(old.query.pivot, nextColumns, aggregations)
             )
         val next =
             gridCompute(
@@ -705,33 +728,28 @@ public class DataGridState<Row> public constructor(
                 old.expanded,
                 old.treeData
             )
-        val states = ArrayList<GridColumnState>()
-        val retained = HashSet<GridColumnId>()
-        for (entry in presentation.value)
-            when (nextColumns.find(entry.id)) {
-                case Some(val column) -> {
-                    val width =
-                        when (entry.width) {
-                            case Some(val value) -> Some(column.size.constrain(value))
-                            case None -> None
-                        }
-                    states.add(GridColumnState(entry.id, entry.visible, width, entry.pin))
-                    retained.add(entry.id)
+        val nextSourceStates =
+            gridReconcileColumns(
+                if (old.pivotMode)
+                    sourcePresentation
+                else
+                    presentation.value,
+                nextColumns,
+                nextHeaders,
+                when (headers) {
+                    case Some(_) -> true;
+                    case None -> false
                 }
-                case None -> {}
-            }
-        for (column in values)
-            if (!retained.contains(column.id))
-                states.add(GridColumnState(column.id))
+            )
         val nextStates =
-            when (headers) {
-                case Some(_) -> {
-                    val byId = HashMap<GridColumnId, GridColumnState>()
-                    for (entry in states)
-                        byId.put(entry.id, entry)
-                    Array<GridColumnState>(values.size) { at -> byId[nextHeaders.leaves[at]]!! }
-                }
-                case None -> states.toArray()
+            when (next.pivot) {
+                case Some(val value) -> gridReconcileColumns(
+                    presentation.value,
+                    value.schema.columns,
+                    value.schema.headers,
+                    gridPivotResetOrder(old, next, presentation.value)
+                )
+                case None -> nextSourceStates
             }
         val keepRange =
             cellRange ==
@@ -746,6 +764,7 @@ public class DataGridState<Row> public constructor(
             throw IllegalStateException(Some("准备列期间模型已更新，请重试"))
         filterCandidates.clear()
         headerState.value = nextHeaders
+        sourcePresentation = nextSourceStates
         presentation.value = nextStates
         computed.value = next
         if (!keepRange)
@@ -784,7 +803,7 @@ public class DataGridState<Row> public constructor(
             )
         if (computed.value !== old)
             throw IllegalStateException(Some("准备固定行期间模型已更新，请重试"))
-        computed.value = next
+        publishComputed(next)
         clearCellRange()
         changed()
     }
@@ -798,7 +817,7 @@ public class DataGridState<Row> public constructor(
     }
     public fun setColumnStates(values: Array<GridColumnState>) {
         presentation.checkMutation()
-        val definitions = computed.value.columns
+        val definitions = computed.value.displayColumns
         gridRequire(
             values.size == definitions.values.size,
             "column state must include every column"
@@ -849,6 +868,31 @@ public class DataGridState<Row> public constructor(
             }
             case Rejected(val message) -> throw IllegalArgumentException(Some(message))
         }
+    }
+    private fun publishComputed(next: GridComputed<Row>) {
+        val old = computed.value
+        if (old.displayColumns !== next.displayColumns) {
+            if (!old.pivotMode)
+                sourcePresentation = presentation.value
+            val states =
+                when (next.pivot) {
+                    case Some(val value) -> gridReconcileColumns(
+                        presentation.value,
+                        value.schema.columns,
+                        value.schema.headers,
+                        gridPivotResetOrder(old, next, presentation.value)
+                    )
+                    case None -> gridReconcileColumns(
+                        sourcePresentation,
+                        next.columns,
+                        headerState.value
+                    )
+                }
+            if (!gridSameCellColumns(presentation.value, states))
+                clearCellRange()
+            presentation.value = states
+        }
+        computed.value = next
     }
     private fun notify(old: GridQuery, next: GridQuery) {
         changed()

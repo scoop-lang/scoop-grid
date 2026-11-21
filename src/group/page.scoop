@@ -55,7 +55,8 @@ internal fun <Row> gridPresentGroups(
     expanded: GridExpandedRows,
     pins: GridPinnedRows,
     includeGroups: Boolean = true,
-    previous: GridComputed<Row>? = None
+    previous: GridComputed<Row>? = None,
+    includeRecords: Boolean = true
 ): (GridResult<Row>, GridQuery) {
     val bounds = gridPageRange(groups.order.roots.size, query.pagination)
     val roots = Array<Long>(bounds.count) { at -> groups.order.roots[bounds.start + at] }
@@ -86,7 +87,8 @@ internal fun <Row> gridPresentGroups(
                 case Disabled -> groups.order.rows
                 case Page(_, _) -> GridPageRows(groups.order.rows, start, count)
             }
-    val rows = GridGroupedRows(groups, roots, expanded, query.groupTotals, includeGroups)
+    val rows =
+        GridGroupedRows(groups, roots, expanded, query.groupTotals, includeGroups, includeRecords)
     val result =
         gridComposeResult(
             rows,

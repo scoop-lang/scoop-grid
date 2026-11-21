@@ -1,0 +1,155 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.ui.component.TableColumnSize
+import scoop.ui.component.GridTrack
+
+internal class GridPivotMetric(
+    val id: GridColumnId,
+    val selection: GridAggregationSelection,
+    val combination: Long
+)
+
+internal class GridPivotSchema<Row>(
+    val columns: GridColumns<Row>,
+    val headers: GridHeaders,
+    val metrics: Array<GridPivotMetric>
+)
+
+internal fun <Row> gridPivotSchema(
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    topology: GridGroupTopology<Row>?
+): GridPivotSchema<Row> {
+    val definitions = ArrayList<GridColumn<Row>>()
+    val metrics = ArrayList<GridPivotMetric>()
+    val label = GridColumnId(GridColumnKey.PivotLabel)
+    definitions.add(
+        GridPivotColumn<Row>(label, query.pivot!!.label, TableColumnSize(GridTrack.Fixed(220.0)))
+    )
+    val headers = ArrayList<GridHeaderNode>()
+    headers.add(GridHeaderNode.Column(label))
+    when (topology) {
+        case None -> {
+            for (
+                node in gridPivotMetricColumns(
+                    columns,
+                    query.aggregations,
+                    [],
+                    "",
+                    0L,
+                    definitions,
+                    metrics
+                )
+            )
+                headers.add(node)
+        }
+        case Some(val groups) -> {
+            val pivot = query.pivot!!
+            val order =
+                gridOrderGroups(
+                    groups,
+                    gridAggregate(groups.source, columns, []),
+                    GridQuery(
+                        grouping = pivot.columns,
+                        groupSorting =
+                            Array<GridGroupSort>(pivot.dimensions.size) {
+                                at -> GridGroupSort(
+                                    pivot.dimensions[at].column,
+                                    direction = pivot.dimensions[at].direction
+                                )
+                            }
+                    )
+                )
+            val built = HashMap<Long, GridHeaderNode>()
+            for (offset in 0L ..< groups.nodes.size) {
+                val index = groups.nodes.size - offset - 1L
+                val node = groups.nodes[index]
+                val children = order.children[index]
+                val nodes =
+                    if (children.size == 0L) {
+                        val title = StringBuilder()
+                        for (depth in 1L ..< node.ancestry.size) {
+                            if (depth > 1L)
+                                title.append(" / ")
+                            title.append(groups.nodes[node.ancestry[depth] - 1L].label)
+                        }
+                        gridPivotMetricColumns(
+                            columns,
+                            query.aggregations,
+                            node.path.parts,
+                            title.toString(),
+                            index,
+                            definitions,
+                            metrics
+                        )
+                    } else
+                        Array<GridHeaderNode>(children.size) { at -> built[children[at]]!! }
+                built.put(
+                    index,
+                    GridHeaderNode.Group(
+                        GridColumnGroupId(f"pivot:${node.path.encoded}"),
+                        node.label,
+                        nodes
+                    )
+                )
+            }
+            for (root in order.roots)
+                headers.add(built[root]!!)
+        }
+    }
+    val byId = HashMap<GridColumnId, GridColumn<Row>>()
+    for (column in definitions)
+        byId.put(column.id, column)
+    val tree =
+        GridHeaders(
+            Array<GridColumnId>(definitions.size) { at -> definitions[at].id },
+            Some(headers.toArray())
+        )
+    val ordered = Array<GridColumn<Row>>(tree.leaves.size) { at -> byId[tree.leaves[at]]!! }
+    return GridPivotSchema(GridColumns(ordered, true), tree, metrics.toArray())
+}
+
+private fun <Row> gridPivotMetricColumns(
+    columns: GridColumns<Row>,
+    selections: Array<GridAggregationSelection>,
+    parts: Array<GridGroupPart>,
+    path: String,
+    combination: Long,
+    definitions: ArrayList<GridColumn<Row>>,
+    metrics: ArrayList<GridPivotMetric>
+): Array<GridHeaderNode> =
+    Array<GridHeaderNode>(selections.size) {
+        at ->
+        val selection = selections[at]
+        val column = columns.get(selection.column)
+        val operation = gridFindAggregation(column, selection.operation)!!
+        val id = GridColumnId(GridColumnKey.Pivot(GridPivotColumnKey(parts, selection)))
+        val title =
+            if (path == "")
+                f"${column.title} · ${operation.title}"
+            else
+                f"${path} / ${column.title} · ${operation.title}"
+        definitions.add(GridPivotColumn<Row>(id, title, column.size))
+        metrics.add(GridPivotMetric(id, selection, combination))
+        GridHeaderNode.Column(id)
+    }
+
+internal fun <Row> gridPivotResultValues(
+    schema: GridPivotSchema<Row>,
+    values: GridPivotAggregated
+): GridAggregations {
+    val results = HashMap<GridColumnId, GridAggregateValues>()
+    val selections = ArrayList<GridAggregationSelection>()
+    for (metric in schema.metrics) {
+        results.put(
+            metric.id,
+            GridPivotAggregateValues(
+                values.source.metric(metric.selection.column)!!,
+                values.byCombination[metric.combination]
+            )
+        )
+        selections.add(GridAggregationSelection(metric.id, metric.selection.operation))
+    }
+    return GridAggregations(selections.toArray(), results)
+}

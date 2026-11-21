@@ -19,13 +19,16 @@ internal class GridColumnChoices<Row>(
     private val show: (GridColumnId, Boolean) -> Unit
 ): ItemSource {
     private val positions = HashMap<GridColumnId, Long>()
+    private val viewPositions = HashMap<ViewKey, Long>()
     private val filtered = HashSet<GridColumnId>()
     private val sorting = HashMap<GridColumnId, String>()
     private val titles =
         Array<String>(entries.size) { index -> input.state.column(entries[index].id).title }
     init {
-        for (index in 0L ..< entries.size)
+        for (index in 0L ..< entries.size) {
             positions.put(entries[index].id, index)
+            viewPositions.put(entries[index].id.viewKey, index)
+        }
         collectGridFilterColumns(input.state.query.filter, filtered)
         val sorts = input.state.query.sorting
         for (index in 0L ..< sorts.size) {
@@ -33,15 +36,12 @@ internal class GridColumnChoices<Row>(
         }
     }
     public override val count: Long get() = entries.size
-    public override fun keyAt(index: Long): ViewKey = ViewKey.Text(entries[index].id.value)
-    public override fun indexOfKey(key: ViewKey): Long? =
-        when (key) {
-            case Text(val id) -> if (id == "")
-                None
-            else
-                positions[GridColumnId(id)]
-            else -> None
-        }
+    public override fun keyAt(index: Long): ViewKey = entries[index].id.viewKey
+    public override fun indexOfKey(key: ViewKey): Long? = viewPositions[key]
+    private fun chooseKey(key: ViewKey): Boolean {
+        val at = viewPositions[key] ?: return false
+        return choose(entries[at].id)
+    }
     private fun caption(id: GridColumnId): String {
         var text = titles[positions[id]!!]
         when (val sort = sorting[id]) {
@@ -120,7 +120,7 @@ internal class GridColumnChoices<Row>(
                 )
             },
             search = SemanticItemSearch(name = true, automationId = true),
-            selection = Some(SemanticCollectionSelection([SemanticItemKey.Text(selected.value)])),
+            selection = Some(SemanticCollectionSelection([SemanticItemKey.Text(selected.encoded)])),
             setSelected =
                 Some {
                     key,
@@ -128,7 +128,7 @@ internal class GridColumnChoices<Row>(
                         SemanticActionResult.Rejected
                     else
                         when (key) {
-                            case Text(val id) -> if (id != "" && choose(GridColumnId(id)))
+                            case Text(val id) -> if (chooseKey(ViewKey.Text(id)))
                                 SemanticActionResult.Completed
                             else
                                 SemanticActionResult.Unavailable

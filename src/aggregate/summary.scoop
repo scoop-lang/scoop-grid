@@ -39,7 +39,13 @@ public class GridAggregationSummary<Row> public constructor(
             )
             for (selection in result.aggregates.selections) {
                 val definition = input.state.column(selection.column)
-                val operation = gridFindAggregation(definition, selection.operation)!!
+                val sourceId =
+                    when (selection.column.key) {
+                        case Pivot(val key) -> key.metric.column
+                        else -> selection.column
+                    }
+                val operation =
+                    gridFindAggregation(input.state.sourceColumn(sourceId), selection.operation)!!
                 val value =
                     when (result.aggregates.total(selection.column)!!) {
                         case Value(val text) -> text
@@ -48,7 +54,7 @@ public class GridAggregationSummary<Row> public constructor(
                     }
                 add(
                     aggregateLabel(labels.value(definition.title, operation.title, value)) {
-                        key = ViewKey.Text(selection.column.value)
+                        key = selection.column.viewKey
                         fonts = input.fonts
                         theme = input.theme
                         semantics =

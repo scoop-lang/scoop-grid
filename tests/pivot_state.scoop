@@ -1,0 +1,173 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+@Test
+private class GridPivotStateTest {
+    @Test
+    fun `pivot column changes preserve surviving settings and base presentation`() {
+        val source = PivotSource(pivotRecords())
+        val model = DataGridState(source, pivotColumns(source.reads))
+        model.setColumnState(GridColumnState(GridColumnId("note"), false, Some(277.0), GridPin.End))
+        model.setQuery(pivotQuery())
+        val id = pivotId(Some(10L), 1L)
+        model.setColumnState(GridColumnState(id, false, Some(233.0), GridPin.Start))
+        val reads = source.reads.amounts
+        model.setPivot(
+            Some(
+                GridPivot(
+                    [
+                        GridSort(GridColumnId("year"), GridSortDirection.Descending),
+                        GridSort(GridColumnId("quarter"))
+                    ]
+                )
+            )
+        )
+        assertEquals(pivotId(Some(10L), 1L), model.columnState[1L].id)
+        assertEquals(reads, source.reads.amounts)
+        assertEquals(
+            GridColumnState(id, false, Some(233.0), GridPin.Start),
+            model.columnState[gridColumnStateIndex(model.columnState, id)!!]
+        )
+        model.setQuery(
+            model.query.withFilter(
+                GridFilter.Column(
+                    GridColumnId("year"),
+                    GridCondition.Compare(GridComparison.Equal, GridLiteral.Integer(10L))
+                )
+            )
+        )
+        assertEquals(5L, model.columns.size)
+        assertEquals(None, gridColumnStateIndex(model.columnState, pivotId(Some(2L), 1L)))
+        assertEquals(
+            Some(233.0),
+            model.columnState[gridColumnStateIndex(model.columnState, id)!!].width
+        )
+        model.setPivot(None)
+        assertEquals(6L, model.columns.size)
+        assertEquals(
+            GridColumnState(GridColumnId("note"), false, Some(277.0), GridPin.End),
+            model.columnState[gridColumnStateIndex(model.columnState, GridColumnId("note"))!!]
+        )
+    }
+
+    @Test
+    fun `pivot restore reconstructs dynamic columns before range and focus validation`() {
+        val source = PivotSource(pivotRecords())
+        val model = DataGridState(source, pivotColumns(source.reads), pivotQuery())
+        val id = pivotId(Some(10L), 1L)
+        val address = GridCellAddress(GridRowKey.Group(pivotPath("North")), id)
+        model.setColumnState(GridColumnState(id, width = Some(280.0), pin = GridPin.End))
+        assertTrue(model.setCellRange(Some(GridCellRange(address, address))))
+        val saved = model.saveViewState(focusedCell = Some(address))
+        model.setPivot(None)
+        val report = model.restoreViewState(saved)
+        assertEquals(0L, report.issues.size)
+        assertEquals(Some(address), report.state.focusedCell)
+        assertEquals(saved.cellRange, model.cellRange)
+        assertEquals(
+            Some(280.0),
+            model.columnState[gridColumnStateIndex(model.columnState, id)!!].width
+        )
+        model.replaceData(PivotSource([pivotRecords()[3L], pivotRecords()[4L]]))
+        val smaller = model.restoreViewState(saved)
+        assertTrue(smaller.issues.size > 0L)
+        assertEquals(None, model.cellRange)
+        assertEquals(None, smaller.state.focusedCell)
+        assertEquals(3L, model.columns.size)
+    }
+
+    @Test
+    fun `restored pivot column order takes precedence over changed dimension direction`() {
+        val source = PivotSource(pivotRecords())
+        val model = DataGridState(source, pivotColumns(source.reads), pivotQuery())
+        val columns = model.columnState
+        val saved =
+            GridViewState(
+                columns,
+                model.query.withPivot(
+                    Some(
+                        GridPivot(
+                            [
+                                GridSort(GridColumnId("year"), GridSortDirection.Descending),
+                                GridSort(GridColumnId("quarter"))
+                            ]
+                        )
+                    )
+                )
+            )
+        val report = model.restoreViewState(saved)
+        assertEquals(0L, report.issues.size)
+        assertTrue(gridArrayEqual(columns, model.columnState))
+        assertEquals(saved.query, model.query)
+    }
+
+    @Test
+    fun `content row height follows source and dynamic result column lifetimes`() {
+        val source = PivotSource(pivotRecords())
+        val model = DataGridState(source, pivotColumns(source.reads))
+        val base = GridColumnId("amount")
+        val result = pivotId(Some(10L), 1L)
+        val mode: GridRowSizing<PivotRecord> = GridRowSizing.Content([base, result])
+        assertTrue(
+            gridSameRowSizing(GridRowSizing.Content([base]), gridResultRowSizing(model, mode))
+        )
+        model.setQuery(pivotQuery())
+        assertTrue(
+            gridSameRowSizing(GridRowSizing.Content([result]), gridResultRowSizing(model, mode))
+        )
+        model.setQuery(
+            model.query.withFilter(
+                GridFilter.Column(
+                    GridColumnId("year"),
+                    GridCondition.Compare(GridComparison.Equal, GridLiteral.Integer(2L))
+                )
+            )
+        )
+        assertTrue(gridSameRowSizing(GridRowSizing.Fixed, gridResultRowSizing(model, mode)))
+        model.setPivot(None)
+        assertTrue(
+            gridSameRowSizing(GridRowSizing.Content([base]), gridResultRowSizing(model, mode))
+        )
+        for (
+            ids in [[base, base], [GridColumnId("unknown")], Array<GridColumnId>(0L) { _ -> base }]
+        )
+            assertFailsWith<IllegalArgumentException> {
+                gridResultRowSizing(model, GridRowSizing.Content(ids))
+            }
+    }
+
+    @Test
+    fun `pivot column replacement cleans dimensions and disables a missing last metric`() {
+        val source = PivotSource(pivotRecords())
+        val definitions = pivotColumns(source.reads)
+        val model = DataGridState(source, definitions, pivotQuery())
+        model.replaceColumns([definitions[0L], definitions[1L], definitions[2L], definitions[4L]])
+        assertEquals(1L, model.query.aggregations.size)
+        assertEquals(1L, model.pivot!!.dimensions.size)
+        assertEquals(4L, model.columns.size)
+        model.replaceColumns([definitions[0L], definitions[1L], definitions[2L]])
+        assertEquals(None, model.pivot)
+        assertEquals(3L, model.columns.size)
+        assertEquals(0L, model.query.aggregations.size)
+    }
+
+    @Test
+    fun `pivot reentrant update wins and later preparation cannot publish stale columns`() {
+        val source = PivotSource(pivotRecords())
+        val model = DataGridState(source, pivotColumns(source.reads), pivotQuery())
+        source.reads.action =
+            Some {
+                source.reads.action = None
+                model.setPagination(GridPagination.Page(1L, 1L))
+            }
+        assertFailsWith<IllegalStateException> {
+            model.setAggregation(GridColumnId("amount"), Some(GridAggregateId("count")))
+        }
+        assertEquals(GridPagination.Page(1L, 1L), model.query.pagination)
+        assertEquals(Some(GridAggregateId("sum")), model.aggregation(GridColumnId("amount")))
+        assertEquals(9L, model.columns.size)
+    }
+}

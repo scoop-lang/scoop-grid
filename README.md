@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、按层级展开、小计与总计。公开合同见 [SPEC.md](docs/SPEC.md)，透视、详情和外部结果继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、透视、按层级展开、小计与总计。公开合同见 [SPEC.md](docs/SPEC.md)，详情和外部结果继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -43,6 +43,10 @@ fun main() {
 筛选保留匹配节点与必要路径祖先，`hierarchyAt` 的 contextOnly 及 `isContextRow` 标明上下文。祖先显示自身字段并可编辑，页内全选和聚合只计算匹配记录。树分页明确使用根节点数；后代与根同页，固定记录保留原层级且只显示一次。`treeAggregations(key)` 读取该节点子树内的匹配聚合；`query.withTreeTotals(GridTotals(GridTotalPlacement.After, "子树小计"))` 显示明确的小计，不改写父节点自身数值。
 
 树的展开按钮和系统展开动作复用编辑门控，Alt＋Right 展开、Alt＋Left 收起；可编辑层级格的 Enter／F2 保留编辑行为。筛选、折叠、数据替换、CSV 范围和视图恢复的约定见 [公开合同](docs/SPEC.md)。[树示例](examples/tree/src/main.scoop) 展示项目与任务、工时编辑、按完成状态筛选、根分页、路径上下文与固定任务。
+
+透视列在业务列上显式声明 `pivotable = true`。查询中的 `aggregations` 至少包含一个度量，再使用 `query.withPivot(Some(GridPivot([GridSort(yearId), GridSort(quarterId)])))` 启用。`grouping` 仍控制行维度；省略行维度会显示单个总计组。结果只为实际组合生成列，缺少记录的交叉点保持缺值，类型化值和聚合错误不会转换为伪造业务记录。
+
+`model.columns` 和 `model.headers` 描述当前透视结果，`model.sourceColumns`／`sourceColumn(id)` 描述筛选和聚合使用的原业务字段。结果列 ID 的 `key` 明确区分 Source、Pivot 与 PivotLabel，透视身份包括完整维度值及度量操作；`model.setPivot(None)` 恢复业务列配置。列面板的分析设置可以选择字段、重排维度及切换聚合，结果列继续支持列虚拟化、冻结、调宽和状态恢复。[透视示例](examples/pivot/src/main.scoop) 展示按区域／渠道分析的年度季度销售。
 
 本地模型验证：
 
@@ -162,6 +166,8 @@ scoop test --release .
 ```sh
 scoop run --release examples/basic
 scoop run --release examples/editors
+scoop run --release examples/tree
+scoop run --release examples/pivot
 scoop check --tests --release tests-cones/window
 scoop test --release tests-cones/window
 scoop check --tests --release tests-cones/controls
@@ -198,6 +204,8 @@ scoop check --tests --release tests-cones/grouping
 scoop test --release tests-cones/grouping
 scoop check --tests --release tests-cones/tree
 scoop test --release tests-cones/tree
+scoop check --tests --release tests-cones/pivot
+scoop test --release tests-cones/pivot
 ```
 
 原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合，`pinned` 覆盖顶部／底部固定、分页去重、筛选／删除、可变高度、原生身份与编辑保留，以及零正文和三段内容测宽。

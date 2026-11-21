@@ -1,0 +1,148 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.select as pivotSelect
+import scoop.ui.style.ThemeSource
+
+internal fun <Row> gridPivotDimensionControl(
+    model: DataGridState<Row>,
+    definition: GridColumn<Row>,
+    enabled: Boolean,
+    labels: GridPivotLabels,
+    fonts: FontCollection?,
+    theme: ThemeSource?,
+    change: (GridPivot) -> Unit
+): View {
+    val id = definition.id
+    val pivot = model.pivot!!
+    val level = gridPivotLevel(pivot, id)
+    val levels = ArrayList<Choice<Long>>()
+    levels.add(Choice(ViewKey.Number(0L), 0L, labels.none))
+    val count =
+        pivot.dimensions.size +
+            if (level == 0L)
+                1L
+            else
+                0L
+    for (index in 1L .. count)
+        levels.add(Choice(ViewKey.Number(index), index, labels.level(index)))
+    return column {
+        add(
+            pivotSelect(
+                binding<Long?>(
+                    { Some(gridPivotLevel(model.pivot!!, id)) },
+                    {
+                        value -> when (value) {
+                            case Some(val next) -> change(gridMovePivot(model.pivot!!, id, next))
+                            case None -> {}
+                        }
+                    }
+                ),
+                levels.toArray()
+            ) {
+                key = ViewKey.Text(f"grid-pivot-${id.value}-dimension")
+                this.enabled = enabled
+                this.fonts = fonts
+                this.theme = theme
+                semantics =
+                    ComponentSemantics(
+                        name = Some(labels.levelName(definition.title)),
+                        automationId = Some(f"grid-pivot-${id.value}-dimension")
+                    )
+            }
+        )
+        if (level > 0L)
+            add(
+                pivotSelect(
+                    binding<GridSortDirection?>(
+                        {
+                            val current = model.pivot!!
+                            val at = gridPivotLevel(current, id)
+                            if (at == 0L)
+                                None
+                            else
+                                Some(current.dimensions[at - 1L].direction)
+                        },
+                        {
+                            value -> when (value) {
+                                case Some(val direction) -> {
+                                    val current = model.pivot!!
+                                    change(
+                                        GridPivot(
+                                            Array<GridSort>(current.dimensions.size) {
+                                                at ->
+                                                val old = current.dimensions[at]
+                                                if (old.column == id)
+                                                    GridSort(id, direction)
+                                                else
+                                                    old
+                                            },
+                                            current.label
+                                        )
+                                    )
+                                }
+                                case None -> {}
+                            }
+                        }
+                    ),
+                    [
+                        Choice(ViewKey.Number(0L), GridSortDirection.Ascending, labels.ascending),
+                        Choice(ViewKey.Number(1L), GridSortDirection.Descending, labels.descending)
+                    ]
+                ) {
+                    key = ViewKey.Text(f"grid-pivot-${id.value}-direction")
+                    this.enabled = enabled
+                    this.fonts = fonts
+                    this.theme = theme
+                    semantics =
+                        ComponentSemantics(
+                            name = Some(labels.directionName(definition.title)),
+                            automationId = Some(f"grid-pivot-${id.value}-direction")
+                        )
+                }
+            )
+        spacing = 6.0
+        alignment = CrossAlignment.Stretch
+    }
+}
+
+private fun gridPivotLevel(pivot: GridPivot, id: GridColumnId): Long {
+    for (at in 0L ..< pivot.dimensions.size)
+        if (pivot.dimensions[at].column == id)
+            return at + 1L
+    return 0L
+}
+
+private fun gridMovePivot(pivot: GridPivot, id: GridColumnId, level: Long): GridPivot {
+    val others = ArrayList<GridSort>()
+    var direction = GridSortDirection.Ascending
+    for (value in pivot.dimensions)
+        if (value.column == id)
+            direction = value.direction
+        else
+            others.add(value)
+    if (level == 0L)
+        return GridPivot(others.toArray(), pivot.label)
+    val index =
+        if (level > others.size + 1L)
+            others.size
+        else
+            level - 1L
+    val moved = GridSort(id, direction)
+    return GridPivot(
+        Array<GridSort>(others.size + 1L) {
+            at -> if (at == index)
+                moved
+            else
+                others[
+                    if (at < index)
+                        at
+                    else
+                        at - 1L
+                ]
+        },
+        pivot.label
+    )
+}

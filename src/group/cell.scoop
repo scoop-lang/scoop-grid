@@ -15,7 +15,10 @@ internal fun <Row> gridGroupCell(
     return gridHierarchyCell(
         input,
         group.path.parts.size - 1L,
-        Some(expanded),
+        if (input.session.currentModel?.canExpand(input.key) ?: false)
+            Some(expanded)
+        else
+            None,
         if (expanded)
             input.labels.collapseGroup(group.label)
         else

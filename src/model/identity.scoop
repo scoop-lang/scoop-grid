@@ -1,11 +1,37 @@
 package scoop.grid
 
-public class GridColumnId public constructor(public val value: String): Equals<GridColumnId>, Hash {
+import scoop.ui.ViewKey
+
+public class GridColumnId public constructor(public val key: GridColumnKey): Equals<
+    GridColumnId
+>, Hash {
+    public constructor(value: String): this(GridColumnKey.Source(value)) {}
     init {
-        gridRequire(value != "", "grid column id must not be empty")
+        when (key) {
+            case Source(val value) -> gridRequire(value != "", "grid column id must not be empty")
+            else -> {}
+        }
     }
-    public override operator fun equals(other: GridColumnId): Boolean = value == other.value
-    public override fun hash(): Long = value.hash()
+    public val value: String get() =
+        when (key) {
+            case Source(val value) -> value
+            case Pivot(val value) -> f"pivot:${value.encoded}"
+            case PivotLabel -> "pivot:label"
+        }
+    public val isSource: Boolean get() =
+        when (key) {
+            case Source(_) -> true
+            else -> false
+        }
+    internal val encoded: String get() =
+        when (key) {
+            case Source(val value) -> f"s${value}"
+            case Pivot(val value) -> f"p${value.encoded}"
+            case PivotLabel -> "l"
+        }
+    public val viewKey: ViewKey get() = ViewKey.Text(encoded)
+    public override operator fun equals(other: GridColumnId): Boolean = key == other.key
+    public override fun hash(): Long = key.hash()
 }
 
 internal fun gridRequire(condition: Boolean, message: String) {
