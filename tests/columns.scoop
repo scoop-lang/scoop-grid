@@ -1,0 +1,160 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class ColumnReads {
+    var count = 0
+}
+
+@Test
+private class GridColumnStateTest {
+    @Test
+    fun `complete column updates are atomic and preserve queries and source data`() {
+        val calls = ColumnReads()
+        val columns =
+            Array<GridColumn<Long>>(3L) {
+                index -> gridColumn<Long, Long>(
+                    GridColumnId(f"c${index}"),
+                    f"Column ${index}",
+                    {
+                        value ->
+                        calls.count += 1;
+                        value
+                    },
+                    gridLongValues(),
+                    TableColumnSize(GridTrack.Fixed(100.0), 50.0, Some(200.0))
+                )
+            }
+        val model = DataGridState(TableRows([TableRecord(ViewKey.Number(0L), 1L)]), columns)
+        val result = model.result
+        val before = model.columnState
+        model.setColumnStates(before)
+        assertTrue(before === model.columnState)
+        assertFailsWith<IllegalArgumentException> {
+            model.setColumnStates([before[0L], before[1L]])
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setColumnStates([before[0L], before[1L], before[1L]])
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setColumnStates(
+                [before[0L], before[1L], GridColumnState(GridColumnId("unknown"))]
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setColumnStates(
+                [before[0L], before[1L], GridColumnState(columns[2L].id, width = Some(-1.0))]
+            )
+        }
+        assertTrue(before === model.columnState)
+        model.setColumnStates(
+            [
+                GridColumnState(columns[2L].id, false, Some(300.0), GridPin.End),
+                GridColumnState(columns[0L].id, true, Some(2.0), GridPin.Start),
+                before[1L]
+            ]
+        )
+        assertEquals(Some(200.0), model.columnState[0L].width)
+        assertEquals(Some(50.0), model.columnState[1L].width)
+        assertFalse(model.columnState[0L].visible)
+        assertTrue(result === model.result)
+        assertEquals(0, calls.count)
+        val installed = model.columnState
+        model.moveColumn(columns[2L].id, 0L)
+        assertTrue(installed === model.columnState)
+        model.setColumnState(GridColumnState(columns[2L].id, false, Some(200.0), GridPin.End))
+        assertTrue(installed === model.columnState)
+        val ordered = gridOrderedColumnStates(installed)
+        assertEquals(columns[0L].id, ordered[0L].id)
+        assertEquals(columns[1L].id, ordered[1L].id)
+        assertEquals(columns[2L].id, ordered[2L].id)
+    }
+
+    @Test
+    fun `fit reuses bounded proportional tracks and permits constrained overflow or gaps`() {
+        val sizes =
+            [
+                TableColumnSize(minimum = 50.0, maximum = Some(100.0)),
+                TableColumnSize(minimum = 50.0, maximum = Some(300.0))
+            ]
+        val fit = gridFitColumnWidths(sizes, [100.0, 100.0], 300.0)
+        assertEquals(100.0, fit[0L])
+        assertEquals(200.0, fit[1L])
+        val overflow = gridFitColumnWidths(sizes, [100.0, 100.0], 20.0)
+        assertEquals(50.0, overflow[0L])
+        assertEquals(50.0, overflow[1L])
+        val gap = gridFitColumnWidths(sizes, [100.0, 100.0], 500.0)
+        assertEquals(100.0, gap[0L])
+        assertEquals(300.0, gap[1L])
+        val small = [TableColumnSize(minimum = 0.0), TableColumnSize(minimum = 0.0)]
+        val fractional = gridFitColumnWidths(small, [0.5, 1.5], 80.0)
+        assertEquals(20.0, fractional[0L])
+        assertEquals(60.0, fractional[1L])
+        val zero = gridFitColumnWidths(small, [0.0, 0.0], 80.0)
+        assertEquals(40.0, zero[0L])
+        assertEquals(40.0, zero[1L])
+        assertEquals(0L, gridFitColumnWidths([], [], 100.0).size)
+    }
+
+    @Test
+    fun `frozen growth reserves the center while shrinking remains available in narrow windows`() {
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            val original = GridColumnLayout([100.0, 200.0, 100.0], 1L, 2L, 500.0, direction)
+            val allowed = GridColumnLayout([150.0, 200.0, 100.0], 1L, 2L, 500.0, direction)
+            val denied = GridColumnLayout([301.0, 200.0, 100.0], 1L, 2L, 500.0, direction)
+            assertTrue(gridFrozenGrowthAllowed(original, allowed, 100.0))
+            assertFalse(gridFrozenGrowthAllowed(original, denied, 100.0))
+            val narrow = GridColumnLayout([100.0, 200.0, 100.0], 1L, 2L, 100.0, direction)
+            val smaller = GridColumnLayout([90.0, 200.0, 100.0], 1L, 2L, 100.0, direction)
+            assertTrue(gridFrozenGrowthAllowed(narrow, smaller, 100.0))
+            assertFalse(gridFrozenGrowthAllowed(smaller, narrow, 100.0))
+        }
+    }
+
+    @Test
+    fun `resize cancellation restores only its own column snapshot and preserves new data`() {
+        val id = GridColumnId("amount")
+        val other = GridColumnId("other")
+        val columns =
+            [
+                gridColumn<Long, Long>(id, "Amount", { row -> row }, gridLongValues()),
+                gridColumn<Long, Long>(other, "Other", { row -> row }, gridLongValues())
+            ]
+        val model = DataGridState(TableRows([TableRecord(ViewKey.Number(0L), 1L)]), columns)
+        val gesture = GridColumnGesture(model, model.columns, model.columnState, id)
+        model.setColumnState(GridColumnState(id, width = Some(150.0)))
+        gesture.expected = model.columnState
+        model.replaceData(TableRows([TableRecord(ViewKey.Number(0L), 9L)]))
+        val result = model.result
+        gesture.restore()
+        assertEquals(None, model.columnState[0L].width)
+        assertEquals(9L, testGridData(model.result.rows.rowAt(0L)))
+        assertTrue(result === model.result)
+        val restored = model.columnState
+        gesture.restore()
+        assertTrue(restored === model.columnState)
+
+        val external = GridColumnGesture(model, model.columns, model.columnState, id)
+        model.setColumnState(GridColumnState(id, width = Some(160.0)))
+        external.expected = model.columnState
+        model.setColumnState(GridColumnState(other, visible = false))
+        val changed = model.columnState
+        external.restore()
+        assertTrue(changed === model.columnState)
+        assertEquals(Some(160.0), model.columnState[0L].width)
+        assertFalse(model.columnState[1L].visible)
+
+        val definitions = GridColumnGesture(model, model.columns, model.columnState, id)
+        model.setColumnState(GridColumnState(id, width = Some(170.0)))
+        definitions.expected = model.columnState
+        model.replaceColumns(
+            [gridColumn<Long, Long>(id, "Renamed", { row -> row }, gridLongValues()), columns[1L]]
+        )
+        val replaced = model.columnState
+        definitions.restore()
+        assertTrue(replaced === model.columnState)
+        assertEquals(Some(170.0), model.columnState[0L].width)
+    }
+}

@@ -1,0 +1,250 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+@Test
+private class GridGroupingStateTest {
+    @Test
+    fun `group expansion and totals retain page eligibility without rereading members`() {
+        val source = GroupingSource(groupingRecords())
+        val model =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                groupingQuery(false)
+                .withPagination(GridPagination.Page(1L, 1L)),
+                rowSelection = GridRowSelectionMode.Multiple,
+                selectable = Some { row -> (row.amount ?: 0L) >= 3L }
+            )
+        assertEquals(1L, model.pageSelectableRows)
+        val page = model.result.pageRows
+        source.reads.forbidden = true
+        assertTrue(model.setExpanded(GridRowKey.Group(groupingPath(Some(2L))), true))
+        model.setQuery(model.query.withGroupTotals(GridTotals(GridTotalPlacement.Before)))
+        model.pinRow(ViewKey.Number(0L), GridRowPin.Top)
+        assertTrue(page === model.result.pageRows)
+        assertEquals(1L, model.pageSelectableRows)
+        source.reads.forbidden = false
+    }
+
+    @Test
+    fun `group selection counts eligible filtered members independently of expansion`() {
+        val source = GroupingSource(groupingRecords())
+        val model =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                groupingQuery(),
+                rowSelection = GridRowSelectionMode.Multiple,
+                selectable = Some { row -> (row.amount ?: 0L) >= 3L }
+            )
+        val ten = groupingPath(Some(10L))
+        val two = groupingPath(Some(2L))
+        assertEquals(2L, model.groupSelectableRows(ten))
+        assertEquals(CheckState.Unchecked, model.groupRowSelection(ten))
+        assertTrue(model.setRowSelected(ViewKey.Number(0L), true))
+        assertEquals(CheckState.Indeterminate, model.groupRowSelection(ten))
+        assertTrue(model.selectGroupRows(ten, true))
+        groupingAssertKeys(model.selectedRowKeys, [0L, 2L])
+        assertEquals(CheckState.Checked, model.groupRowSelection(ten))
+        assertTrue(model.setExpanded(GridRowKey.Group(ten), true))
+        assertTrue(model.setExpanded(GridRowKey.Group(ten), false))
+        assertEquals(CheckState.Checked, model.groupRowSelection(ten))
+        assertTrue(model.selectGroupRows(two, true))
+        assertEquals(CheckState.Checked, model.groupRowSelection(two))
+        model.setQuery(
+            model.query.withFilter(
+                GridFilter.Column(
+                    GridColumnId("amount"),
+                    GridCondition.Compare(GridComparison.Greater, GridLiteral.Integer(5L))
+                )
+            )
+        )
+        assertEquals(1L, model.groupSelectableRows(ten))
+        assertEquals(CheckState.Checked, model.groupRowSelection(ten))
+        assertTrue(model.selectGroupRows(ten, false))
+        assertTrue(model.isRowSelected(ViewKey.Number(2L)))
+        assertTrue(model.isRowSelected(ViewKey.Number(1L)))
+        assertFalse(model.isRowSelected(ViewKey.Number(0L)))
+        assertFalse(model.selectGroupRows(two, true))
+        assertEquals(CheckState.Unchecked, model.groupRowSelection(two))
+        val single =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                groupingQuery(),
+                rowSelection = GridRowSelectionMode.Single
+            )
+        assertFalse(single.selectGroupRows(ten, true))
+        assertEquals(0L, single.groupSelectableRows(ten))
+    }
+
+    @Test
+    fun `group expansion survives filtering and state restore but drops incompatible dimensions`() {
+        val source = GroupingSource(groupingRecords())
+        val model = DataGridState(source, groupingColumns(source.reads), groupingQuery())
+        val root = GridRowKey.Group(groupingPath(Some(10L)))
+        val child = GridRowKey.Group(groupingPath(Some(10L), Some("same")))
+        assertTrue(model.setExpanded(root, true))
+        assertTrue(model.setExpanded(child, true))
+        val saved =
+            model.saveViewState(focusedCell = Some(GridCellAddress(child, GridColumnId("team"))))
+        model.setQuery(
+            model.query.withFilter(
+                GridFilter.Column(
+                    GridColumnId("region"),
+                    GridCondition.Compare(GridComparison.Equal, GridLiteral.Integer(2L))
+                )
+            )
+        )
+        assertFalse(model.isExpanded(root))
+        assertTrue(model.expandedRows.contains(root))
+        assertTrue(model.expandedRows.contains(child))
+        model.setQuery(model.query.withFilter(GridFilter.All))
+        assertTrue(model.isExpanded(root))
+        assertTrue(model.isExpanded(child))
+        model.setExpandedRows(GridExpandedRows())
+        val report = model.restoreViewState(saved)
+        assertEquals(0L, report.issues.size)
+        assertTrue(model.isExpanded(child))
+        assertEquals(saved.focusedCell, report.state.focusedCell)
+        model.setGrouping([GridColumnId("team"), GridColumnId("region")])
+        assertEquals(0L, model.expandedRows.exceptions.size)
+        assertFailsWith<IllegalArgumentException> { model.setExpandedRows(saved.expandedRows) }
+        assertEquals(0L, model.expandedRows.exceptions.size)
+    }
+
+    @Test
+    fun `group configuration removal cleans metric sorting and reports incompatible saved paths`() {
+        val source = GroupingSource(groupingRecords())
+        val model =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                groupingQuery().withGroupSorting(
+                    [
+                        GridGroupSort(
+                            GridColumnId("region"),
+                            GridGroupSortBy.Aggregate(GridColumnId("amount"))
+                        )
+                    ]
+                ),
+                expandedRows = GridExpandedRows(false, [GridRowKey.Group(groupingPath(Some(10L)))])
+            )
+        val saved = model.saveViewState()
+        model.setAggregation(GridColumnId("amount"), None)
+        assertEquals(0L, model.query.groupSorting.size)
+        model.replaceColumns(
+            [model.column(GridColumnId("team")), model.column(GridColumnId("note"))]
+        )
+        assertEquals(1L, model.query.grouping.size)
+        assertEquals(GridColumnId("team"), model.query.grouping[0L])
+        assertEquals(0L, model.expandedRows.exceptions.size)
+        val report = model.restoreViewState(saved)
+        var grouping = false
+        var sorting = false
+        var expansion = false
+        for (issue in report.issues)
+            when (issue.part) {
+                case Grouping(val id) -> grouping = id == GridColumnId("region")
+                case GroupSorting(val id) -> sorting = id == GridColumnId("region")
+                case Expansion(_) -> expansion = true
+                else -> {}
+            }
+        assertTrue(grouping && sorting && expansion)
+        assertEquals(1L, model.query.grouping.size)
+        assertEquals(0L, model.query.groupSorting.size)
+    }
+
+    @Test
+    fun `group invalid queries and failing aggregate reads keep the last valid result`() {
+        val source = GroupingSource(groupingRecords())
+        val model = DataGridState(source, groupingColumns(source.reads), groupingQuery())
+        val before = model.result
+        val query = model.query
+        assertFailsWith<IllegalArgumentException> { model.setGrouping([GridColumnId("amount")]) }
+        assertFailsWith<IllegalArgumentException> {
+            model.setGrouping([GridColumnId("region"), GridColumnId("region")])
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(query.withGroupSorting([GridGroupSort(GridColumnId("amount"))]))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(
+                query.withGroupSorting(
+                    [
+                        GridGroupSort(
+                            GridColumnId("region"),
+                            GridGroupSortBy.Aggregate(GridColumnId("team"))
+                        )
+                    ]
+                )
+            )
+        }
+        assertTrue(before === model.result)
+        assertTrue(query === model.query)
+        source.reads.action = Some { throw IllegalStateException(Some("read failed")) }
+        assertFailsWith<IllegalStateException> {
+            model.replaceData(GroupingSource(groupingRecords()))
+        }
+        assertTrue(before === model.result)
+        assertTrue(source === model.source)
+        source.reads.action = None
+        assertFalse(model.setExpanded(GridRowKey.Group(groupingPath(Some(99L))), true))
+        assertFalse(model.setExpanded(GridRowKey.Data(ViewKey.Number(0L)), true))
+    }
+
+    @Test
+    fun `group reentrant query preparation cannot overwrite a newer committed page`() {
+        val source = GroupingSource(groupingRecords())
+        val model =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                groupingQuery(false)
+                .withPagination(GridPagination.Page(0L, 1L))
+            )
+        val before = model.result.aggregates
+        source.reads.action =
+            Some {
+                source.reads.action = None
+                model.setPage(1L)
+            }
+        assertFailsWith<IllegalStateException> {
+            model.setAggregation(GridColumnId("amount"), Some(GridAggregateId("count")))
+        }
+        assertEquals(GridPagination.Page(1L, 1L), model.query.pagination)
+        assertEquals(Some(GridAggregateId("sum")), model.aggregation(GridColumnId("amount")))
+        assertTrue(before === model.result.aggregates)
+    }
+
+    @Test
+    fun `group empty queries still provide the configured overall total without synthetic groups`() {
+        val source = GroupingSource([])
+        val model =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                groupingQuery()
+                .withPagination(GridPagination.Page(99L, 2L))
+                .withTotals(GridTotals(GridTotalPlacement.After))
+            )
+        assertEquals(0L, model.result.rootCount)
+        assertEquals(0L, model.result.totalRows)
+        assertEquals(0L, model.result.pageCount)
+        assertEquals(1L, model.result.rows.count)
+        assertEquals(GridPagination.Page(0L, 2L), model.query.pagination)
+        assertEquals(GridRowKey.Total(GridTotalKey.AllFiltered), model.result.rows.rowKeyAt(0L))
+        assertEquals(
+            Some(GridAggregateDisplay.Missing),
+            model.result.aggregates.total(GridColumnId("amount"))
+        )
+        model.setAggregation(GridColumnId("amount"), Some(GridAggregateId("count")))
+        assertEquals(
+            Some(GridAggregateDisplay.Value("0")),
+            model.result.aggregates.total(GridColumnId("amount"))
+        )
+    }
+}

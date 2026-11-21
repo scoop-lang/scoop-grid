@@ -1,0 +1,82 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.ui.View
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+/** Ordinary content belonging to a real business record. */
+public class GridDetails<Row> public constructor(
+    public val content: (Row) -> View,
+    public val column: GridColumnId? = None,
+    public val label: String = "详情"
+) {
+    init {
+        gridRequire(column?.isSource ?: true, "detail controls require a source column")
+    }
+}
+
+public class GridDetailRow internal constructor(
+    public val parent: ViewKey,
+    public val label: String
+)
+
+internal class GridDetailState<Row>(
+    val definition: GridDetails<Row>? = None,
+    val keys: Array<ViewKey> = []
+) {
+    private val open = HashSet<ViewKey>()
+    val available =
+        when (definition) {
+            case Some(_) -> true;
+            case None -> false
+        }
+    init {
+        gridRequire(keys.size == 0L || available, "expanded details require content")
+        for (key in keys) {
+            gridRequire(key != ViewKey.Position, "details require explicit parent keys")
+            gridRequire(open.add(key), "duplicate detail parent key")
+        }
+    }
+    fun contains(key: ViewKey): Boolean = open.contains(key)
+    fun same(other: GridDetailState<Row>): Boolean {
+        val sameDefinition =
+            when ((definition, other.definition)) {
+                case(Some(val a), Some(val b)) -> a === b
+                case(None, None) -> true
+                else -> false
+            }
+        if (!sameDefinition || keys.size != other.keys.size)
+            return false
+        for (key in keys)
+            if (!other.contains(key))
+                return false
+        return true
+    }
+    fun changed(key: ViewKey, expanded: Boolean): GridDetailState<Row> {
+        if (contains(key) == expanded)
+            return this
+        val next = ArrayList<ViewKey>()
+        for (old in keys)
+            if (old != key)
+                next.add(old)
+        if (expanded)
+            next.add(key)
+        return GridDetailState(definition, next.toArray())
+    }
+    fun check(source: TableSource<Row>): GridDetailState<Row> {
+        for (key in keys)
+            gridRequire(source.indexOfKey(key) != None, "unknown detail parent key")
+        return this
+    }
+    fun surviving(source: TableSource<Row>): GridDetailState<Row> {
+        val next = ArrayList<ViewKey>()
+        for (key in keys)
+            if (source.indexOfKey(key) != None)
+                next.add(key)
+        return if (next.size == keys.size)
+            this
+        else
+            GridDetailState(definition, next.toArray())
+    }
+}

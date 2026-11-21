@@ -1,0 +1,170 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.math.min
+import scoop.ui.ViewKey
+
+internal fun <Row> gridExternalExportRows(
+    value: GridComputed<Row>,
+    selection: GridSelectedRows,
+    options: GridCsvOptions
+): GridRowSource<Row> {
+    val snapshot = value.external!!
+    val pinned = HashSet<ViewKey>()
+    for (keys in [value.pins.top, value.pins.bottom])
+        for (key in keys)
+            pinned.add(key)
+    val excluded = HashSet<ViewKey>()
+    if (!options.includePinnedRows)
+        for (keys in [value.pins.top, value.pins.bottom])
+            for (key in keys)
+                excluded.add(key)
+    if (options.scope == GridExportScope.SelectedRows) {
+        val missing = ArrayList<ViewKey>()
+        val kept = ArrayList<ViewKey>()
+        for (key in selection.keys)
+            if (!excluded.contains(key)) {
+                if (value.source.indexOfKey(key) == None)
+                    missing.add(key)
+                else
+                    kept.add(key)
+            }
+        if (missing.size > 0L)
+            throw GridDataUnavailableException([], missing.toArray())
+        return GridDataRows(GridPickedRows(value.source, kept.toArray()))
+    }
+    val records = options.data == GridExportData.Records
+    gridRequire(
+        !records || value.query.pivot == None,
+        "external pivot does not supply its source records"
+    )
+    var start = 0L
+    var count = snapshot.data(GridExternalBranch.Root).extent
+    if (options.scope == GridExportScope.CurrentPage)
+        when (value.query.pagination) {
+            case Page(val index, val size) -> {
+                start = index * size
+                count =
+                    if (count > start)
+                        min(size, count - start)
+                    else
+                        if (snapshot.data(GridExternalBranch.Root).total == None)
+                            1L
+                        else
+                            0L
+            }
+            case Disabled -> {}
+        }
+    val rows =
+        GridExternalRows(
+            snapshot,
+            start,
+            count,
+            if (records)
+                GridExpandedRows(true)
+            else
+                value.expanded
+        )
+    if (
+        options.includePinnedRows &&
+            options.scope !=
+            GridExportScope.LoadedRows &&
+            value.query.pivot ==
+            None
+    ) {
+        val missing = ArrayList<ViewKey>()
+        for (keys in [value.pins.top, value.pins.bottom])
+            for (key in keys)
+                if (value.source.indexOfKey(key) == None)
+                    missing.add(key)
+        if (missing.size > 0L)
+            throw GridDataUnavailableException([], missing.toArray())
+    }
+    if (options.scope != GridExportScope.LoadedRows) {
+        val missing = rows.unavailable(0L, rows.count)
+        if (missing.size > 0L)
+            throw GridDataUnavailableException(missing)
+    }
+    val selected = ArrayList<GridRow<Row>>()
+    val seen = HashSet<GridRowKey>()
+    val available = rows.available()
+    val append: (GridRow<Row>) -> Unit =
+        {
+            row ->
+            val allowed =
+                when (row) {
+                    case Data(_, val key) -> !excluded.contains(key)
+                    case Group(_) -> !records && options.includeGroups
+                    case Total(_) -> !records && options.includeTotals
+                    else -> false
+                }
+            if (allowed && seen.add(row.key))
+                selected.add(row)
+        }
+    if (options.includePinnedRows && value.query.pivot == None)
+        for (key in value.pins.top) {
+            val at = value.source.indexOfKey(key) ?: continue
+            append(GridRow.Data(value.source.rowAt(at), key))
+        }
+    if (
+        !records &&
+            options.includeTotals &&
+            value.query.totals.placement ==
+            GridTotalPlacement.Before
+    )
+        append(
+            GridRow.Total(
+                GridTotalRow(
+                    GridTotalKey.AllFiltered,
+                    value.query.totals.label,
+                    value.result.aggregates
+                )
+            )
+        )
+    for (index in 0L ..< available.count) {
+        if (records && (available.hierarchyAt(index)?.contextOnly ?: false))
+            continue
+        when (available.rowAt(index).key.dataKey) {
+            case Some(val key) -> if (pinned.contains(key))
+                continue
+            case None -> {}
+        }
+        append(available.rowAt(index))
+    }
+    if (
+        !records &&
+            options.includeTotals &&
+            value.query.totals.placement ==
+            GridTotalPlacement.After
+    )
+        append(
+            GridRow.Total(
+                GridTotalRow(
+                    GridTotalKey.AllFiltered,
+                    value.query.totals.label,
+                    value.result.aggregates
+                )
+            )
+        )
+    if (options.includePinnedRows && value.query.pivot == None)
+        for (key in value.pins.bottom) {
+            val at = value.source.indexOfKey(key) ?: continue
+            append(GridRow.Data(value.source.rowAt(at), key))
+        }
+    return GridExternalExportRows(selected.toArray())
+}
+
+private class GridExternalExportRows<Row>(private val rows: Array<GridRow<Row>>): GridRowSource<
+    Row
+> {
+    public override val count: Long get() = rows.size
+    public override fun infoAt(index: Long): GridRowInfo = rows[index].info
+    public override fun keyAt(index: Long): ViewKey = rows[index].key.viewKey
+    public override fun rowAt(index: Long): GridRow<Row> = rows[index]
+    public override fun indexOfKey(key: ViewKey): Long? {
+        for (at in 0L ..< rows.size)
+            if (keyAt(at) == key)
+                return Some(at)
+        return None
+    }
+}

@@ -1,0 +1,432 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.collections.sortWith
+import scoop.comparisons.comparatorOf
+import scoop.comparisons.Comparator
+import scoop.text.*
+import scoop.ui.component.TableSource
+
+internal class GridComputed<Row>(
+    val source: TableSource<Row>,
+    val columns: GridColumns<Row>,
+    val query: GridQuery,
+    val baseResult: GridResult<Row>,
+    val pins: GridPinnedRows,
+    val filtered: TableSource<Row>,
+    val expanded: GridExpandedRows,
+    val groups: GridGrouped<Row>? = None,
+    val tree: GridTreeComputed<Row>? = None,
+    val pivot: GridPivoted<Row>? = None,
+    val details: GridDetailState<Row> = GridDetailState<Row>(),
+    val external: GridExternalSnapshot<Row>? = None
+) {
+    val result: GridResult<Row> = gridDetailResult(baseResult, details)
+    val externalSchema: GridExternalColumns<Row>? get() = external?.schema ?: None
+    val resultHeaders: GridHeaders? get() =
+        when (externalSchema) {
+            case Some(val schema) -> Some(schema.tree)
+            case None -> pivot?.schema?.headers
+        }
+    val displayColumns: GridColumns<Row> get() =
+        externalSchema?.definitions ?: (pivot?.schema?.columns ?: columns)
+    val pivotMode: Boolean get() = query.pivot != None
+    val treeData: GridTreeData<Row>? get() = tree?.topology?.definition
+    val treeMode: Boolean get() =
+        when (tree) {
+            case Some(_) -> true
+            case None -> (external?.source?.treeColumn ?: None) != None
+        }
+}
+
+internal fun <Row> gridCompute(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    previous: GridComputed<Row>?,
+    pins: GridPinnedRows,
+    expanded: GridExpandedRows,
+    treeData: GridTreeData<Row>? = None,
+    details: GridDetailState<Row>? = None
+): GridComputed<Row> {
+    when (previous?.external ?: None) {
+        case Some(val external) -> {
+            val old = previous!!
+            val sameColumns = old.columns === columns
+            if (!sameColumns || external.query != query)
+                gridCheckExternalQuery(external.source, columns, query)
+            return gridComputeExternal(
+                if (sameColumns)
+                    external
+                else
+                    GridExternalSnapshot(external.source, query),
+                columns,
+                query,
+                pins,
+                expanded,
+                details ?: old.details
+            )
+        }
+        case None -> {}
+    }
+    val value = gridComputeBase(source, columns, query, previous, pins, expanded, treeData)
+    var configured = details ?: (previous?.details ?: GridDetailState<Row>())
+    when (previous) {
+        case Some(val old) -> if (old.source !== source)
+            configured = configured.surviving(source)
+        case None -> {}
+    }
+    return GridComputed(
+        value.source,
+        value.columns,
+        value.query,
+        value.baseResult,
+        value.pins,
+        value.filtered,
+        value.expanded,
+        value.groups,
+        value.tree,
+        value.pivot,
+        configured
+    )
+}
+
+internal fun <Row> gridInitialComputed(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    pins: GridPinnedRows,
+    expanded: GridExpandedRows,
+    tree: GridTreeData<Row>?,
+    details: GridDetailState<Row>,
+    external: GridExternalSource<Row>?
+): GridComputed<Row> =
+    when (external) {
+        case Some(val config) -> {
+            gridRequire(source.count == 0L, "external and local records require separate sources")
+            gridRequire(
+                when (tree) {
+                    case Some(_) -> false;
+                    case None -> true
+                },
+                "external tree uses its declared label column"
+            )
+            gridCheckExternalQuery(config, columns, query)
+            val expansion =
+                if (config.treeColumn == None)
+                    expanded.forGrouping(query.grouping)
+                else
+                    gridExternalTreeExpansion(expanded)
+            gridRequire(
+                expansion.exceptions.size == expanded.exceptions.size,
+                "expansion key does not match the external hierarchy"
+            )
+            gridComputeExternal(
+                GridExternalSnapshot(config, query),
+                columns,
+                query,
+                pins,
+                expansion,
+                details
+            )
+        }
+        case None -> gridCompute(
+            source,
+            columns,
+            query,
+            None,
+            gridCheckPinnedRows(source, pins),
+            expanded,
+            tree,
+            Some(details.check(source))
+        )
+    }
+
+private fun <Row> gridComputeBase(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    previous: GridComputed<Row>?,
+    pins: GridPinnedRows,
+    expanded: GridExpandedRows,
+    treeData: GridTreeData<Row>?
+): GridComputed<Row> {
+    gridRequire(source.count >= 0L, "negative grid source count")
+    val topology =
+        when (treeData) {
+            case Some(val definition) -> {
+                gridRequire(
+                    query.grouping.size == 0L && query.pivot == None,
+                    "tree data, row grouping and pivot require separate modes"
+                )
+                Some(
+                    when (val old = previous?.tree ?: None) {
+                        case Some(val value) -> if (
+                            value.topology.source ===
+                                source &&
+                                value.topology.definition ===
+                                definition
+                        )
+                            value.topology
+                        else
+                            GridTreeTopology(source, definition)
+                        case None -> GridTreeTopology(source, definition)
+                    }
+                )
+            }
+            case None -> None
+        }
+    var filterCache: TableSource<Row>? = None
+    var orderCache: TableSource<Row>? = None
+    var aggregateCache: GridAggregations? = None
+    when (previous) {
+        case Some(val old) -> if (
+            old.source ===
+                source &&
+                old.columns ===
+                columns &&
+                gridFilterCriteriaEqual(old.query, query)
+        ) {
+            filterCache = Some(old.filtered)
+            if (
+                !old.treeMode &&
+                    !old.pivotMode &&
+                    old.query.grouping.size ==
+                    0L &&
+                    gridArrayEqual(old.query.sorting, query.sorting)
+            )
+                orderCache = Some(old.result.ordered)
+            if (
+                !old.treeMode &&
+                    !old.pivotMode &&
+                    old.query.grouping.size ==
+                    0L &&
+                    gridArrayEqual(old.query.aggregations, query.aggregations)
+            )
+                aggregateCache = Some(old.result.aggregates)
+        }
+        case None -> {}
+    }
+    val filtered = filterCache ?: gridLocalFilter(source, columns, query)
+    when (topology) {
+        case Some(val value) -> {
+            gridCheckGroupSorting(query)
+            val tree = gridComputeTree(value, filtered, columns, query, previous?.tree ?: None)
+            val expansion = gridTreeExpansion(expanded, value)
+            val(result, resolved) = gridPresentTree(tree, query, expansion, pins, previous)
+            return GridComputed(
+                source,
+                columns,
+                resolved,
+                result,
+                pins,
+                filtered,
+                expansion,
+                None,
+                Some(tree)
+            )
+        }
+        case None -> {}
+    }
+    val expansion = expanded.forGrouping(query.grouping)
+    when (query.pivot) {
+        case Some(_) -> {
+            val pivot = gridComputePivot(filtered, columns, query, previous?.pivot ?: None)
+            val(result, resolved) = gridPresentPivot(pivot, query, expansion, previous)
+            return GridComputed(
+                source,
+                columns,
+                resolved,
+                result,
+                pins,
+                filtered,
+                expansion,
+                pivot.groups,
+                None,
+                Some(pivot)
+            )
+        }
+        case None -> {}
+    }
+    if (query.grouping.size > 0L) {
+        val groups = gridComputeGroups(filtered, columns, query, previous?.groups ?: None)
+        val(result, resolved) =
+            gridPresentGroups(groups, query, expansion, pins, previous = previous)
+        return GridComputed(
+            source,
+            columns,
+            resolved,
+            result,
+            pins,
+            filtered,
+            expansion,
+            Some(groups)
+        )
+    }
+    gridCheckGroupSorting(query)
+    val ordered = orderCache ?: gridLocalOrder(filtered, columns, query.sorting)
+    val aggregates = aggregateCache ?: gridAggregate(filtered, columns, query.aggregations)
+    val bounds = gridPageRange(ordered.count, query.pagination)
+    val pageCache =
+        when (previous) {
+            case Some(val old) -> if (
+                !old.treeMode &&
+                    !old.pivotMode &&
+                    old.query.grouping.size ==
+                    0L &&
+                    old.result.ordered ===
+                    ordered &&
+                    old.query.pagination ==
+                    bounds.pagination
+            )
+                Some(old.result.pageRows)
+            else
+                None
+            case None -> None
+        }
+    val rows: TableSource<Row> =
+        pageCache ?:
+            when (query.pagination) {
+                case Disabled -> ordered
+                case Page(_, _) -> GridPageRows(ordered, bounds.start, bounds.count)
+            }
+    val resolved =
+        if (bounds.pagination == query.pagination)
+            query
+        else
+            query.withPagination(bounds.pagination)
+    return GridComputed(
+        source,
+        columns,
+        resolved,
+        gridPinResult(rows, ordered, ordered.count, bounds.pages, pins, aggregates, query.totals),
+        pins,
+        filtered,
+        expansion
+    )
+}
+
+private fun <Row> gridFilterPredicate(columns: GridColumns<Row>, filter: GridFilter): (
+    Row
+) -> Boolean =
+    when (filter) {
+        case All -> ({ _ -> true })
+        case Column(val id, val condition) -> columns.get(id).predicate(condition)
+        case And(val children) -> {
+            gridRequire(children.size > 0L, "AND filter requires conditions")
+            val predicates =
+                Array<(Row) -> Boolean>(children.size) {
+                    index -> gridFilterPredicate(columns, children[index])
+                };
+            all@{
+                row ->
+                for (predicate in predicates)
+                    if (!predicate(row))
+                        return@all false
+                true
+            }
+        }
+        case Or(val children) -> {
+            gridRequire(children.size > 0L, "OR filter requires conditions")
+            val predicates =
+                Array<(Row) -> Boolean>(children.size) {
+                    index -> gridFilterPredicate(columns, children[index])
+                };
+            any@{
+                row ->
+                for (predicate in predicates)
+                    if (predicate(row))
+                        return@any true
+                false
+            }
+        }
+    }
+
+private fun <Row> gridQuickMatch(row: Row, columns: GridColumns<Row>, needle: String): Boolean {
+    if (needle == "")
+        return true
+    for (column in columns.values)
+        if (column.exportable)
+            when (column.text(row)) {
+                case Some(val text) -> if (text.lowercaseAscii().contains(needle))
+                    return true
+                case None -> {}
+            }
+    return false
+}
+
+private fun <Row> gridLocalFilter(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery
+): TableSource<Row> {
+    val predicate = gridFilterPredicate(columns, query.filter)
+    if (query.filter == GridFilter.All && query.quickFilter == "")
+        return source
+    val needle = query.quickFilter.lowercaseAscii()
+    val indices = ArrayList<Long>()
+    for (index in 0L ..< source.count) {
+        val row = source.rowAt(index)
+        if (predicate(row) && gridQuickMatch(row, columns, needle))
+            indices.add(index)
+    }
+    return GridOrderedRows(source, indices.toArray())
+}
+
+internal fun <Row> gridLocalOrder(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    sorts: Array<GridSort>
+): TableSource<Row> {
+    val comparison = gridRecordOrder(source, columns, sorts) ?: return source
+    val indices = ArrayList<Long>()
+    for (index in 0L ..< source.count)
+        indices.add(index)
+    indices.sortWith(comparison)
+    return GridOrderedRows(source, indices.toArray())
+}
+
+internal fun <Row> gridRecordOrder(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    sorts: Array<GridSort>
+): Comparator<Long>? {
+    val sorting = ArrayList<GridColumn<Row>>()
+    val ids = HashSet<GridColumnId>()
+    for (sort in sorts) {
+        val column = columns.get(sort.column)
+        gridRequire(ids.add(sort.column), "duplicate grid sort column")
+        gridRequire(column.sortable, "grid column is not sortable")
+        sorting.add(column)
+    }
+    if (sorting.size == 0L)
+        return None
+    return Some(
+        comparatorOf<Long> compare@{
+            left, right ->
+            val a = source.rowAt(left)
+            val b = source.rowAt(right)
+            for (index in 0L ..< sorting.size) {
+                val column = sorting[index]
+                val aMissing = column.missing(a)
+                val bMissing = column.missing(b)
+                if (aMissing != bMissing)
+                    return@compare if (aMissing == column.missingLast)
+                        1L
+                    else
+                        -1L
+                if (!aMissing) {
+                    val value = column.compare(a, b)
+                    if (value != 0L) {
+                        val ascending = sorts[index].direction == GridSortDirection.Ascending
+                        return@compare if ((value < 0L) == ascending)
+                            -1L
+                        else
+                            1L
+                    }
+                }
+            }
+            left.compareTo(right)
+        }
+    )
+}

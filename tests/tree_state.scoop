@@ -1,0 +1,136 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+@Test
+private class GridTreeStateTest {
+    @Test
+    fun `tree expansion survives filters restores current topology and prunes deleted nodes`() {
+        val model = treeModel()
+        model.setExpandedRows(GridExpandedRows(false, [treeKey(10L), treeKey(12L), treeKey(20L)]))
+        val saved =
+            model.saveViewState(
+                focusedCell = Some(GridCellAddress(ViewKey.Number(13L), GridColumnId("name")))
+            )
+        model.setQuery(model.query.withFilter(treeOnlyHit()))
+        assertTrue(model.expandedRows.contains(treeKey(20L)))
+        assertTrue(model.setExpanded(treeKey(10L), false))
+        assertFalse(model.setExpanded(treeKey(13L), true))
+        assertFalse(model.setExpanded(treeKey(99L), true))
+        model.setExpandedRows(GridExpandedRows())
+        val restored = model.restoreViewState(saved)
+        assertEquals(0L, restored.issues.size)
+        assertTrue(model.isExpanded(treeKey(12L)))
+        assertEquals(saved.focusedCell, restored.state.focusedCell)
+        val records = treeRecords()
+        model.replaceData(
+            TreeSource([records[0L], records[1L], records[2L], records[5L], records[6L]])
+        )
+        assertFalse(model.expandedRows.contains(treeKey(12L)))
+        val report = model.restoreViewState(saved)
+        var expansion = false
+        for (issue in report.issues)
+            when (issue.part) {
+                case Expansion(val key) -> {
+                    if (key == treeKey(12L))
+                        expansion = true
+                }
+                else -> {}
+            }
+        assertTrue(expansion)
+        assertFailsWith<IllegalArgumentException> {
+            model.setExpandedRows(GridExpandedRows(false, [treeKey(99L)]))
+        }
+    }
+
+    @Test
+    fun `tree mode switching is explicit and saved grouping cannot replace parent callbacks`() {
+        val source = TreeSource(treeRecords())
+        val definition = treeDefinition(source.reads)
+        val model =
+            DataGridState(
+                source,
+                treeColumns(source.reads),
+                treeQuery().withGrouping([GridColumnId("name")])
+            )
+        val saved = model.saveViewState()
+        val grouped = model.result
+        assertFailsWith<IllegalArgumentException> { model.setTreeData(Some(definition)) }
+        assertTrue(grouped === model.result)
+        model.setGrouping([])
+        model.setTreeData(Some(definition))
+        assertEquals(GridPageUnit.TreeRoots, model.result.pageUnit)
+        val report = model.restoreViewState(saved)
+        assertEquals(0L, model.query.grouping.size)
+        assertTrue(report.issues.size > 0L)
+        assertTrue(model.treeData!! === definition)
+        model.setPagination(GridPagination.Page(1L, 1L))
+        model.setTreeData(None)
+        assertEquals(GridPageUnit.Records, model.result.pageUnit)
+        assertEquals(GridPagination.Page(0L, 1L), model.query.pagination)
+        assertEquals(7L, model.result.rootCount)
+        assertEquals(ViewKey.Number(10L), model.result.pageRows.keyAt(0L))
+        model.setPage(1L)
+        assertEquals(ViewKey.Number(11L), model.result.pageRows.keyAt(0L))
+        model.setTreeData(Some(definition))
+        assertEquals(3L, model.result.rootCount)
+        assertEquals(4L, model.result.pageRows.count)
+    }
+
+    @Test
+    fun `tree presentation and selection cache eligibility while column replacement reuses parents`() {
+        val source = TreeSource(treeRecords())
+        val model =
+            DataGridState(
+                source,
+                treeColumns(source.reads),
+                treeQuery().withPagination(GridPagination.Page(0L, 1L)),
+                treeData = Some(treeDefinition(source.reads)),
+                rowSelection = GridRowSelectionMode.Multiple,
+                selectable =
+                    Some {
+                        row ->
+                        source.reads.eligible += 1L
+                        (row.amount ?: 0L) >= 5L
+                    }
+            )
+        assertEquals(3L, model.pageSelectableRows)
+        assertEquals(4L, source.reads.eligible)
+        val page = model.result.pageRows
+        source.reads.forbidden = true
+        model.setExpanded(treeKey(10L), true)
+        model.setExpanded(treeKey(12L), true)
+        model.setQuery(model.query.withTreeTotals(GridTotals(GridTotalPlacement.After)))
+        model.pinRow(ViewKey.Number(30L), GridRowPin.Top)
+        assertEquals(3L, model.pageSelectableRows)
+        assertTrue(page === model.result.pageRows)
+        assertEquals(4L, source.reads.eligible)
+        source.reads.forbidden = false
+        val parents = source.reads.parents
+        model.replaceColumns(
+            [model.column(GridColumnId("amount")), model.column(GridColumnId("name"))]
+        )
+        assertEquals(parents, source.reads.parents)
+        assertEquals(GridTotalPlacement.After, model.query.treeTotals.placement)
+        assertEquals(1L, model.query.aggregations.size)
+    }
+
+    @Test
+    fun `tree reentrant aggregate updates preserve the newer root page`() {
+        val source = TreeSource(treeRecords())
+        val model = treeModel(source, treeQuery().withPagination(GridPagination.Page(0L, 1L)))
+        source.reads.action =
+            Some {
+                source.reads.action = None
+                model.setPage(1L)
+            }
+        assertFailsWith<IllegalStateException> {
+            model.setAggregation(GridColumnId("amount"), Some(GridAggregateId("count")))
+        }
+        assertEquals(GridPagination.Page(1L, 1L), model.query.pagination)
+        assertEquals(Some(GridAggregateId("sum")), model.aggregation(GridColumnId("amount")))
+        treeAssertRows(model, [20L, 21L])
+    }
+}

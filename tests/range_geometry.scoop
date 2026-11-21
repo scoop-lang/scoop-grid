@@ -1,0 +1,140 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+@Test
+private class GridRangeGeometryTest {
+    @Test
+    fun `range hit spans frozen regions and mirrors the physical center`() {
+        val rows = GridRowLayout(ItemExtentIndex(20L, ItemExtent.Fixed(32.0)), 1L, 1L, 256.0)
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            val columns =
+                GridColumnLayout([80.0, 100.0, 120.0, 90.0, 60.0], 1L, 4L, 300.0, direction)
+            val rtl = direction == LayoutDirection.Rtl
+            val offset =
+                Point(
+                    if (rtl)
+                        110.0
+                    else
+                        40.0,
+                    64.0
+                )
+            fun hit(x: Double, y: Double): GridRangeHit? =
+                gridRangeHit(
+                    columns,
+                    rows,
+                    offset,
+                    Point(
+                        if (rtl)
+                            300.0 - x
+                        else
+                            x,
+                        y
+                    )
+                )
+            assertEquals(Some(GridRangeHit(0L, 0L)), hit(10.0, 16.0))
+            assertEquals(Some(GridRangeHit(3L, 1L)), hit(90.0, 32.0))
+            assertEquals(Some(GridRangeHit(5L, 2L)), hit(180.0, 110.0))
+            assertEquals(Some(GridRangeHit(19L, 4L)), hit(285.0, 240.0))
+            assertEquals(None, hit(-1.0, 100.0))
+            assertEquals(None, hit(100.0, -1.0))
+            assertEquals(None, hit(100.0, 256.0))
+        }
+    }
+
+    @Test
+    fun `half open physical edges skip zero widths and clipped frozen cells`() {
+        val rows = GridRowLayout(ItemExtentIndex(2L, ItemExtent.Fixed(20.0)), 0L, 0L, 80.0)
+        val zero = Point(0.0, 0.0)
+        val ltr = GridColumnLayout([80.0, 0.0, 100.0, 60.0], 1L, 3L, 240.0, LayoutDirection.Ltr)
+        val rtl = GridColumnLayout([80.0, 0.0, 100.0, 60.0], 1L, 3L, 240.0, LayoutDirection.Rtl)
+        assertEquals(Some(GridRangeHit(0L, 2L)), gridRangeHit(ltr, rows, zero, Point(80.0, 0.0)))
+        assertEquals(Some(GridRangeHit(0L, 3L)), gridRangeHit(ltr, rows, zero, Point(180.0, 0.0)))
+        assertEquals(Some(GridRangeHit(0L, 3L)), gridRangeHit(rtl, rows, zero, Point(0.0, 0.0)))
+        assertEquals(Some(GridRangeHit(0L, 2L)), gridRangeHit(rtl, rows, zero, Point(60.0, 0.0)))
+        assertEquals(Some(GridRangeHit(0L, 0L)), gridRangeHit(rtl, rows, zero, Point(160.0, 0.0)))
+        assertEquals(None, gridRangeHit(ltr, rows, zero, Point(100.0, 40.0)))
+        assertEquals(None, gridRangeHit(ltr, rows, zero, Point(240.0, 0.0)))
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            val narrow = GridColumnLayout([80.0, 100.0, 60.0], 1L, 2L, 40.0, direction)
+            assertEquals(
+                Some(GridRangeHit(0L, 0L)),
+                gridRangeHit(narrow, rows, zero, Point(20.0, 10.0))
+            )
+        }
+        val empty = GridColumnLayout([], 0L, 0L, 300.0, LayoutDirection.Ltr)
+        assertEquals(None, gridRangeHit(empty, rows, zero, Point(10.0, 10.0)))
+    }
+
+    @Test
+    fun `sparse row heights hit a distant row without materializing its predecessors`() {
+        val index = ItemExtentIndex(100000000L, ItemExtent.Variable(32.0))
+        index.record(50000000L, 80.0)
+        val rows = GridRowLayout(index, 1L, 1L, 256.0)
+        val columns = GridColumnLayout([100.0], 0L, 1L, 100.0, LayoutDirection.Ltr)
+        val offset = Point(0.0, index.prefix(50000000L) - rows.topExtent)
+        assertEquals(
+            Some(GridRangeHit(50000000L, 0L)),
+            gridRangeHit(columns, rows, offset, Point(10.0, 111.0))
+        )
+        assertEquals(
+            Some(GridRangeHit(50000001L, 0L)),
+            gridRangeHit(columns, rows, offset, Point(10.0, 112.0))
+        )
+        assertEquals(
+            Some(GridRangeHit(99999999L, 0L)),
+            gridRangeHit(columns, rows, offset, Point(10.0, 224.0))
+        )
+    }
+
+    @Test
+    fun `only active scrollable edges produce bounded physical velocities`() {
+        val zero = Point(0.0, 0.0)
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            for (density in [1.0, 1.5]) {
+                val columns =
+                    GridColumnLayout(
+                        [80.0 * density, 400.0 * density, 60.0 * density],
+                        1L,
+                        2L,
+                        300.0 * density,
+                        direction
+                    )
+                val rows =
+                    GridRowLayout(
+                        ItemExtentIndex(20L, ItemExtent.Fixed(32.0 * density)),
+                        1L,
+                        1L,
+                        256.0 * density
+                    )
+                val left =
+                    if (direction == LayoutDirection.Ltr)
+                        80.0
+                    else
+                        60.0
+                val right = left + 160.0
+                val offset = Point(100.0, 100.0)
+                val maximum = Point(300.0, 1000.0)
+                fun speed(x: Double, y: Double, at: Point = offset): Point =
+                    gridRangeSpeed(
+                        columns,
+                        rows,
+                        Point(x * density, y * density),
+                        density,
+                        at,
+                        maximum
+                    )
+                assertEquals(Point(-300.0 * density, -300.0 * density), speed(left + 12.0, 44.0))
+                assertEquals(Point(300.0 * density, 300.0 * density), speed(right - 12.0, 212.0))
+                assertEquals(zero, speed(10.0, 16.0))
+                assertEquals(zero, speed(left + 80.0, 120.0))
+                assertEquals(zero, speed(-1.0, 44.0))
+                assertEquals(zero, speed(left + 12.0, 44.0, zero))
+                assertEquals(zero, speed(right - 12.0, 212.0, maximum))
+            }
+        }
+    }
+}

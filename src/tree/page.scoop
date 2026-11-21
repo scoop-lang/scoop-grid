@@ -1,0 +1,59 @@
+package scoop.grid
+
+import scoop.ui.component.TableSource
+
+internal fun <Row> gridPresentTree(
+    tree: GridTreeComputed<Row>,
+    query: GridQuery,
+    expanded: GridExpandedRows,
+    pins: GridPinnedRows,
+    previous: GridComputed<Row>? = None
+): (GridResult<Row>, GridQuery) {
+    val bounds = gridPageRange(tree.order.roots.size, query.pagination)
+    val roots = Array<Long>(bounds.count) { at -> tree.order.roots[bounds.start + at] }
+    val start =
+        if (roots.size == 0L)
+            0L
+        else
+            tree.order.starts[roots[0L]]
+    var count = 0L
+    for (root in roots)
+        count += tree.matches.counts[root]
+    val cached =
+        when (previous) {
+            case Some(val old) -> if (
+                old.result.ordered === tree.order.rows && old.query.pagination == bounds.pagination
+            )
+                Some(old.result.pageRows)
+            else
+                None
+            case None -> None
+        }
+    val page: TableSource<Row> =
+        cached ?:
+            when (query.pagination) {
+                case Disabled -> tree.order.rows
+                case Page(_, _) -> GridPageRows(tree.order.rows, start, count)
+            }
+    val result =
+        gridComposeResult(
+            GridTreeRows(tree, roots, expanded, query.treeTotals),
+            page,
+            tree.order.rows,
+            tree.matches.filtered.count,
+            bounds.pages,
+            pins,
+            tree.aggregates,
+            query.totals,
+            tree.order.roots.size,
+            GridPageUnit.TreeRoots,
+            GridTreeDataRows(tree.order.withContext, tree, expanded)
+        )
+    return (
+        result,
+        if (query.pagination == bounds.pagination)
+            query
+        else
+            query.withPagination(bounds.pagination)
+    )
+}

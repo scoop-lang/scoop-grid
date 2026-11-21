@@ -1,0 +1,25 @@
+package scoop.grid
+
+import scoop.surface.InputEvent
+import scoop.window.ElementState
+import scoop.window.TextEditCommand
+
+internal fun gridPasteCommand(event: InputEvent): Boolean {
+    when (event) {
+        case TextCommand(val command) -> return when (command) {
+            case Paste -> true
+            else -> false
+        }
+        case Keyboard(val key) -> {
+            if (key.state != ElementState.Pressed || key.synthetic)
+                return false
+            for (command in key.textCommands)
+                when (command) {
+                    case Paste -> return true
+                    else -> {}
+                }
+        }
+        else -> {}
+    }
+    return false
+}

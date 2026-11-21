@@ -1,0 +1,269 @@
+package scoop.grid.tests.pivot
+
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridPivotWindowTest {
+    @Test
+    fun `native pivot uses real dynamic columns analysis controls and edit gates`() {
+        val probe = PivotProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            pivotFailure(error)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+private fun pivotFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        pivotFailure(error.primaryFailure)
+        pivotFailure(error.cleanupFailure)
+    } else
+        if (error is AssertionFailure)
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        else
+            if (error is Exception)
+                error.printStackTrace()
+}
+
+internal struct PivotWindowRow(val index: Long, val amount: Long)
+
+internal class PivotWindowSource(private val first: Long = 1L): TableSource<PivotWindowRow> {
+    public override val count: Long get() = 400L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): PivotWindowRow =
+        PivotWindowRow(
+            index,
+            if (index == 0L)
+                first
+            else
+                index + 1L
+        )
+}
+
+internal class PivotProbe: Closeable {
+    val handle = DataGridHandle()
+    val enabled = state(true)
+    var editor: GridTextEditor<Long>? = None
+    var options: GridEditorOptions? = None
+    var pending: GridCommit<PivotWindowRow>? = None
+    var dataBuilds = 0L
+    var baselineBuilds = 0L
+    val model =
+        DataGridState(
+            PivotWindowSource(),
+            columns(),
+            GridQuery(
+                aggregations =
+                    [GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum"))]
+            ),
+            rowSelection = GridRowSelectionMode.Multiple
+        )
+    val address = GridCellAddress(ViewKey.Number(0L), GridColumnId("amount"))
+    val rootPath = GridGroupPath([GridGroupPart(GridColumnId("region"), GridLiteral.Integer(0L))])
+    val rootKey = GridRowKey.Group(rootPath)
+    var saved: GridViewState? = None
+    var table: NativeNode? = None
+    var first: NativeNode? = None
+    var far: NativeNode? = None
+    var row: NativeNode? = None
+    var control: NativeNode? = None
+    var oldCell: NativeNode? = None
+    var frame: ComponentScope? = None
+    var application: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var root: NativeNode? = None
+    var calls: NativeCalls? = None
+    var phase = 0
+    var waiting = false
+    var retry = false
+    var finished = false
+    val focused: Boolean get() = options?.focus?.hasFocus ?: false
+    val diagnostic: String get() =
+        f"pivot phase=${phase}, waiting=${waiting}, retry=${retry}, focus=${focused}, rows=${
+            model.result.rows.count
+        }, columns=${model.columns.size}, builds=${dataBuilds}"
+    private val retained = ArrayList<NativeNode>()
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(35L)
+
+    private fun columns(): Array<GridColumn<PivotWindowRow>> {
+        val probe = this
+        return [
+            gridColumn<PivotWindowRow, Long>(
+                GridColumnId("region"),
+                "Region",
+                { it -> it.index / 200L },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(180.0)),
+                groupable = true
+            ),
+            gridColumn<PivotWindowRow, Long>(
+                GridColumnId("team"),
+                "Team",
+                { it -> it.index % 2L },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(120.0)),
+                groupable = true
+            ),
+            gridColumn<PivotWindowRow, Long>(
+                GridColumnId("period"),
+                "Period",
+                { it -> it.index % 200L },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(150.0)),
+                pivotable = true
+            ),
+            gridColumn<PivotWindowRow, Long>(
+                GridColumnId("amount"),
+                "Amount",
+                { it -> it.amount },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(180.0)),
+                cell =
+                    Some {
+                        it ->
+                        probe.dataBuilds += 1L;
+                        label(f"${it.amount}")
+                    },
+                edit =
+                    Some(
+                        gridEdit<PivotWindowRow, Long>(
+                            {
+                                value ->
+                                val editor = gridLongEditor(value)
+                                probe.editor = Some(editor)
+                                PivotEditor(editor, probe)
+                            },
+                            { _, completion -> probe.pending = Some(completion) }
+                        )
+                    ),
+                aggregations = [gridSumLongAggregation(), gridCountAggregation<Long>()]
+            )
+        ]
+    }
+    fun metric(period: Long, operation: String = "sum"): GridColumnId =
+        GridColumnId(
+            GridColumnKey.Pivot(
+                GridPivotColumnKey(
+                    [GridGroupPart(GridColumnId("period"), GridLiteral.Integer(period))],
+                    GridAggregationSelection(GridColumnId("amount"), GridAggregateId(operation))
+                )
+            )
+        )
+    fun event(host: UiHost, active: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                application = Some(active)
+                active.setControlFlow(ControlFlow.WaitUntil(timeout))
+                val native =
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid pivot"
+                            size = LogicalSize(1160.0, 920.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> PivotScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(active.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(Some(diagnostic))
+            else -> {}
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        retained.add(node);
+        return node
+    }
+    fun named(id: String): NativeNode =
+        keep(root!!.find(id) ?: fail(Some(f"missing ${id} at ${phase}")))
+    fun find(node: NativeNode, role: String, name: String? = None): NativeNode? {
+        if (node.flag(0) && node.text(2, Some(role)) && (name == None || node.text(0, name)))
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val found = find(keep(node.child(index)), role, name)
+            when (found) {
+                case Some(_) -> return found;
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun key(code: Int) {
+        assertTrue(sendSurfaceKey(window!!, code, true))
+        assertTrue(sendSurfaceKey(window!!, code, false))
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in retained)
+            node.close()
+    }
+}
+
+private class PivotEditor<T>(
+    private val editor: GridTextEditor<T>,
+    private val probe: PivotProbe
+): GridEditor<T> {
+    public override val composing: Boolean get() = editor.composing
+    public override fun candidate(): GridCandidate<T> = editor.candidate()
+    public override fun importText(text: String): String? = editor.importText(text)
+    public override fun cancelComposition() {
+        editor.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        probe.options = Some(options)
+        return editor.view(options)
+    }
+}

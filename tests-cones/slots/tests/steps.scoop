@@ -1,0 +1,298 @@
+package scoop.grid.tests.slots
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.ui.*
+
+internal fun SlotsProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    if (phase < 32) {
+        assertTrue(handle.isAttached)
+        assertEquals(Size(640.0, height.value), gridSize)
+    }
+    if (phase >= 3 && phase <= 8) {
+        assertTrue(editor!! === originalEditor!!)
+        assertEquals("bad", editor!!.state.text)
+        assertTrue(focused)
+        assertTrue(rows!! === model.result.rows)
+        assertTrue(scroll.offset.y >= scrollBefore.y)
+        assertEquals(Some(address(40L)), handle.focusedCell)
+        assertTrue(table!!.same(currentTable()))
+        assertTrue(cell!!.same(keep(table!!.cell(40L, 0L)!!)))
+        assertEquals(0, queries)
+        assertEquals(0, submissions)
+    }
+    when (phase) {
+        case 0 -> {
+            table = Some(currentTable())
+            header = Some(named("grid-header-value"))
+            resize = Some(named("grid-resize-value"))
+            rows = Some(model.result.rows)
+            bounds(header!!, 0.0, 0.0, 160.0, 32.0)
+            assertEquals(100L, table!!.trait(5))
+            assertFalse(busy())
+        }
+        case 1 -> {
+            retry = handle.focusedCell != Some(address(40L)) || handle.isPending
+            if (!retry)
+                cell = Some(keep(table!!.cell(40L, 0L)!!))
+        }
+        case 2 -> {
+            retry = !focused
+            if (!retry) {
+                originalEditor = editor
+                scrollBefore = scroll.offset
+                assertTrue(scrollBefore.y > 0.0)
+            }
+        }
+        case 3 -> {
+            toolbar = Some(named("slot-toolbar"))
+            bounds(toolbar!!, 0.0, 0.0, 640.0, 40.0)
+            bounds(header!!, 0.0, 40.0, 160.0, 32.0)
+        }
+        case 4 -> {
+            footer = Some(named("slot-footer"))
+            bounds(footer!!, 0.0, 288.0, 640.0, 32.0)
+            assertTrue(toolbar!!.same(named("slot-toolbar")))
+        }
+        case 5 -> {
+            status = Some(named("slot-loading"))
+            bounds(header!!, 0.0, 64.0, 160.0, 32.0)
+            assertTrue(busy())
+        }
+        case 6 -> {
+            assertFalse(status!!.flag(0))
+            status = Some(named("slot-error"))
+            bounds(status!!, 0.0, 40.0, 640.0, 32.0)
+            bounds(header!!, 0.0, 72.0, 160.0, 32.0)
+            assertFalse(busy())
+        }
+        case 7 -> {
+            assertFalse(status!!.flag(0))
+            status = Some(named("slot-loading"))
+            assertTrue(busy())
+        }
+        case 8 -> {
+            assertFalse(status!!.flag(0))
+            assertFalse(busy())
+            bounds(header!!, 0.0, 40.0, 160.0, 32.0)
+        }
+        case 9 -> {
+            assertEquals(1, toolbarClicks)
+            assertEquals(None, handle.editingCell)
+            assertFalse(table!!.flag(1))
+            assertTrue(toolbar!!.flag(1))
+            assertTrue(footer!!.flag(1))
+        }
+        case 10 -> {
+            assertFalse(footer!!.flag(0))
+            status = Some(named("slot-error"))
+            assertTrue(status!!.flag(1))
+            assertFalse(table!!.flag(1))
+        }
+        case 11 -> assertEquals(1, retries)
+        case 12 -> {
+            assertFalse(status!!.flag(0))
+            assertTrue(table!!.flag(1))
+            assertTrue(table!!.same(currentTable()))
+            bounds(header!!, 0.0, 40.0, 160.0, 32.0)
+        }
+        case 13 -> {
+            assertEquals(0L, table!!.trait(5))
+            empty = Some(named("slot-empty"))
+            bounds(empty!!, 230.0, 176.0, 180.0, 40.0)
+            assertTrue(toolbar!!.same(named("slot-toolbar")))
+        }
+        case 14 -> {
+            assertFalse(empty!!.flag(0))
+            status = Some(named("slot-loading"))
+            assertTrue(busy())
+            assertEquals(0L, model.result.rows.count)
+        }
+        case 15 -> {
+            assertFalse(status!!.flag(0))
+            assertFalse(empty!!.same(named("slot-empty")))
+            empty = Some(named("slot-empty"))
+        }
+        case 16 -> assertEquals(100L, model.result.rows.count)
+        case 17 -> {
+            assertFalse(empty!!.flag(0))
+            assertEquals(100L, table!!.trait(5))
+            assertEquals(2, queries)
+        }
+        case 18 -> {
+            assertFalse(toolbar!!.flag(0))
+            footer = Some(named("slot-footer"))
+            assertTrue(table!!.same(currentTable()))
+            bounds(header!!, 480.0, 0.0, 160.0, 32.0)
+            bounds(footer!!, 0.0, 288.0, 640.0, 32.0)
+        }
+        case 19 -> {
+            assertTrue(resize!!.same(named("grid-resize-value")))
+            assertTrue(resize!!.text(0, Some("Resize:Value")))
+        }
+        case 20 -> {
+            toolbar = Some(named("slot-toolbar"))
+            bounds(toolbar!!, 0.0, 0.0, 640.0, 40.0)
+            bounds(footer!!, 0.0, 40.0, 640.0, 32.0)
+            assertTrue(table!!.same(currentTable()))
+        }
+        case 21 -> {
+            assertEquals(0.0, scroll.viewport.height)
+            assertFalse(header!!.flag(4))
+            assertEquals(None, handle.focusedCell)
+        }
+        case 22 -> {
+            assertEquals(0.0, scroll.viewport.height)
+            assertFalse(header!!.flag(4))
+            assertEquals(None, handle.focusedCell)
+        }
+        case 23 -> {
+            assertFalse(toolbar!!.flag(0))
+            assertFalse(footer!!.flag(0))
+            bounds(header!!, 0.0, 0.0, 160.0, 32.0)
+            assertFalse(header!!.flag(4))
+        }
+        case 24 -> retry = handle.focusedCell != Some(address(2L)) || handle.isPending
+        case 25 -> retry = !focused
+        case 26 -> {
+            assertTrue(focused)
+            assertEquals("bad", editor!!.state.text)
+            toolbar = Some(named("slot-toolbar"))
+            footer = Some(named("slot-footer"))
+        }
+        case 27 -> {
+            retry = !focused
+            if (!retry) {
+                assertEquals(Some(address(2L)), handle.editingCell)
+                assertEquals(Some("请输入有效整数"), handle.editError)
+                assertEquals(Some("Info:请输入有效整数"), activeOptions!!.error)
+                assertTrue(named("grid-editor-message").text(1, Some("Info:请输入有效整数")))
+                assertEquals(0, submissions)
+            }
+        }
+        case 28 -> {
+            assertTrue(handle.isSubmitting)
+            assertTrue(activeOptions!!.submitting)
+            assertTrue(named("grid-editor-message").text(1, Some("正在保存…")))
+            originalEditor = editor
+        }
+        case 29 -> {
+            assertTrue(handle.isSubmitting)
+            assertTrue(pending!!.isActive)
+            assertTrue(editor!! === originalEditor!!)
+            assertEquals("3", editor!!.state.text)
+            assertTrue(busy())
+        }
+        case 30 -> {
+            assertEquals(1, footerClicks)
+            assertEquals(1, submissions)
+            assertTrue(handle.isSubmitting)
+        }
+        case 31 -> {
+            retry = !focused
+            if (!retry) {
+                assertFalse(busy())
+                assertEquals(Some("Remote failure"), handle.editError)
+                assertEquals(Some("Info:Remote failure"), activeOptions!!.error)
+            }
+        }
+        case 32 -> {
+            assertFalse(handle.isAttached)
+            assertFalse(table!!.flag(0))
+            assertFalse(header!!.flag(0))
+            assertFalse(toolbar!!.flag(0))
+            assertFalse(footer!!.flag(0))
+            assertFalse(pending!!.isActive)
+        }
+        else -> fail(Some("unexpected slots phase"))
+    }
+}
+
+internal fun SlotsProbe.completed(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(1, result, Some(f"native slots action at ${phase}"))
+    waiting = false
+    if (retry) {
+        frame!!.requestFrame()
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 1 -> assertTrue(handle.focusCell(address(40L)))
+        case 2 -> {
+            assertTrue(handle.beginEdit(address(40L)))
+            editor!!.state.replaceAll("bad")
+        }
+        case 3 -> toolbarShown.value = true
+        case 4 -> footerShown.value = true
+        case 5 -> loading.value = true
+        case 6 -> failed.value = true
+        case 7 -> failed.value = false
+        case 8 -> loading.value = false
+        case 9 -> enabled.value = false
+        case 10 -> {
+            failed.value = true
+            footerShown.value = false
+        }
+        case 13 -> model.setQuery(GridQuery(quickFilter = "no matching value"))
+        case 14 -> loading.value = true
+        case 15 -> loading.value = false
+        case 18 -> {
+            toolbarShown.value = false
+            footerShown.value = true
+            direction.value = LayoutDirection.Rtl
+        }
+        case 19 -> labels.value =
+            GridLabels(
+                resizeColumn = { title -> f"Resize:${title}" },
+                error = { text -> f"Info:${text}" }
+            )
+        case 20 -> {
+            toolbarShown.value = true
+            height.value = 72.0
+        }
+        case 23 -> {
+            height.value = 320.0
+            toolbarShown.value = false
+            footerShown.value = false
+            direction.value = LayoutDirection.Ltr
+        }
+        case 24 -> assertTrue(handle.focusCell(address(2L)))
+        case 25 -> {
+            assertTrue(handle.beginEdit(address(2L)))
+            editor!!.state.replaceAll("bad")
+        }
+        case 26 -> {
+            toolbarShown.value = true
+            footerShown.value = true
+        }
+        case 27 -> assertTrue(toolbarFocus.requestFocus())
+        case 28 -> {
+            assertTrue(handle.cancelEdit())
+            assertTrue(handle.beginEdit(address(2L)))
+            editor!!.state.replaceAll("3")
+            assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+        }
+        case 29 -> loading.value = true
+        case 31 -> {
+            assertTrue(pending!!.reject("Remote failure"))
+            loading.value = false
+        }
+        case 32 -> {
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+            return
+        }
+        case 33 -> {
+            finished = true
+            active!!.requestExit()
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}

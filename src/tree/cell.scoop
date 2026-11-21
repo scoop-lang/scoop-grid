@@ -1,0 +1,30 @@
+package scoop.grid
+
+import scoop.ui.View
+import scoop.ui.ViewKey
+
+internal fun <Row> gridTreeCell(input: GridDataCellProps<Row>, content: View): View {
+    val hierarchy = input.hierarchy ?: return content
+    val title = input.row.text(input.column) ?: ""
+    val key = input.key.dataKey ?: return content
+    val identity =
+        when (key) {
+            case Number(val value) -> f"n${value}"
+            case Text(val value) -> f"s${value}"
+            case Position -> throw IllegalArgumentException(
+                Some("tree rows require an explicit key")
+            )
+        }
+    return gridHierarchyCell(
+        input,
+        hierarchy.level,
+        hierarchy.expanded,
+        if (hierarchy.expanded == Some(true))
+            input.labels.collapseNode(title)
+        else
+            input.labels.expandNode(title),
+        f"grid-tree-expand-${identity}",
+        hierarchy.contextOnly,
+        content
+    )
+}

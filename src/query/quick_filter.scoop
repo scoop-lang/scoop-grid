@@ -1,0 +1,145 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.text.TextEditorState
+import scoop.ui.component.input as queryInput
+import scoop.ui.component.button as queryButton
+
+public class GridQuickFilterProps<Row> public constructor(
+    public val state: DataGridState<Row>,
+    public val handle: DataGridHandle? = None,
+    public val enabled: Boolean = true,
+    public val fonts: FontCollection? = None,
+    public val theme: ThemeSource? = None,
+    public val focus: FocusOptions = FocusOptions(),
+    public val labels: GridQuickFilterLabels = GridQuickFilterLabels()
+)
+
+public class GridQuickFilter<Row> public constructor(
+    private val props: Props<GridQuickFilterProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private var model = props.value.state
+    private var applied = model.query.quickFilter
+    private var draft = TextEditorState(applied)
+    private var ambient: ThemeSource? = None
+    public override fun onMount() {
+        when (props.value.theme) {
+            case None -> ambient = Some(currentThemeSource())
+            case Some(_) -> {}
+        }
+    }
+
+    private fun apply(clear: Boolean = false) {
+        val input = props.value
+        if (
+            !scope.isMounted ||
+                !input.enabled ||
+                draft.isComposing ||
+                !(input.state.external?.quickFilter ?: true)
+        )
+            return
+        val text =
+            if (clear)
+                ""
+            else
+                draft.committedText
+        if (!gridQueryReady(input.handle) || !scope.isMounted || props.value.state !== input.state)
+            return
+        val query = input.state.query
+        input.state.setQuery(query.withQuickFilter(text))
+        applied = input.state.query.quickFilter
+        if (clear)
+            draft.replaceAll("")
+    }
+
+    public override fun render(): View {
+        val input = props.value
+        if (!(input.state.external?.quickFilter ?: true))
+            return empty()
+        val labels = input.labels
+        val source = input.theme ?: (ambient ?: currentThemeSource())
+        val density = source.read(scope).tokens.typography.body.fontSize / 14.0
+        val current = input.state.query.quickFilter
+        if (model !== input.state || current != applied) {
+            model = input.state
+            applied = current
+            draft = TextEditorState(current)
+        }
+        val editor = draft
+        val available =
+            input.enabled && !(input.handle?.isSubmitting ?: false) && !editor.isComposing
+        return row {
+            item(
+                queryInput(editor) {
+                    enabled = input.enabled
+                    fonts = input.fonts
+                    theme = input.theme
+                    focus = input.focus
+                    placeholder = labels.placeholder
+                    semantics =
+                        ComponentSemantics(
+                            name = Some(labels.inputName),
+                            automationId = Some("grid-quick-filter-input")
+                        )
+                    onSubmit = { _ -> this @GridQuickFilter.apply() }
+                }
+            ) { grow = 1.0 }
+            add(
+                queryButton(labels.apply, { this @GridQuickFilter.apply() }) {
+                    enabled = available
+                    fonts = input.fonts
+                    theme = input.theme
+                    semantics =
+                        ComponentSemantics(
+                            name = Some(labels.applyName),
+                            automationId = Some("grid-quick-filter-apply")
+                        )
+                }
+            )
+            add(
+                queryButton(labels.clear, { this @GridQuickFilter.apply(true) }) {
+                    enabled = available && (editor.committedText != "" || current != "")
+                    variant = ButtonVariant.Outline
+                    fonts = input.fonts
+                    theme = input.theme
+                    semantics =
+                        ComponentSemantics(
+                            name = Some(labels.clearName),
+                            automationId = Some("grid-quick-filter-clear")
+                        )
+                }
+            )
+            spacing = 8.0 * density
+            alignment = CrossAlignment.Center
+        }
+    }
+}
+
+public class GridQuickFilterBuilder internal constructor() {
+    public var handle: DataGridHandle? = None
+    public var enabled: Boolean = true
+    public var fonts: FontCollection? = None
+    public var theme: ThemeSource? = None
+    public var focus: FocusOptions = FocusOptions()
+    public var labels: GridQuickFilterLabels = GridQuickFilterLabels()
+    public var key: ViewKey = ViewKey.Position
+    internal fun <Row> snapshot(state: DataGridState<Row>): GridQuickFilterProps<Row> =
+        GridQuickFilterProps(state, handle, enabled, fonts, theme, focus, labels)
+}
+
+public fun <Row> gridQuickFilter(
+    state: DataGridState<Row>,
+    configure: GridQuickFilterBuilder.() -> Unit = {}
+): View {
+    val builder = GridQuickFilterBuilder()
+    builder.configure()
+    return component(
+        builder.snapshot(state),
+        { current, mount -> GridQuickFilter(current, mount) },
+        builder.key
+    )
+}

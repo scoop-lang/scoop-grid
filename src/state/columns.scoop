@@ -1,0 +1,60 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+
+internal fun <Row> gridRestoreColumns(
+    saved: Array<GridColumnState>,
+    current: Array<GridColumnState>,
+    definitions: GridColumns<Row>,
+    headers: GridHeaders,
+    issues: ArrayList<GridRestoreIssue>
+): Array<GridColumnState> {
+    val prior = HashMap<GridColumnId, GridColumnState>()
+    for (entry in current)
+        prior.put(entry.id, entry)
+    val seen = HashSet<GridColumnId>()
+    val next = ArrayList<GridColumnState>()
+    for (entry in saved) {
+        val part = GridStatePart.Column(entry.id)
+        if (!seen.add(entry.id)) {
+            issues.add(GridRestoreIssue(part, "重复列状态已跳过"))
+            continue
+        }
+        val definition = definitions.find(entry.id)
+        if (!definitions.contains(entry.id)) {
+            issues.add(GridRestoreIssue(part, "列已移除"))
+            continue
+        }
+        val width =
+            when (entry.width) {
+                case Some(val value) -> {
+                    if (!value.isFinite() || value < 0.0) {
+                        issues.add(GridRestoreIssue(part, "无效宽度，保留当前宽度"))
+                        prior[entry.id]!!.width
+                    } else {
+                        val limited = definition!!.size.constrain(value)
+                        if (value != limited)
+                            issues.add(GridRestoreIssue(part, "宽度已按当前列限制调整"))
+                        Some(limited)
+                    }
+                }
+                case None -> None
+            }
+        next.add(GridColumnState(entry.id, entry.visible, width, entry.pin))
+    }
+    for (entry in current)
+        if (!seen.contains(entry.id))
+            next.add(entry)
+    val ordered = next.toArray()
+    when (headers.orderError(ordered)) {
+        case Some(val message) -> {
+            issues.add(GridRestoreIssue(GridStatePart.ColumnOrder, message))
+            val states = HashMap<GridColumnId, GridColumnState>()
+            for (entry in ordered)
+                states.put(entry.id, entry)
+            return Array<GridColumnState>(current.size) { index -> states[current[index].id]!! }
+        }
+        case None -> return ordered
+    }
+}

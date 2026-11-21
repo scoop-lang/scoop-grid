@@ -1,0 +1,46 @@
+package scoop.grid.tests.spans
+
+import scoop.graphics.Rect
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.NativeNode
+import scoop.tests.window.nativeEditorKey
+import scoop.window.native.*
+
+internal fun SpanProbe.bounds(node: NativeNode, value: Rect) {
+    assertTrue(matchesBounds(node, value), Some(f"span frame at ${phase}"))
+}
+
+internal fun SpanProbe.matchesBounds(node: NativeNode, value: Rect): Boolean {
+    @Unsafe
+    {
+        val lease = window!!.acquireNativeWindow()
+        try {
+            return when (lease.handle) {
+                case AppKit(_, val pointer) ->
+                node.frame(pointer, 12.0 + value.x, 12.0 + value.y, value.width, value.height)
+            }
+        } finally {
+            lease.close()
+        }
+    }
+}
+
+internal fun SpanProbe.key(code: Int, text: String, flags: Int = 0) {
+    @Unsafe
+    {
+        window!!.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                when (lease.handle) {
+                    case AppKit(_, val pointer) -> text.withUtf8Bytes {
+                        bytes,
+                        length -> @Unsafe
+                        {
+                            assertEquals(0, nativeEditorKey(pointer, code, bytes, length, flags))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

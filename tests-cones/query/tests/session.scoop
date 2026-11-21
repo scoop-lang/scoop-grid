@@ -1,0 +1,329 @@
+package scoop.grid.tests.query
+
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridQueryWindowTest {
+    @Test
+    fun `native headers preserve multi sort priority and reject edits before sorting`() {
+        val probe = QueryProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(1, probe.submissions)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+internal class QueryProbe: Closeable {
+    private var rows = queryRows()
+    val model = DataGridState(rows, queryColumns(this))
+    val handle = DataGridHandle()
+    val outside = FocusHandle()
+    val modifier = state(GridMultiSortModifier.Shift)
+    val direction = state(LayoutDirection.Ltr)
+    val enabled = state(true)
+    var frame: ComponentScope? = None
+    var editor: GridTextEditor<Long>? = None
+    var submissions = 0
+    var finished = false
+    private val address = GridCellAddress(ViewKey.Number(0L), GridColumnId("amount"))
+    private var pending: GridCommit<QueryRow>? = None
+    private var pendingRows: TableRows<QueryRow>? = None
+    private var expected = GridQuery()
+    private var groupTitle = "Group"
+    private var amountTitle = "Amount"
+    private var phase = 0
+    private var waiting = false
+    private var retry = false
+    val diagnostic: String get() = f"query UI phase=${phase}, waiting=${waiting}, retry=${retry}"
+    private var active: ActiveApplication? = None
+    private var window: Window? = None
+    private var ui: UiWindow? = None
+    private var calls: NativeCalls? = None
+    private var root: NativeNode? = None
+    private var group: NativeNode? = None
+    private var amount: NativeNode? = None
+    private val held = ArrayList<NativeNode>()
+    init {
+        model.setColumnState(GridColumnState(GridColumnId("group"), pin = GridPin.Start))
+        model.setColumnState(GridColumnState(GridColumnId("note"), pin = GridPin.End))
+    }
+    fun save(change: GridChange<QueryRow, Long>, completion: GridCommit<QueryRow>) {
+        submissions += 1
+        pending = Some(completion)
+        val current = rows
+        pendingRows =
+            Some(
+                TableRows(
+                    Array<TableRecord<QueryRow>>(current.count) {
+                        index ->
+                        val key = current.keyAt(index)
+                        TableRecord(
+                            key,
+                            if (key == change.address.row.dataKey!!)
+                                QueryRow(change.row.group, change.value)
+                            else
+                                current.rowAt(index)
+                        )
+                    }
+                )
+            )
+    }
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                active = Some(application)
+                application.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
+                )
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid query controls"
+                            size = LogicalSize(360.0, 280.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { mount -> QueryScene(this, mount) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val view) -> root =
+                                    Some(keep(NativeNode(nativeRoot(view)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(application.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(
+                Some(f"query UI timeout phase=${phase}, nativeFocus=${window?.isFocused ?: false}")
+            )
+            else -> {}
+        }
+    }
+    fun accepted() {
+        if (!finished && !waiting && (window?.isFocused ?: false))
+            send()
+    }
+    private fun keep(node: NativeNode): NativeNode {
+        held.add(node);
+        return node
+    }
+    private fun named(node: NativeNode, name: String): NativeNode? {
+        if (node.flag(0) && node.text(0, Some(name)))
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val found = named(keep(node.child(index)), name)
+            when (found) {
+                case Some(_) -> return found;
+                case None -> {}
+            }
+        }
+        return None
+    }
+    private fun send() {
+        waiting = true
+        retry = false
+        if (phase == 6 || phase == 16)
+            calls!!.post(amount!!, phase, 2)
+        else
+            calls!!.post(root!!, phase, 20)
+    }
+    private fun inspect(tag: Int) {
+        assertEquals(phase, tag)
+        if (phase == 0) {
+            group = Some(named(root!!, "Group") ?: fail(Some("group header missing")))
+            amount = Some(named(root!!, "Amount") ?: fail(Some("amount header missing")))
+        }
+        assertEquals(expected, model.query, Some(f"sort query at phase ${phase}"))
+        assertTrue(group!!.text(0, Some(groupTitle)), Some(f"group caption at phase ${phase}"))
+        assertTrue(amount!!.text(0, Some(amountTitle)), Some(f"amount caption at phase ${phase}"))
+        assertTrue(group!!.flag(2))
+        assertTrue(amount!!.flag(2))
+        when (phase) {
+            case 1 -> order([1L, 2L, 4L, 0L, 3L])
+            case 2 -> order([2L, 4L, 1L, 3L, 0L])
+            case 3 -> order([3L, 0L, 2L, 4L, 1L])
+            case 4 -> order([2L, 3L, 4L, 0L, 1L])
+            case 7 -> retry = !amount!!.flag(4)
+            case 17 -> retry = !amount!!.flag(4)
+            case 23 -> retry = handle.focusedCell != Some(address) || handle.isPending
+            case 24 -> {
+                assertEquals(Some(address), handle.editingCell)
+                assertTrue(handle.editError != None)
+                assertEquals(0, submissions)
+            }
+            case 25 -> {
+                assertTrue(handle.isSubmitting);
+                assertEquals(1, submissions)
+            }
+            case 26 -> {
+                assertTrue(handle.isSubmitting);
+                assertEquals(1, submissions)
+            }
+            case 27 -> {
+                assertEquals(None, handle.editingCell);
+                assertEquals(3L, rows.rowAt(0L).amount)
+            }
+            else -> {}
+        }
+    }
+    private fun order(keys: Array<Long>) {
+        for (index in 0L ..< keys.size)
+            assertEquals(ViewKey.Number(keys[index]), model.result.rows.keyAt(index))
+    }
+    private fun expect(sorting: Array<GridSort>, group: String, amount: String) {
+        expected = GridQuery(sorting)
+        groupTitle = group
+        amountTitle = amount
+    }
+    private fun click(column: Long, command: Boolean = false, shift: Boolean = false) {
+        queryClick(window!!, column, direction.value, command, shift)
+    }
+    private fun completed(tag: Int, result: Int) {
+        assertEquals(phase, tag)
+        assertEquals(1, result)
+        waiting = false
+        if (retry) {
+            frame!!.requestFrame();
+            return
+        }
+        phase += 1
+        when (phase) {
+            case 1 -> {
+                expect([querySort("group")], "Group ↑", "Amount");
+                click(0L)
+            }
+            case 2 -> {
+                expect([querySort("group"), querySort("amount")], "Group ↑1", "Amount ↑2");
+                click(1L, shift = true)
+            }
+            case 3 -> {
+                expect([querySort("group", true), querySort("amount")], "Group ↓1", "Amount ↑2");
+                click(0L, shift = true)
+            }
+            case 4 -> {
+                expect([querySort("amount")], "Group", "Amount ↑");
+                click(0L, shift = true)
+            }
+            case 5 -> {
+                expect([querySort("group")], "Group ↑", "Amount");
+                click(0L)
+            }
+            case 6 -> {
+                send();
+                return
+            }
+            case 7 -> {}
+            case 8 -> {
+                expect([querySort("group"), querySort("amount")], "Group ↑1", "Amount ↑2");
+                queryKey(window!!, 36, shift = true)
+            }
+            case 9 -> queryKey(window!!, 36, shift = true, repeat = true)
+            case 10 -> {
+                expect([querySort("group"), querySort("amount", true)], "Group ↑1", "Amount ↓2");
+                queryKey(window!!, 49, shift = true)
+            }
+            case 11 -> {
+                expect([], "Group", "Amount");
+                queryKey(window!!, 36)
+            }
+            case 12 -> {
+                modifier.value = GridMultiSortModifier.Primary;
+                direction.value = LayoutDirection.Rtl
+            }
+            case 13 -> {
+                expect([querySort("group")], "Group ↑", "Amount");
+                click(0L)
+            }
+            case 14 -> {
+                expect([querySort("group"), querySort("amount")], "Group ↑1", "Amount ↑2");
+                click(1L, command = true)
+            }
+            case 15 -> {
+                expect([querySort("group", true)], "Group ↓", "Amount");
+                click(0L, shift = true)
+            }
+            case 16 -> {
+                send();
+                return
+            }
+            case 17 -> {}
+            case 18 -> {
+                expect([querySort("group", true), querySort("amount")], "Group ↓1", "Amount ↑2");
+                queryKey(window!!, 36, command = true)
+            }
+            case 19 -> click(2L)
+            case 20 -> enabled.value = false
+            case 21 -> click(0L, command = true)
+            case 22 -> enabled.value = true
+            case 23 -> {
+                expect([], "Group", "Amount")
+                model.setQuery(expected)
+                assertTrue(handle.beginEdit(address))
+                editor!!.state.replaceAll("invalid")
+            }
+            case 24 -> click(0L, command = true)
+            case 25 -> {
+                editor!!.state.replaceAll("3");
+                click(0L, command = true)
+            }
+            case 26 -> click(0L, command = true)
+            case 27 -> {
+                val next = pendingRows!!
+                assertTrue(pending!!.accept(next))
+                rows = next
+            }
+            case 28 -> {
+                expect([querySort("group")], "Group ↑", "Amount");
+                click(0L)
+            }
+            case 29 -> {
+                finished = true
+                ui!!.close()
+                active!!.requestExit()
+                return
+            }
+            else -> fail(Some("unknown query UI phase"))
+        }
+        frame!!.requestFrame()
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in held)
+            node.close()
+    }
+}

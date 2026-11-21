@@ -1,0 +1,136 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.max
+import scoop.surface.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.button as loadButton
+import scoop.window.*
+import scoop.window.accessibility.*
+
+internal fun <Row> gridLoadView(rows: GridRows<Row>, load: GridLoadRow, index: Long): View {
+    val text =
+        when (load.state) {
+            case Unloaded -> rows.labels.unloaded
+            case Loading -> rows.labels.loading
+            case Failed(val message) -> rows.labels.error(message)
+        }
+    val model = rows.session.currentModel
+    val content =
+        row {
+            alignment = CrossAlignment.Center
+            spacing = 8.0 * rows.columns.appearance.density
+            item(rows.columns.appearance.label(text)) { grow = 1.0 }
+            when (load.state) {
+                case Failed(_) -> add(
+                    loadButton(
+                        rows.labels.retry,
+                        {
+                            when (model) {
+                                case Some(val value) -> if (rows.session.usesModel(value))
+                                    value.retryExternal(load.position);
+                                case None -> {}
+                            }
+                            Unit
+                        }
+                    ) {
+                        theme = rows.session.theme
+                        fonts = Some(rows.columns.appearance.fonts)
+                        enabled = rows.enabled
+                        size = ButtonSize.Sm
+                        semantics =
+                            ComponentSemantics(
+                                name = Some(rows.labels.retry),
+                                automationId = Some(f"grid-load-retry-${load.position.encoded}")
+                            )
+                    }
+                )
+                else -> {}
+            }
+        }
+    return element(
+        GridLoadProps(rows, load, index, text),
+        { props, scope -> GridLoadView(props, scope) },
+        [content]
+    )
+}
+
+private class GridLoadProps<Row>(
+    val rows: GridRows<Row>,
+    val load: GridLoadRow,
+    val index: Long,
+    val text: String
+)
+
+private class GridLoadView<Row>(
+    private val props: Props<GridLoadProps<Row>>,
+    scope: ComponentScope
+): Element<GridCellClip>(scope) {
+    private val semantics = scope.semantics(SemanticRole.Group)
+    private val area = scope.createArea(focusable = true)
+    private val focus = scope.focusTarget(area, FocusOptions(order = Int.MAX_VALUE))
+    init {
+        scope.routeChildren(area);
+        semantics.bindFocus(Some(focus));
+        scope.routeSemanticsChildren(Some(semantics))
+    }
+    public override fun update(): UiInvalidation {
+        area.scope.enabled = props.value.rows.enabled
+        semantics.update(
+            SemanticProperties(
+                name = Some(props.value.text),
+                enabled = props.value.rows.enabled,
+                busy =
+                    when (props.value.load.state) {
+                        case Loading -> true;
+                        else -> false
+                    }
+            )
+        )
+        return UiInvalidation.Layout
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        GridCellClip
+    > {
+        val input = props.value
+        val plan = context.input<GridMeasurePlan>()
+        val padding = 8.0 * input.rows.columns.appearance.density
+        val width = max(0.0, plan.columns.viewport - padding * 2.0)
+        val child = context.measureChild(0L, Constraints(minWidth = width, maxWidth = Some(width)))
+        val height = max(plan.rows.estimate, child.size.height + padding * 2.0)
+        val x = plan.scroll.presentationOffset.x - plan.scroll.snapshot.offset.x
+        context.placeChild(0L, Point(x + padding, padding))
+        val row = plan.bands.box(input.index, plan.scroll.presentationOffset.y, height)
+        return LayoutResult(
+            LayoutMetrics(constraints.constrain(Size(plan.columns.total, height))),
+            GridCellClip(
+                Rect(x, row.clipTop, plan.columns.viewport, row.clipHeight),
+                Rect(
+                    0.0,
+                    plan.headerHeight + row.regionTop,
+                    plan.columns.viewport,
+                    row.regionHeight
+                ),
+                ScrollAxes.Vertical,
+                plan.viewport,
+                fixedRow = row.fixed
+            )
+        )
+    }
+    public override fun scene(context: SceneContext, clip: GridCellClip) {
+        context.withScrollReveal(clip.viewport, clip.region, clip.axes) {
+            body ->
+            body.clipRect(clip.bounds)
+            body.draw {
+                paint -> paint.canvas.drawRect(
+                    clip.bounds,
+                    Paint(props.value.rows.columns.appearance.theme.tokens.palette.muted.background)
+                )
+            }
+            body.place(area, clip.bounds)
+            body.semantics(semantics, clip.bounds)
+            body.children()
+        }
+    }
+}

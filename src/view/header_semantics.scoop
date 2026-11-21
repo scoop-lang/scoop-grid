@@ -1,0 +1,68 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+import scoop.ui.*
+import scoop.window.accessibility.*
+
+/** References follow real header mounts; they do not realize offscreen views. */
+internal class GridHeaderSemantics {
+    private var plan: GridHeadersPlan? = None
+    private var references = HashMap<ViewKey, SemanticsReference>()
+    fun update(value: GridHeadersPlan) {
+        when (plan) {
+            case Some(val old) -> if (old === value)
+                return
+            case None -> {}
+        }
+        // Retained lazy headers have already reconciled before the root update.
+        val retained = HashMap<ViewKey, SemanticsReference>()
+        for (item in value.items) {
+            val key = item.target.viewKey()
+            when (references[key]) {
+                case Some(val reference) -> retained.put(key, reference)
+                case None -> {}
+            }
+        }
+        references = retained
+        plan = Some(value)
+    }
+    fun reference(target: GridHeaderTarget): SemanticsReference {
+        val key = target.viewKey()
+        when (references[key]) {
+            case Some(val value) -> return value
+            case None -> {}
+        }
+        val value = SemanticsReference()
+        references.put(key, value)
+        return value
+    }
+    fun headers(plan: GridHeadersPlan, index: Long, includeSelf: Boolean, span: Long = 1L): Array<
+        SemanticNodeId
+    > {
+        val result = ArrayList<SemanticNodeId>()
+        val seen = HashSet<SemanticNodeId>()
+        for (column in index ..< index + span) {
+            val ancestors = plan.ancestors[column]
+            var at = ancestors.size
+            while (at > 0L) {
+                at -= 1L
+                append(result, seen, plan.items[ancestors[at]].target)
+            }
+            if (includeSelf)
+                append(result, seen, plan.items[column].target)
+        }
+        return result.toArray()
+    }
+    private fun append(
+        result: ArrayList<SemanticNodeId>,
+        seen: HashSet<SemanticNodeId>,
+        target: GridHeaderTarget
+    ) {
+        when (reference(target).id) {
+            case Some(val id) -> if (seen.add(id))
+                result.add(id)
+            case None -> {}
+        }
+    }
+}

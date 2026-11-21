@@ -1,0 +1,165 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.math.BigDecimal
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+@Test
+private class GridExternalOperationsTest {
+    @Test
+    fun `copy statistics and CSV report concrete gaps while loaded export and find stay explicit`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        val consumer = probe.attach(model)
+        probe.last.complete(externalPage(0L, 2L, Some(6L)))
+        model.loadExternal(externalPosition(5L))
+        probe.last.complete(externalPage(4L, 2L, Some(6L), true))
+        assertTrue(
+            model.setCellRange(Some(GridCellRange(externalAddress(0L), externalAddress(5L))))
+        )
+        try {
+            model.copyText()
+            fail(Some("copy silently skipped a gap"))
+        } catch (error: GridDataUnavailableException) {
+            assertEquals(1L, error.ranges.size)
+            assertEquals(externalRange(2L, 2L), error.ranges[0L])
+        }
+        assertFailsWith<GridDataUnavailableException> { model.rangeStatistics() }
+        assertFailsWith<GridDataUnavailableException> { model.exportCsv() }
+        assertEquals(
+            "0\r\n1\r\n4\r\n5\r\n",
+            model.exportCsv(
+                GridCsvOptions(
+                    scope = GridExportScope.LoadedRows,
+                    includeHeaders = false,
+                    columns = Some([GridColumnId("id")])
+                )
+            )
+        )
+        assertEquals(None, model.findCell("记录 3"))
+        assertEquals(2L, probe.requests.size)
+        assertFalse(model.selectRowRange(ViewKey.Number(0L), ViewKey.Number(5L)))
+        model.loadExternal(externalPosition(2L))
+        probe.last.complete(externalPage(2L, 2L, Some(6L)))
+        assertEquals(Some("0\n1\n2\n3\n4\n5"), model.copyText())
+        assertEquals(BigDecimal(15L), model.rangeStatistics()!!.sum)
+        assertTrue(model.selectRowRange(ViewKey.Number(0L), ViewKey.Number(5L)))
+        assertEquals(6L, model.selectedRowKeys.size)
+        consumer.close()
+    }
+
+    @Test
+    fun `selected export identifies missing keys and pinned rows retain display order`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        model.setPinnedRows(GridPinnedRows([ViewKey.Number(1L)], [ViewKey.Number(0L)]))
+        val consumer = probe.attach(model)
+        probe.last.complete(externalPage(0L, 2L, Some(2L), true))
+        assertEquals(
+            "1\r\n0\r\n",
+            model.exportCsv(
+                GridCsvOptions(includeHeaders = false, columns = Some([GridColumnId("id")]))
+            )
+        )
+        assertEquals(1L, model.result.topCount)
+        assertEquals(1L, model.result.bottomCount)
+        model.setSelectedRows([ViewKey.Number(99L), ViewKey.Number(1L)])
+        try {
+            model.exportCsv(GridCsvOptions(scope = GridExportScope.SelectedRows))
+            fail(Some("export silently skipped a selected key"))
+        } catch (error: GridDataUnavailableException) {
+            assertEquals(0L, error.ranges.size)
+            assertEquals(1L, error.keys.size)
+            assertEquals(ViewKey.Number(99L), error.keys[0L])
+        }
+        model.refreshExternal([ViewKey.Number(0L)])
+        assertEquals(0L, model.pinnedRows.bottom.size)
+        consumer.close()
+    }
+
+    @Test
+    fun `a zero row result can fetch separately provided pins after pin configuration changes`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        val consumer = probe.attach(model)
+        probe.last.complete(externalPage(0L, 0L, Some(0L), true))
+        model.setPinnedRows(GridPinnedRows([ViewKey.Number(8L)]))
+        assertEquals(2L, probe.requests.size)
+        assertEquals(ViewKey.Number(8L), probe.last.pinnedRows.top[0L])
+        probe.last.complete(
+            GridExternalPage<Long>(
+                [],
+                Some(0L),
+                true,
+                pinned = Some(TableRows([TableRecord(ViewKey.Number(8L), 88L)]))
+            )
+        )
+        assertEquals(1L, model.result.rows.count)
+        assertEquals(Some("88"), model.copyText(Some(externalAddress(8L))))
+        assertTrue(model.evictExternal(externalRange(0L, 1L)))
+        assertEquals(Some(0L), model.source.indexOfKey(ViewKey.Number(8L)))
+        consumer.close()
+    }
+
+    @Test
+    fun `external pivot publishes its typed values and complete columns in one result`() {
+        val probe = ExternalProbe()
+        val query =
+            GridQuery(
+                grouping = [GridColumnId("id")],
+                aggregations =
+                    [GridAggregationSelection(GridColumnId("id"), GridAggregateId("sum"))],
+                pivot = Some(GridPivot([GridSort(GridColumnId("id"))]))
+            )
+        val model = probe.model(query)
+        probe.forbidReads = true
+        val consumer = probe.attach(model)
+        val id =
+            GridColumnId(
+                GridColumnKey.Pivot(
+                    GridPivotColumnKey(
+                        [GridGroupPart(GridColumnId("id"), GridLiteral.Integer(2026L))],
+                        GridAggregationSelection(GridColumnId("id"), GridAggregateId("sum"))
+                    )
+                )
+            )
+        val columns = GridExternalColumns([gridResultColumn<Long>(id, "2026")])
+        val values =
+            gridProvidedAggregations(
+                [
+                    gridProvidedAggregate(
+                        id,
+                        GridAggregateId("sum"),
+                        Some(9007199254740993L),
+                        gridLongValues()
+                    )
+                ]
+            )
+        val group =
+            GridExternalItem<Long>(
+                GridRow.Group(gridExternalGroup(externalPath(1L), "Group", Some(2L), values))
+            )
+        assertFailsWith<IllegalArgumentException> {
+            probe.last.complete(GridExternalPage([group], Some(1L), true))
+        }
+        assertTrue(
+            probe.last.complete(GridExternalPage([group], Some(1L), true, columns = Some(columns)))
+        )
+        assertEquals(1L, model.columnState.size)
+        assertEquals(id, model.columnState[0L].id)
+        val address = GridCellAddress(GridRowKey.Group(externalPath(1L)), id)
+        assertEquals(Some("9007199254740993"), model.copyText(Some(address)))
+        model.setCellRange(Some(GridCellRange(address, address)))
+        assertEquals(BigDecimal(9007199254740993L), model.rangeStatistics()!!.sum)
+        assertEquals(
+            "9007199254740993\r\n",
+            model.exportCsv(GridCsvOptions(includeHeaders = false, data = GridExportData.Displayed))
+        )
+        assertFailsWith<IllegalArgumentException> { model.exportCsv() }
+        model.setQuery(query.withQuickFilter("new result"))
+        assertEquals(0L, model.result.availableRows.count)
+        assertFalse(model.columnState[0L].id == id)
+        consumer.close()
+    }
+}

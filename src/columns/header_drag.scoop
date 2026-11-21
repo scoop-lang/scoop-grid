@@ -1,0 +1,106 @@
+package scoop.grid
+
+import scoop.surface.*
+import scoop.ui.*
+import scoop.window.*
+
+/** Uses the header's existing area so claiming a drag cancels its sorting press. */
+internal class GridHeaderDrag<Row>(
+    private val scope: ComponentScope,
+    private val area: InputArea,
+    private val focus: FocusHandle,
+    private val value: () -> GridHeaderDragInput<Row>
+) {
+    private var move: GridColumnMove<Row>? = None
+    private val drag = scope.drag(area, options(), { _ -> enabled() }, { event -> receive(event) })
+
+    init {
+        scope.resource {
+            area.scope.addEventHandler {
+                context,
+                event -> if (context.phase == RoutedPhase.Notification) {
+                    when (event) {
+                        case FocusChanged(false) -> cancel()
+                        else -> {}
+                    }
+                }
+            }
+        }
+        scope.resource {
+            area.scope.addDefaultAction {
+                context,
+                event -> when (event) {
+                    case Keyboard(val key) -> {
+                        if (
+                            moving &&
+                                key.state ==
+                                ElementState.Pressed &&
+                                !key.synthetic &&
+                                key.logicalKey ==
+                                LogicalKey.Named(NamedKey.Escape)
+                        ) {
+                            cancel()
+                            context.consume()
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
+    private fun enabled(): Boolean {
+        val input = value()
+        return input.enabled && !input.session.submitting
+    }
+
+    private fun options(): DragOptions =
+        DragOptions(DragAxis.Horizontal, 6.0 * value().appearance.density, enabled())
+
+    fun update() {
+        drag.update(options(), { _ -> enabled() }, { event -> receive(event) })
+    }
+
+    val moving: Boolean get() = value().session.columnReorder.isMoving(value().target.key)
+
+    private fun receive(event: DragEvent) {
+        val reorder = value().session.columnReorder
+        when (event) {
+            case Started(val sample) -> {
+                move = reorder.begin(value(), sample.position, { cancel() })
+                when (move) {
+                    case Some(_) -> {
+                        if (!focus.requestFocus(FocusOrigin.Pointer))
+                            cancel()
+                    }
+                    case None -> cancel()
+                }
+            }
+            case Moved(val sample) -> when (move) {
+                case Some(val current) -> reorder.position(current, sample.position)
+                case None -> {}
+            }
+            case Ended(val sample) -> {
+                val current = move
+                move = None
+                when (current) {
+                    case Some(val active) -> reorder.finish(active, sample.position)
+                    case None -> {}
+                }
+            }
+            case Cancelled(_, _) -> cancel()
+        }
+        if (scope.isMounted)
+            scope.requestFrame()
+    }
+
+    fun cancel() {
+        val current = move
+        move = None
+        when (current) {
+            case Some(val active) -> value().session.columnReorder.cancel(active)
+            case None -> {}
+        }
+        drag.cancel()
+    }
+}

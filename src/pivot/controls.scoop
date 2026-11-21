@@ -1,0 +1,234 @@
+package scoop.grid
+
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.select as pivotSelect
+import scoop.ui.component.checkbox as pivotCheckbox
+import scoop.ui.component.label as pivotLabel
+
+public class GridPivotLabels public constructor(
+    public val enabled: String = "透视结果",
+    public val source: String = "分析字段",
+    public val none: String = "不透视",
+    public val level: (Long) -> String = { value -> f"第 ${value} 个透视维度" },
+    public val levelName: (String) -> String = { value -> f"${value} 透视维度顺序" },
+    public val directionName: (String) -> String = { value -> f"${value} 透视值排序" },
+    public val ascending: String = "升序",
+    public val descending: String = "降序"
+)
+
+private class GridPivotControlsProps<Row>(
+    val input: GridColumnsPanelProps<Row>,
+    val enabled: Boolean
+)
+
+internal fun <Row> gridPivotControls(input: GridColumnsPanelProps<Row>, enabled: Boolean): View =
+    component(
+        GridPivotControlsProps(input, enabled),
+        { props, scope -> GridPivotControls(props, scope) },
+        ViewKey.Text("grid-pivot-controls")
+    )
+
+internal fun <Row> gridHasPivotControls(model: DataGridState<Row>): Boolean {
+    if (model.isTree)
+        return false
+    if (model.pivot != None)
+        return true
+    for (column in model.sourceColumns)
+        when (column.pivoting) {
+            case Some(_) -> return true;
+            case None -> {}
+        }
+    return false
+}
+
+private class GridPivotControls<Row>(
+    private val props: Props<GridPivotControlsProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private var selected: GridColumnId? = None
+    private var model = props.value.input.state
+    private val revision = state(0L)
+    private var message: String? = None
+    private fun available(): Boolean {
+        val input = props.value
+        return scope.isMounted &&
+            input.enabled &&
+            input.input.enabled &&
+            input.input.handle.usesColumns(input.input.state.columnState) &&
+            !input.input.handle.isSubmitting
+    }
+    private fun change(action: (DataGridState<Row>) -> Unit) {
+        if (!available())
+            return
+        val input = props.value.input
+        val before = input.state.query
+        if (!gridQueryReady(Some(input.handle))) {
+            message = Some(input.handle.editError ?: input.labels.finishEditing)
+            revision.value += 1L
+            return
+        }
+        if (!available() || props.value.input.state !== input.state || input.state.query !== before)
+            return
+        try {
+            action(input.state)
+            message = None
+        } catch (error: IllegalArgumentException) {
+            message = Some(error.message ?: "分析配置无效")
+        }
+        if (scope.isMounted)
+            revision.value += 1L
+    }
+    public override fun render(): View {
+        revision.value
+        val input = props.value.input
+        val model = input.state
+        val labels = input.labels.pivot
+        val active = available()
+        if (this.model !== model) {
+            this.model = model;
+            selected = None;
+            message = None
+        }
+        val choices = ArrayList<Choice<GridColumnId>>()
+        for (column in model.sourceColumns) {
+            var allowed = column.aggregations.size > 0L
+            when (column.grouping) {
+                case Some(_) -> allowed = true;
+                case None -> {}
+            }
+            when (column.pivoting) {
+                case Some(_) -> allowed = true;
+                case None -> {}
+            }
+            if (allowed)
+                choices.add(Choice(column.id.viewKey, column.id, column.title))
+        }
+        var found = false
+        for (choice in choices)
+            if (selected == Some(choice.value))
+                found = true
+        if (!found)
+            selected = Some(choices[0L].value)
+        val id = selected!!
+        val definition = model.sourceColumn(id)
+        val controls = this
+        return column {
+            row {
+                add(
+                    pivotCheckbox(
+                        binding<Boolean>(
+                            { model.pivot != None },
+                            {
+                                value -> controls.change {
+                                    state -> state.setPivot(
+                                        if (value)
+                                            Some(GridPivot())
+                                        else
+                                            None
+                                    )
+                                }
+                            }
+                        )
+                    ) {
+                        key = ViewKey.Text("grid-pivot-enabled")
+                        enabled =
+                            active && (model.pivot != None || model.query.aggregations.size > 0L)
+                        theme = input.theme
+                        semantics =
+                            ComponentSemantics(
+                                name = Some(labels.enabled),
+                                automationId = Some("grid-pivot-enabled")
+                            )
+                    }
+                )
+                add(
+                    pivotLabel(labels.enabled) {
+                        fonts = input.fonts;
+                        theme = input.theme
+                    }
+                )
+                spacing = 8.0
+                alignment = CrossAlignment.Center
+            }
+            add(
+                pivotSelect(
+                    binding<GridColumnId?>(
+                        { controls.selected },
+                        {
+                            value -> if (controls.available()) {
+                                controls.selected = value
+                                controls.message = None
+                                controls.revision.value += 1L
+                            }
+                        }
+                    ),
+                    choices.toArray()
+                ) {
+                    key = ViewKey.Text("grid-pivot-source")
+                    enabled = active
+                    fonts = input.fonts
+                    theme = input.theme
+                    semantics =
+                        ComponentSemantics(
+                            name = Some(labels.source),
+                            automationId = Some("grid-pivot-source")
+                        )
+                }
+            )
+            when (definition.grouping) {
+                case Some(_) -> add(
+                    gridColumnGroupingControl(
+                        model,
+                        definition,
+                        active,
+                        input.labels.grouping,
+                        input.fonts,
+                        input.theme,
+                        { query -> controls.change { state -> state.setQuery(query) } }
+                    )
+                )
+                case None -> {}
+            }
+            if (definition.aggregations.size > 0L)
+                add(
+                    gridColumnAggregationControl(
+                        model,
+                        definition,
+                        active,
+                        input.labels,
+                        input.fonts,
+                        input.theme,
+                        { value -> controls.change { state -> state.setAggregation(id, value) } }
+                    )
+                )
+            when (definition.pivoting) {
+                case Some(_) -> if (model.pivot != None)
+                    add(
+                        gridPivotDimensionControl(
+                            model,
+                            definition,
+                            active,
+                            labels,
+                            input.fonts,
+                            input.theme,
+                            { value -> controls.change { state -> state.setPivot(Some(value)) } }
+                        )
+                    )
+                case None -> {}
+            }
+            when (controls.message) {
+                case Some(val text) -> add(
+                    pivotLabel(input.labels.error(text)) {
+                        fonts = input.fonts;
+                        theme = input.theme
+                        semantics = ComponentSemantics(automationId = Some("grid-pivot-error"))
+                    }
+                )
+                case None -> {}
+            }
+            spacing = 6.0
+            alignment = CrossAlignment.Stretch
+        }
+    }
+}

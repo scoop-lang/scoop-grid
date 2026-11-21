@@ -1,0 +1,175 @@
+package scoop.grid
+
+import scoop.math.*
+
+public fun <T> gridCountAggregation(title: String = "计数"): GridAggregation<T> =
+    gridAggregation<T, Unit, Long>(
+        GridAggregateId("count"),
+        title,
+        { -> Unit },
+        { _, _ -> Unit },
+        { _, count -> count },
+        { value -> f"${value}" },
+        { a, b -> a.compareTo(b) },
+        { value -> Some(BigDecimal(value)) },
+        Some(0L)
+    )
+
+public fun <T> gridMinAggregation(values: GridValues<T>, title: String = "最小值"): GridAggregation<
+    T
+> = gridExtremeAggregation(values, false, title)
+
+public fun <T> gridMaxAggregation(values: GridValues<T>, title: String = "最大值"): GridAggregation<
+    T
+> = gridExtremeAggregation(values, true, title)
+
+private fun <T> gridExtremeAggregation(
+    values: GridValues<T>,
+    maximum: Boolean,
+    title: String
+): GridAggregation<T> =
+    gridAggregation<T, T?, T>(
+        GridAggregateId(
+            if (maximum)
+                "max"
+            else
+                "min"
+        ),
+        title,
+        { -> None },
+        {
+            old, value ->
+            if (values.kind == GridValueKind.Number) {
+                // Numeric encoding validates the value even without an optional projection.
+                try {
+                    when (values.encode(value)) {
+                        case Number(val number) -> {
+                            gridAggregateFinite(number);
+                            Unit
+                        }
+                        case Integer(_) -> {}
+                        else -> throw ArithmeticException()
+                    }
+                } catch (error: IllegalArgumentException) {
+                    throw ArithmeticException()
+                }
+            }
+            when (old) {
+                case None -> Some(value)
+                case Some(val previous) -> {
+                    val compared = values.compare(value, previous)
+                    if (
+                        if (maximum)
+                            compared > 0L
+                        else
+                            compared < 0L
+                    )
+                        Some(value)
+                    else
+                        old
+                }
+            }
+        },
+        { value, _ -> value!! },
+        values.format,
+        values.compare,
+        {
+            value -> when (values.encode(value)) {
+                case Integer(val number) -> Some(BigDecimal(number))
+                case Number(val number) -> Some(BigDecimal.fromDouble(number))
+                else -> None
+            }
+        }
+    )
+
+public fun gridSumLongAggregation(title: String = "总和"): GridAggregation<Long> =
+    gridAggregation<Long, BigInteger, Long>(
+        GridAggregateId("sum"),
+        title,
+        { -> BigInteger.ZERO },
+        { sum, value -> sum + BigInteger(value) },
+        { sum, _ -> sum.toLongExact() },
+        { value -> f"${value}" },
+        { a, b -> a.compareTo(b) },
+        { value -> Some(BigDecimal(value)) }
+    )
+
+public fun gridAverageLongAggregation(title: String = "平均值"): GridAggregation<Long> =
+    gridAggregation<Long, BigInteger, Double>(
+        GridAggregateId("average"),
+        title,
+        { -> BigInteger.ZERO },
+        { sum, value -> sum + BigInteger(value) },
+        {
+            sum,
+            count -> gridAggregateFinite(
+                BigDecimal(sum).div(BigDecimal(count), MathContext.Decimal128).toDouble()
+            )
+        },
+        { value -> f"${value}" },
+        { a, b -> a.compareTo(b) },
+        { value -> Some(BigDecimal.fromDouble(value)) }
+    )
+
+public fun gridSumDoubleAggregation(title: String = "总和"): GridAggregation<Double> =
+    gridAggregation<Double, Double, Double>(
+        GridAggregateId("sum"),
+        title,
+        { -> 0.0 },
+        { sum, value -> gridAggregateFinite(sum + gridAggregateFinite(value)) },
+        { sum, _ -> sum },
+        { value -> f"${value}" },
+        { a, b -> a.compareTo(b) },
+        { value -> Some(BigDecimal.fromDouble(value)) }
+    )
+
+public fun gridAverageDoubleAggregation(title: String = "平均值"): GridAggregation<Double> =
+    gridAggregation<Double, BigDecimal, Double>(
+        GridAggregateId("average"),
+        title,
+        { -> BigDecimal.ZERO },
+        { sum, value -> sum + BigDecimal.fromDouble(gridAggregateFinite(value)) },
+        {
+            sum,
+            count -> gridAggregateFinite(
+                sum.div(BigDecimal(count), MathContext.Decimal128).toDouble()
+            )
+        },
+        { value -> f"${value}" },
+        { a, b -> a.compareTo(b) },
+        { value -> Some(BigDecimal.fromDouble(value)) }
+    )
+
+public fun gridSumDecimalAggregation(title: String = "总和"): GridAggregation<BigDecimal> =
+    gridAggregation<BigDecimal, BigDecimal, BigDecimal>(
+        GridAggregateId("sum"),
+        title,
+        { -> BigDecimal.ZERO },
+        { sum, value -> sum + value },
+        { sum, _ -> sum },
+        { value -> value.toPlainString() },
+        { a, b -> a.compareTo(b) },
+        { value -> Some(value) }
+    )
+
+public fun gridAverageDecimalAggregation(
+    scale: Long,
+    roundingMode: RoundingMode,
+    title: String = "平均值"
+): GridAggregation<BigDecimal> =
+    gridAggregation<BigDecimal, BigDecimal, BigDecimal>(
+        GridAggregateId("average"),
+        title,
+        { -> BigDecimal.ZERO },
+        { sum, value -> sum + value },
+        { sum, count -> sum.div(BigDecimal(count), scale, roundingMode) },
+        { value -> value.toPlainString() },
+        { a, b -> a.compareTo(b) },
+        { value -> Some(value) }
+    )
+
+private fun gridAggregateFinite(value: Double): Double {
+    if (!value.isFinite())
+        throw ArithmeticException()
+    return value
+}

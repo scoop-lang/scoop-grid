@@ -1,0 +1,67 @@
+package scoop.grid
+
+import scoop.collections.sortWith
+import scoop.ui.component.TableSource
+
+internal class GridTreeOrder<Row>(
+    val roots: Array<Long>,
+    val children: Array<Array<Long>>,
+    val starts: Array<Long>,
+    val rows: TableSource<Row>,
+    val withContext: TableSource<Row>
+)
+
+internal fun <Row> gridOrderTree(
+    matches: GridTreeMatches<Row>,
+    columns: GridColumns<Row>,
+    sorting: Array<GridSort>
+): GridTreeOrder<Row> {
+    val topology = matches.topology
+    val comparison = gridRecordOrder(topology.source, columns, sorting)
+    val roots = ArrayList<Long>()
+    for (root in topology.roots)
+        if (matches.retained(root))
+            roots.add(root)
+    when (comparison) {
+        case Some(val value) -> roots.sortWith(value)
+        case None -> {}
+    }
+    val children =
+        Array<Array<Long>>(topology.source.count) {
+            node ->
+            val kept = ArrayList<Long>()
+            for (child in topology.children[node])
+                if (matches.retained(child))
+                    kept.add(child)
+            when (comparison) {
+                case Some(val value) -> kept.sortWith(value)
+                case None -> {}
+            }
+            kept.toArray()
+        }
+    val starts = ArrayList<Long>()
+    for (_ in 0L ..< topology.source.count)
+        starts.add(0L)
+    val ordered = ArrayList<Long>()
+    val contextual = ArrayList<Long>()
+    val pending = ArrayList<Long>()
+    for (at in 0L ..< roots.size)
+        pending.add(roots[roots.size - at - 1L])
+    while (pending.size > 0L) {
+        val node = pending.removeAt(pending.size - 1L)
+        starts[node] = ordered.size
+        contextual.add(node)
+        if (matches.matches[node])
+            ordered.add(node)
+        val nested = children[node]
+        for (at in 0L ..< nested.size)
+            pending.add(nested[nested.size - at - 1L])
+    }
+    return GridTreeOrder(
+        roots.toArray(),
+        children,
+        starts.toArray(),
+        GridOrderedRows(topology.source, ordered.toArray()),
+        GridOrderedRows(topology.source, contextual.toArray())
+    )
+}

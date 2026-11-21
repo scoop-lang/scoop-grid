@@ -1,0 +1,130 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.math.BigDecimal
+
+private enum GridAccumulator<A> {
+    Ready(A, Long), Failed(String)
+}
+
+private enum GridAggregateValue<R> {
+    Value(R), Missing, Failed(String)
+}
+
+private class GridAggregateEntry<R>(
+    val value: GridAggregateValue<R>,
+    val display: GridAggregateDisplay,
+    val number: BigDecimal?
+)
+
+/** Group numbers are local result positions, never UI or business identities. */
+internal class TypedGridAggregation<T, A, R>(
+    private val seed: () -> A,
+    private val step: (A, T) -> A,
+    private val complete: (A, Long) -> R,
+    private val format: (R) -> String,
+    private val order: (R, R) -> Long,
+    private val numeric: (R) -> BigDecimal?,
+    private val empty: R?
+): GridValueAggregation<T> {
+    private val groups = HashMap<Long, GridAccumulator<A>>()
+    private val positions = ArrayList<Long>()
+    public override fun ensure(group: Long) {
+        if (!groups.containsKey(group)) {
+            val value =
+                try {
+                    GridAccumulator.Ready(seed(), 0L)
+                } catch (error: ArithmeticException) {
+                    GridAccumulator.Failed(error.message ?: "aggregate arithmetic failed")
+                }
+            groups.put(group, value)
+            positions.add(group)
+        }
+    }
+    public override fun add(group: Long, value: T) {
+        val accumulator =
+            groups[group] ?: throw IllegalStateException(Some("aggregate group was not created"))
+        when (accumulator) {
+            case Failed(_) -> {}
+            case Ready(val current, val count) -> {
+                val next =
+                    try {
+                        GridAccumulator.Ready(step(current, value), count + 1L)
+                    } catch (error: ArithmeticException) {
+                        GridAccumulator.Failed(error.message ?: "aggregate arithmetic failed")
+                    }
+                groups.put(group, next)
+            }
+        }
+    }
+    private fun result(accumulator: GridAccumulator<A>): GridAggregateValue<R> {
+        return when (accumulator) {
+            case Failed(val message) -> GridAggregateValue.Failed(message)
+            case Ready(val current, val count) -> {
+                if (count == 0L)
+                    when (empty) {
+                        case Some(val value) -> GridAggregateValue.Value(value)
+                        case None -> GridAggregateValue.Missing
+                    }
+                else
+                    try {
+                        GridAggregateValue.Value(complete(current, count))
+                    } catch (error: ArithmeticException) {
+                        GridAggregateValue.Failed(error.message ?: "aggregate arithmetic failed")
+                    }
+            }
+        }
+    }
+    public override fun finish(): GridAggregateValues {
+        val results = HashMap<Long, GridAggregateEntry<R>>()
+        for (group in positions) {
+            val value = result(groups[group]!!)
+            val entry =
+                when (value) {
+                    case Value(val item) -> try {
+                        GridAggregateEntry(
+                            value,
+                            GridAggregateDisplay.Value(format(item)),
+                            numeric(item)
+                        )
+                    } catch (error: ArithmeticException) {
+                        val message = error.message ?: "aggregate arithmetic failed"
+                        GridAggregateEntry(
+                            GridAggregateValue.Failed(message),
+                            GridAggregateDisplay.Failed(message),
+                            None
+                        )
+                    }
+                    case Missing -> GridAggregateEntry(value, GridAggregateDisplay.Missing, None)
+                    case Failed(val error) -> GridAggregateEntry(
+                        value,
+                        GridAggregateDisplay.Failed(error),
+                        None
+                    )
+                }
+            results.put(group, entry)
+        }
+        return TypedGridAggregateValues(results, order)
+    }
+}
+
+private class TypedGridAggregateValues<R>(
+    private val values: HashMap<Long, GridAggregateEntry<R>>,
+    private val order: (R, R) -> Long
+): GridAggregateValues {
+    public override fun display(group: Long): GridAggregateDisplay =
+        values[group]?.display ?: GridAggregateDisplay.Missing
+    public override fun number(group: Long): BigDecimal? = values[group]?.number ?: None
+    public override fun compare(left: Long, right: Long): Long {
+        val a = values[left]?.value ?: GridAggregateValue.Missing
+        val b = values[right]?.value ?: GridAggregateValue.Missing
+        return when ((a, b)) {
+            case(Value(val x), Value(val y)) -> order(x, y)
+            case(Value(_), _) -> -1L
+            case(_, Value(_)) -> 1L
+            case(Missing, Failed(_)) -> -1L
+            case(Failed(_), Missing) -> 1L
+            else -> 0L
+        }
+    }
+}

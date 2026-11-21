@@ -1,0 +1,232 @@
+package scoop.grid.tests.columns
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.style.shadcn.shadcnTheme
+
+internal fun ColumnsProbe.advanceReorder() {
+    when (phase) {
+        case 127 -> reopenForMove()
+        case 128 -> {}
+        case 129 -> movePress(190.0)
+        case 130 -> moveTo(330.0)
+        case 131 -> moveRelease()
+        case 132 -> movePress(290.0)
+        case 133 -> moveTo(190.0)
+        case 134 -> key(53, "\u001b")
+        case 135 -> moveRelease()
+        case 136 -> movePress(290.0)
+        case 137 -> moveTo(40.0)
+        case 138 -> moveRelease()
+        case 139 -> movePress(290.0)
+        case 140 -> moveTo(190.0, 60.0)
+        case 141 -> moveRelease()
+        case 142 -> movePress(40.0)
+        case 143 -> moveTo(120.0)
+        case 144 -> moveRelease()
+        case 145 -> movePress(415.0)
+        case 146 -> moveTo(480.0)
+        case 147 -> moveRelease()
+        case 148 -> resetMoveColumns()
+        case 149 -> movePress(190.0)
+        case 150 -> moveTo(330.0)
+        case 151 -> {
+            model.setColumnState(GridColumnState(GridColumnId("c2"), width = Some(125.0)))
+            moveSnapshot = Some(model.columnState)
+        }
+        case 152 -> moveRelease()
+        case 153 -> resetMoveColumns()
+        case 154 -> movePress(190.0)
+        case 155 -> moveTo(330.0)
+        case 156 -> {
+            rows = columnRows()
+            model.replaceData(rows)
+            moveResult = Some(model.result)
+        }
+        case 157 -> moveRelease()
+        case 158 -> resetMoveColumns()
+        case 159 -> movePress(190.0)
+        case 160 -> moveTo(330.0)
+        case 161 -> enabled.value = false
+        case 162 -> moveRelease()
+        case 163 -> enabled.value = true
+        case 164 -> movePress(190.0)
+        case 165 -> moveTo(330.0)
+        case 166 -> {
+            direction.value = LayoutDirection.Rtl
+            theme.current.value =
+                shadcnTheme() { tokens { typography { body { fontSize = 21.0 } } } }
+            scroll.scrollTo(Point(1000000.0, 0.0))
+        }
+        case 167 -> moveRelease()
+        case 168 -> resetMoveColumns(true)
+        case 169 -> movePress(305.0, 24.0)
+        case 170 -> moveTo(195.0, 24.0)
+        case 171 -> moveRelease()
+        case 172 -> defaultMoveTheme()
+        case 173 -> movePress(190.0)
+        case 174 -> moveTo(372.0)
+        case 175 -> moveTo(260.0)
+        case 176 -> moveRelease()
+        case 177 -> beginMoveIdle()
+        case 178 -> resetMoveColumns()
+        case 179 -> {
+            assertTrue(handle.beginEdit(address))
+            editor!!.state.replaceAll("bad")
+        }
+        case 180 -> movePress(190.0)
+        case 181 -> moveTo(330.0)
+        case 182 -> moveRelease()
+        case 183 -> {
+            editor!!.state.replaceAll("77")
+            movePress(190.0)
+        }
+        case 184 -> moveTo(330.0)
+        case 185 -> moveRelease()
+        case 186 -> {
+            rows = pendingRows!!
+            assertTrue(pending!!.accept(rows))
+            moveResult = Some(model.result)
+        }
+        case 187 -> movePress(190.0)
+        case 188 -> moveTo(330.0)
+        case 189 -> moveRelease()
+        case 190 -> resetMoveColumns()
+        case 191 -> movePress(190.0)
+        case 192 -> moveTo(330.0)
+        case 193 -> {
+            movePrevious = Some(model)
+            selected.value =
+                DataGridState(
+                    rows,
+                    columnDefinitions(this),
+                    columnQuery(),
+                    Some { _ -> queryEvents += 1 }
+                )
+            resetMoveColumns()
+            model.moveColumn(GridColumnId("c7"), 2L)
+            moveSnapshot = Some(model.columnState)
+        }
+        case 194 -> moveRelease()
+        case 195 -> resetMoveColumns()
+        case 196 -> movePress(190.0)
+        case 197 -> moveTo(330.0)
+        case 198 -> {
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+        }
+        case 199 -> {
+            finished = true
+            active!!.requestExit()
+        }
+        else -> fail(Some("unexpected column reorder phase"))
+    }
+}
+
+internal fun ColumnsProbe.inspectReorder() {
+    when (phase) {
+        case 127 -> assertTrue(handle.isAttached)
+        case 128 -> {
+            moveCapture()
+            assertTrue(resizeFrame(moveHeader!!, Rect(588.0, 12.0, 100.0, 32.0)))
+            movePinned = Some(identified("grid-header-c0"))
+            moveEnd = Some(identified("grid-header-c298"))
+        }
+        case 130 -> {
+            moveUnchanged()
+            assertTrue(moveHeader!!.flag(4), Some("dragging should focus the source header"))
+        }
+        case 131 -> {
+            movePrefix(["c0", "c2", "c1", "c3", "c4"])
+            assertTrue(moveCell!!.same(keep(grid!!.cell(0L, 3L)!!)))
+            assertTrue(moveHeader!!.same(identified("grid-header-c1")))
+            assertTrue(resizeFrame(moveHeader!!, Rect(688.0, 12.0, 100.0, 32.0)))
+            moveSnapshot = Some(model.columnState)
+        }
+        case 134 -> moveUnchanged()
+        case 135 -> moveUnchanged()
+        case 138 -> {
+            moveUnchanged()
+            assertEquals(GridPin.None, entry("c1").pin)
+        }
+        case 141 -> moveUnchanged()
+        case 144 -> {
+            movePrefix(["c2", "c1", "c3", "c4", "c0", "c5"])
+            assertTrue(movePinned!!.same(identified("grid-header-c0")))
+            assertEquals(0.0, scroll.offset.x)
+            assertEquals(GridPin.Start, entry("c0").pin)
+        }
+        case 147 -> {
+            assertEquals("c299", model.columnState[298L].id.value)
+            assertEquals("c298", model.columnState[299L].id.value)
+            assertEquals(GridPin.End, entry("c298").pin)
+            assertTrue(moveEnd!!.same(identified("grid-header-c298")))
+            assertTrue(moveResult!! === model.result)
+            assertEquals(0.0, scroll.offset.x)
+        }
+        case 152 -> {
+            moveUnchanged()
+            assertEquals(Some(125.0), entry("c2").width)
+        }
+        case 157 -> {
+            movePrefix(["c0", "c2", "c1", "c3", "c4"])
+            assertEquals(1L, nativeGridData(model.result.rows.rowAt(0L)))
+        }
+        case 162 -> moveUnchanged()
+        case 167 -> moveUnchanged()
+        case 168 -> {
+            moveCapture()
+            assertTrue(resizeFrame(moveHeader!!, Rect(708.0, 12.0, 90.0, 48.0)))
+        }
+        case 170 -> moveUnchanged()
+        case 171 -> {
+            movePrefix(["c0", "c2", "c1", "c3", "c4"])
+            assertTrue(moveCell!!.same(keep(grid!!.cell(0L, 3L)!!)))
+            assertTrue(moveHeader!!.same(identified("grid-header-c1")))
+            assertTrue(resizeFrame(moveHeader!!, Rect(618.0, 12.0, 90.0, 48.0)))
+        }
+        case 172 -> {
+            moveCapture()
+            moveWaitFrames = 0
+        }
+        case 174 -> {
+            moveUnchanged()
+            moveWaitFrames += 1
+            assertTrue(moveWaitFrames < 200, Some("edge scrolling did not pass the source column"))
+            retry = scroll.offset.x < 140.0
+        }
+        case 176 -> movePrefix(["c0", "c2", "c3", "c4", "c5", "c1", "c6"])
+        case 179 -> retry = handle.focusedCell != Some(address) || handle.isPending
+        case 181 -> {
+            moveUnchanged()
+            assertEquals(Some(address), handle.editingCell)
+            assertTrue(handle.editError != None)
+            assertEquals(2, submissions)
+        }
+        case 184 -> {
+            moveUnchanged()
+            assertTrue(handle.isSubmitting)
+            assertEquals(3, submissions)
+        }
+        case 186 -> {
+            moveUnchanged()
+            assertEquals(None, handle.editingCell)
+        }
+        case 189 -> movePrefix(["c0", "c2", "c1", "c3", "c4"])
+        case 194 -> {
+            moveUnchanged()
+            assertEquals("c7", model.columnState[2L].id.value)
+            assertEquals("c1", movePrevious!!.columnState[1L].id.value)
+        }
+        case 195 -> moveCapture()
+        case 198 -> {
+            moveUnchanged()
+            assertFalse(moveHeader!!.flag(0))
+            assertFalse(handle.isAttached)
+        }
+        else -> {}
+    }
+}

@@ -1,0 +1,274 @@
+package scoop.grid.tests.details
+
+import scoop.collections.HashMap
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.surface.InputScope
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.tests.window.nativeEditorKey
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridDetailsWindowTest {
+    @Test
+    fun `native details use ordinary content nested editing and focus cleanup`() {
+        val probe = DetailProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(probe.reads.mounted, probe.reads.unmounted)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            detailFailure(error)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+private fun detailFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        detailFailure(error.primaryFailure)
+        detailFailure(error.cleanupFailure)
+    } else
+        if (error is AssertionFailure)
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        else
+            if (error is Exception)
+                error.printStackTrace()
+}
+
+internal class DetailProbe: Closeable {
+    val reads = DetailReads()
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val width = state(600.0)
+    val extra = state(0.0)
+    val enabled = state(true)
+    val direction = state(LayoutDirection.Ltr)
+    val outside = FocusHandle()
+    val live = HashMap<Long, DetailPanel>()
+    var retired: DetailPanel? = None
+    var editor: GridTextEditor<Long>? = None
+    var options: GridEditorOptions? = None
+    var pending: GridCommit<DetailRecord>? = None
+    val model =
+        DataGridState(
+            DetailWindowSource(reads),
+            columns(),
+            rowSelection = GridRowSelectionMode.Multiple,
+            details = Some(definition())
+        )
+    var table: NativeNode? = None
+    var nativeRow: NativeNode? = None
+    var selectNode: NativeNode? = None
+    var emptyNode: NativeNode? = None
+    var popup: NativeNode? = None
+    var frame: ComponentScope? = None
+    var gridInput: InputScope? = None
+    var application: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var root: NativeNode? = None
+    var calls: NativeCalls? = None
+    var phase = 0
+    var waiting = false
+    var waitingInput = false
+    var retry = false
+    var finished = false
+    val diagnostic: String get() =
+        f"details phase=${phase}, retry=${retry}, focus=${handle.focusedCell != None}, pending=${
+            handle.isPending
+        }, rows=${model.result.rows.count}, views=${reads.views}, live=${live.size}, scrollY=${
+            scroll.offset.y
+        }"
+    private val retained = ArrayList<NativeNode>()
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(40L)
+
+    init {
+        model.setColumnState(GridColumnState(GridColumnId("id"), pin = GridPin.Start))
+        model.setColumnState(GridColumnState(GridColumnId("end"), pin = GridPin.End))
+    }
+    fun definition(column: GridColumnId = GridColumnId("id")): GridDetails<DetailRecord> {
+        val probe = this
+        return GridDetails(
+            {
+                row ->
+                probe.reads.views += 1L
+                if (row.id == 50000L)
+                    probe.reads.distantViews += 1L
+                component(row.id, { props, scope -> DetailPanel(props, probe, scope) })
+            },
+            Some(column),
+            "Record details"
+        )
+    }
+    fun event(host: UiHost, active: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                application = Some(active)
+                active.setControlFlow(ControlFlow.WaitUntil(timeout))
+                val native =
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid details";
+                            size = LogicalSize(900.0, 470.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> DetailScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(active.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(Some(diagnostic))
+            else -> {}
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        retained.add(node);
+        return node
+    }
+    fun named(id: String): NativeNode {
+        when (val found = findNamed(root!!, id)) {
+            case Some(val node) -> return node
+            case None -> {}
+        }
+        for (key in [GridRowKey.Data(ViewKey.Number(0L)), GridRowKey.Detail(ViewKey.Number(0L))]) {
+            val index = model.result.rows.indexOfKey(key) ?: continue
+            val row = keep(table!!.row(index) ?: continue)
+            when (val found = row.find(id)) {
+                case Some(val node) -> return keep(node)
+                case None -> {}
+            }
+        }
+        return fail(Some(f"missing ${id} at ${phase}"))
+    }
+    private fun findNamed(node: NativeNode, id: String): NativeNode? {
+        if (node.text(3, Some(id)))
+            return Some(node)
+        if (node.text(2, Some("AXTable")))
+            return None
+        for (index in 0L ..< node.count) {
+            when (val found = findNamed(keep(node.child(index)), id)) {
+                case Some(_) -> return found
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun ownRows(node: NativeNode): Long {
+        if (node.text(2, Some("AXTable")))
+            return 0L
+        var count =
+            if (node.text(2, Some("AXRow")))
+                1L
+            else
+                0L
+        for (index in 0L ..< node.count)
+            count += ownRows(keep(node.child(index)))
+        return count
+    }
+    fun find(node: NativeNode, role: String): NativeNode? {
+        if (node.flag(0) && node.text(2, Some(role)))
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val child = find(keep(node.child(index)), role)
+            when (child) {
+                case Some(_) -> return child;
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun key(code: Int, text: String, flags: Int = 0) {
+        @Unsafe
+        {
+            window!!.acquireNativeWindow().use {
+                lease -> @Unsafe
+                {
+                    when (lease.handle) {
+                        case AppKit(_, val pointer) -> text.withUtf8Bytes {
+                            bytes,
+                            length -> @Unsafe
+                            {
+                                assertEquals(
+                                    0,
+                                    nativeEditorKey(pointer, code, bytes, length, flags)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        waitingInput = true
+        assertTrue(
+            application!!.proxy().post {
+                _ ->
+                waitingInput = false
+                if (!finished)
+                    frame?.requestFrame()
+            }
+        )
+    }
+    fun bounds(node: NativeNode, value: Rect) {
+        @Unsafe
+        {
+            window!!.acquireNativeWindow().use {
+                lease -> @Unsafe
+                {
+                    when (lease.handle) {
+                        case AppKit(_, val pointer) -> assertTrue(
+                            node.frame(pointer, value.x, value.y, value.width, value.height),
+                            Some(
+                                f"detail frame at ${phase}: ${value.x},${value.y},${value.width},${
+                                    value.height
+                                }"
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+    fun panel(id: Long = 0L): DetailPanel = live[id] ?: fail(Some(f"missing panel ${id}"))
+    public override fun close() {
+        calls?.close()
+        for (node in retained)
+            node.close()
+    }
+}

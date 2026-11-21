@@ -1,0 +1,159 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.graphics.*
+import scoop.math.max
+import scoop.math.min
+import scoop.ui.*
+
+internal class GridHeaderTarget(val key: GridHeaderKey, val pin: GridPin) {
+    fun viewKey(): ViewKey =
+        when (key) {
+            case Column(val id) -> ViewKey.Text(f"column:${id.encoded}")
+            case Group(val id) -> ViewKey.Text(f"group:${gridHeaderPin(pin)}:${id.value}")
+        }
+    fun automationId(): String =
+        when (key) {
+            case Column(val id) -> f"grid-header-${id.value}"
+            case Group(val id) -> f"grid-group-header-${gridHeaderPin(pin)}-${id.value}"
+        }
+}
+
+private fun gridHeaderPin(pin: GridPin): String =
+    when (pin) {
+        case None -> "center"
+        case Start -> "start"
+        case End -> "end"
+    }
+
+internal class GridHeaderItem(
+    val target: GridHeaderTarget,
+    val level: Long,
+    val title: String,
+    val first: Long,
+    val end: Long
+)
+
+internal class GridHeaderBox(
+    val x: Double,
+    val y: Double,
+    val width: Double,
+    val height: Double,
+    val clip: Rect,
+    val region: Rect
+)
+
+/** Leaves and group fragments stay siblings in one lazy identity domain. */
+internal class GridHeadersPlan(
+    val tree: GridHeaders,
+    columns: Array<GridColumnId>,
+    startCount: Long,
+    endStart: Long
+) {
+    private val lookup = HashMap<ViewKey, Long>()
+    private val assembled = assemble(columns, startCount, endStart)
+    val items: Array<GridHeaderItem> get() = assembled.items
+    val levels: Long get() = assembled.levels
+    val ancestors: Array<Array<Long>> get() = assembled.ancestors
+    private fun assemble(
+        columns: Array<GridColumnId>,
+        startCount: Long,
+        endStart: Long
+    ): GridHeaderItems {
+        val leaves = ArrayList<GridHeaderItem>()
+        val groups = HashMap<ViewKey, GridHeaderItem>()
+        val groupOrder = ArrayList<ViewKey>()
+        val parentKeys = ArrayList<Array<ViewKey>>()
+        var levels = 1L
+        for (at in 0L ..< columns.size) {
+            val entry = tree.get(GridHeaderKey.Column(columns[at]))
+            val pin =
+                if (at < startCount)
+                    GridPin.Start
+                else
+                    if (at >= endStart)
+                        GridPin.End
+                    else
+                        GridPin.None
+            leaves.add(
+                GridHeaderItem(GridHeaderTarget(entry.key, pin), entry.level, "", at, at + 1L)
+            )
+            levels = max(levels, entry.level + 1L)
+            val keys = ArrayList<ViewKey>()
+            for (parent in tree.ancestors(columns[at])) {
+                val target = GridHeaderTarget(parent.key, pin)
+                val key = target.viewKey()
+                val old = groups[key]
+                val first =
+                    when (old) {
+                        case Some(val item) -> item.first
+                        case None -> {
+                            groupOrder.add(key);
+                            at
+                        }
+                    }
+                groups.put(key, GridHeaderItem(target, parent.level, parent.title, first, at + 1L))
+                keys.add(key)
+            }
+            parentKeys.add(keys.toArray())
+        }
+        for (key in groupOrder) {
+            val item = groups[key]!!
+            leaves.add(item)
+            val keys = ArrayList<ViewKey>()
+            var parent = tree.get(item.target.key).parent
+            while (true) {
+                val ancestor = parent ?: break
+                keys.add(GridHeaderTarget(ancestor, item.target.pin).viewKey())
+                parent = tree.get(ancestor).parent
+            }
+            parentKeys.add(keys.toArray())
+        }
+        val items = leaves.toArray()
+        for (index in 0L ..< items.size)
+            lookup.put(items[index].target.viewKey(), index)
+        val ancestors =
+            Array<Array<Long>>(items.size) {
+                at -> Array<Long>(parentKeys[at].size) { index -> lookup[parentKeys[at][index]]!! }
+            }
+        return GridHeaderItems(items, levels, ancestors)
+    }
+    fun indexOf(key: ViewKey): Long? = lookup[key]
+    fun indexOf(target: GridHeaderTarget): Long? = indexOf(target.viewKey())
+    fun box(
+        index: Long,
+        columns: GridColumnLayout,
+        offset: Double,
+        rowHeight: Double,
+        totalHeight: Double
+    ): GridHeaderBox {
+        val item = items[index]
+        val top = min(totalHeight, item.level.toDouble() * rowHeight)
+        val height =
+            when (item.target.key) {
+                case Column(_) -> totalHeight - top
+                case Group(_) -> min(rowHeight, totalHeight - top)
+            }
+        val first = columns.box(item.first, offset, height)
+        val last = columns.box(item.end - 1L, offset, height)
+        val x = min(first.x, last.x)
+        val width = columns.prefix[item.end] - columns.prefix[item.first]
+        val region = columns.region(item.first, top, height)
+        val left = max(0.0, region.x + offset - x)
+        val right = min(width, region.x + region.width + offset - x)
+        return GridHeaderBox(
+            x,
+            top,
+            width,
+            height,
+            Rect(left, 0.0, max(0.0, right - left), height),
+            region
+        )
+    }
+}
+
+private class GridHeaderItems(
+    val items: Array<GridHeaderItem>,
+    val levels: Long,
+    val ancestors: Array<Array<Long>>
+)

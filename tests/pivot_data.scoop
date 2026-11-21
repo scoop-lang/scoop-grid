@@ -1,0 +1,196 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+internal struct PivotRecord(
+    val region: String,
+    val team: String,
+    val year: Long?,
+    val quarter: Long,
+    val amount: Long?,
+    val note: String
+)
+
+internal class PivotReads {
+    var amounts = 0L
+    var forbidden = false
+    var action: (() -> Unit)? = None
+}
+
+internal class PivotSource(
+    val rows: Array<PivotRecord>,
+    val reads: PivotReads = PivotReads()
+): TableSource<PivotRecord> {
+    public override val count: Long get() = rows.size
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(value)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): PivotRecord {
+        assertFalse(reads.forbidden, Some("presentation read a pivot record"))
+        return rows[index]
+    }
+}
+
+internal fun pivotRecords(): Array<PivotRecord> =
+    [
+        PivotRecord("North", "A", Some(10L), 1L, Some(9007199254740993L), "a"),
+        PivotRecord("South", "A", Some(10L), 1L, Some(7L), "b"),
+        PivotRecord("North", "A", Some(10L), 2L, Some(5L), "c"),
+        PivotRecord("North", "B", Some(2L), 1L, None, "d"),
+        PivotRecord("South", "B", Some(2L), 1L, Some(3L), "e"),
+        PivotRecord("North", "A", Some(10L), 1L, Some(2L), "f"),
+        PivotRecord("North", "B", None, 1L, Some(4L), "g"),
+        PivotRecord("South", "A", Some(10L), 2L, Some(6L), "h"),
+        PivotRecord("South", "B", Some(2L), 1L, None, "i")
+    ]
+
+internal fun pivotColumns(reads: PivotReads, sameLabels: Boolean = false): Array<
+    GridColumn<PivotRecord>
+> {
+    val longs = gridLongValues()
+    val years =
+        if (sameLabels)
+            GridValues<Long>(
+                longs.kind,
+                { _ -> "Year" },
+                longs.compare,
+                longs.literal,
+                longs.encode,
+                longs.missing,
+                longs.number
+            )
+        else
+            longs
+    val concatenate =
+        gridAggregation<String, String, String>(
+            GridAggregateId("join"),
+            "Join",
+            { "" },
+            { old, next -> f"${old}${next}" },
+            { value, _ -> value },
+            { value -> value },
+            { a, b -> a.compareTo(b) }
+        )
+    return [
+        gridColumn<PivotRecord, String>(
+            GridColumnId("region"),
+            "Region",
+            { it -> it.region },
+            gridTextValues(),
+            groupable = true,
+            pivotable = true
+        ),
+        gridColumn<PivotRecord, String>(
+            GridColumnId("team"),
+            "Team",
+            { it -> it.team },
+            gridTextValues(),
+            groupable = true,
+            pivotable = true
+        ),
+        gridColumn<PivotRecord, Long?>(
+            GridColumnId("year"),
+            "Year",
+            { it -> it.year },
+            nullableGridValues(years),
+            pivotable = true
+        ),
+        gridColumn<PivotRecord, Long>(
+            GridColumnId("quarter"),
+            "Quarter",
+            { it -> it.quarter },
+            longs,
+            pivotable = true
+        ),
+        gridColumn<PivotRecord, Long?>(
+            GridColumnId("amount"),
+            "Amount",
+            {
+                it ->
+                reads.amounts += 1L
+                reads.action?.invoke()
+                it.amount
+            },
+            nullableGridValues(longs),
+            aggregations =
+                [
+                    nullableGridAggregation(gridSumLongAggregation()),
+                    nullableGridAggregation(gridCountAggregation<Long>())
+                ]
+        ),
+        gridColumn<PivotRecord, String>(
+            GridColumnId("note"),
+            "Note",
+            { it -> it.note },
+            gridTextValues(),
+            aggregations = [concatenate]
+        )
+    ]
+}
+
+internal fun pivotQuery(nested: Boolean = false): GridQuery =
+    GridQuery(
+        grouping =
+            if (nested)
+                [GridColumnId("region"), GridColumnId("team")]
+            else
+                [GridColumnId("region")],
+        aggregations =
+            [
+                GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum")),
+                GridAggregationSelection(GridColumnId("note"), GridAggregateId("join"))
+            ],
+        pivot = Some(GridPivot([GridSort(GridColumnId("year")), GridSort(GridColumnId("quarter"))]))
+    )
+
+internal fun pivotPath(region: String, team: String? = None): GridGroupPath {
+    val part = GridGroupPart(GridColumnId("region"), GridLiteral.Text(region))
+    return GridGroupPath(
+        when (team) {
+            case Some(val value) -> [
+                part,
+                GridGroupPart(GridColumnId("team"), GridLiteral.Text(value))
+            ]
+            case None -> [part]
+        }
+    )
+}
+
+internal fun pivotId(
+    year: Long?,
+    quarter: Long,
+    metric: String = "amount",
+    operation: String = "sum"
+): GridColumnId =
+    GridColumnId(
+        GridColumnKey.Pivot(
+            GridPivotColumnKey(
+                [
+                    GridGroupPart(
+                        GridColumnId("year"),
+                        when (year) {
+                            case Some(val value) -> GridLiteral.Integer(value);
+                            case None -> GridLiteral.Empty
+                        }
+                    ),
+                    GridGroupPart(GridColumnId("quarter"), GridLiteral.Integer(quarter))
+                ],
+                GridAggregationSelection(GridColumnId(metric), GridAggregateId(operation))
+            )
+        )
+    )
+
+internal fun pivotValue(
+    model: DataGridState<PivotRecord>,
+    region: String,
+    column: GridColumnId
+): GridAggregateDisplay? =
+    groupingInfo(model.result.rows, pivotPath(region)).aggregates.total(column)

@@ -1,0 +1,89 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+import scoop.math.BigDecimal
+import scoop.ui.component.TableSource
+
+public class GridAggregations internal constructor(
+    public val selections: Array<GridAggregationSelection>,
+    private val values: HashMap<GridColumnId, GridAggregateValues>,
+    private val group: Long = 0L
+) {
+    public fun total(column: GridColumnId): GridAggregateDisplay? = values[column]?.display(group)
+    public fun numericTotal(column: GridColumnId): BigDecimal? =
+        values[column]?.number(group) ?: None
+    internal fun metric(column: GridColumnId): GridAggregateValues? = values[column]
+    internal fun atGroup(index: Long): GridAggregations =
+        GridAggregations(selections, values, index)
+}
+
+internal fun <Row> gridFindAggregation(
+    column: GridColumn<Row>,
+    id: GridAggregateId
+): GridColumnAggregation<Row>? {
+    for (value in column.aggregations)
+        if (value.id == id)
+            return Some(value)
+    return None
+}
+
+internal fun <Row> gridAggregate(
+    rows: TableSource<Row>,
+    columns: GridColumns<Row>,
+    selections: Array<GridAggregationSelection>
+): GridAggregations {
+    val runs = gridAggregateRuns(columns, selections)
+    for (run in runs)
+        run.ensure(0L)
+    if (runs.size > 0L)
+        for (index in 0L ..< rows.count) {
+            val row = rows.rowAt(index)
+            for (run in runs)
+                run.add(0L, row)
+        }
+    return gridFinishAggregates(selections, runs)
+}
+
+internal fun <Row> gridAggregateRuns(
+    columns: GridColumns<Row>,
+    selections: Array<GridAggregationSelection>
+): Array<GridRowAggregation<Row>> {
+    val seen = HashSet<GridColumnId>()
+    val runs = ArrayList<GridRowAggregation<Row>>()
+    for (selection in selections) {
+        gridRequire(seen.add(selection.column), "duplicate grid aggregate column")
+        val column = columns.get(selection.column)
+        val operation =
+            gridFindAggregation(column, selection.operation) ?:
+                throw IllegalArgumentException(Some("grid column does not allow this aggregation"))
+        runs.add(operation.start())
+    }
+    return runs.toArray()
+}
+
+internal fun <Row> gridFinishAggregates(
+    selections: Array<GridAggregationSelection>,
+    runs: Array<GridRowAggregation<Row>>
+): GridAggregations {
+    val results = HashMap<GridColumnId, GridAggregateValues>()
+    for (index in 0L ..< runs.size)
+        results.put(selections[index].column, runs[index].finish())
+    return GridAggregations(selections, results)
+}
+
+internal fun <Row> gridSurvivingAggregations(
+    values: Array<GridAggregationSelection>,
+    columns: GridColumns<Row>
+): Array<GridAggregationSelection> {
+    val kept = ArrayList<GridAggregationSelection>()
+    for (selection in values)
+        when (columns.find(selection.column)) {
+            case Some(val column) -> when (gridFindAggregation(column, selection.operation)) {
+                case Some(_) -> kept.add(selection)
+                case None -> {}
+            }
+            case None -> {}
+        }
+    return kept.toArray()
+}

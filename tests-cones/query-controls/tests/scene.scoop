@@ -1,0 +1,93 @@
+package scoop.grid.tests.querycontrols
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class QueryToolScene(private val probe: QueryToolProbe, scope: ComponentScope): Component(
+    scope
+) {
+    public override fun render(): View {
+        val probe = this.probe
+        return element(
+            { mount -> QueryToolPanel(probe, mount) },
+            [
+                gridQuickFilter(probe.model) {
+                    handle = Some(probe.handle)
+                    enabled = probe.enabled.value
+                    if (probe.localized.value)
+                        labels =
+                            GridQuickFilterLabels(
+                                placeholder = "Search rows",
+                                inputName = "Quick search",
+                                apply = "Apply",
+                                applyName = "Apply search",
+                                clear = "Clear",
+                                clearName = "Clear search"
+                            )
+                },
+                dataGrid(probe.model) {
+                    height = 240.0
+                    width = Some(640.0)
+                    rowHeight = 32.0
+                    headerHeight = 32.0
+                    handle = Some(probe.handle)
+                },
+                gridPager(probe.model) {
+                    handle = Some(probe.handle)
+                    enabled = probe.enabled.value
+                    pageSizes = [2L, 3L]
+                    if (probe.localized.value)
+                        labels =
+                            GridPagerLabels(
+                                all = "All records",
+                                size = { count -> f"size:${count}" },
+                                sizeName = "Rows per page",
+                                rows = { count -> f"total:${count}" },
+                                status =
+                                    {
+                                        count,
+                                        page,
+                                        pages -> f"total:${count}; page:${page}/${pages}"
+                                    },
+                                previous = "Back",
+                                next = "Forward",
+                                page = { number -> f"Page #${number}" },
+                                name = "Result pages"
+                            )
+                },
+                button("Outside", {})
+            ]
+        )
+    }
+}
+
+private class QueryToolPanel(private val probe: QueryToolProbe, scope: ComponentScope): Element<
+    Unit
+>(scope) {
+    init {
+        probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(640.0, 48.0)))
+        context.placeChild(0L, Point(0.0, 0.0))
+        context.measureChild(1L, Constraints.tight(Size(640.0, 240.0)))
+        context.placeChild(1L, Point(0.0, 48.0))
+        context.measureChild(2L, Constraints.tight(Size(640.0, 84.0)))
+        context.placeChild(2L, Point(0.0, 288.0))
+        context.measureChild(3L, Constraints.tight(Size(180.0, 48.0)))
+        context.placeChild(3L, Point(0.0, 372.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(640.0, 420.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted)
+                probe.accepted()
+        }
+    }
+}

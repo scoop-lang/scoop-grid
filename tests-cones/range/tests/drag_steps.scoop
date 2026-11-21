@@ -1,0 +1,217 @@
+package scoop.grid.tests.range
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+
+internal fun RangeProbe.advanceDrag() {
+    when (phase) {
+        case 43 -> resetDrag()
+        case 44 -> dragPress(180.0, 112.0)
+        case 45 -> dragMove(420.0, 176.0)
+        case 46 -> dragRelease()
+        case 47 -> dragPress(180.0, 144.0, true)
+        case 48 -> dragMove(60.0, 48.0)
+        case 49 -> dragRelease()
+        case 50 -> dragPress(60.0, 48.0)
+        case 51 -> dragMove(580.0, 304.0)
+        case 52 -> dragRelease()
+        case 53 -> dragClicks = clicks
+        case 54 -> dragPress(300.0, 144.0)
+        case 55 -> dragMove(420.0, 176.0)
+        case 56 -> dragRelease()
+        case 57 -> dragPress(180.0, 112.0)
+        case 58 -> dragMove(420.0, 176.0)
+        case 59 -> key(53)
+        case 60 -> dragMove(580.0, 304.0)
+        case 61 -> dragRelease()
+        case 62 -> dragPress(180.0, 112.0)
+        case 63 -> dragMove(420.0, 176.0)
+        case 64 -> enabled.value = false
+        case 65 -> dragMove(580.0, 304.0)
+        case 66 -> {
+            dragRelease();
+            enabled.value = true
+        }
+        case 67 -> dragPress(180.0, 112.0)
+        case 68 -> dragMove(420.0, 176.0)
+        case 69 -> assertTrue(
+            handle.setCellRange(Some(GridCellRange(rangeAddress(0L), rangeAddress(1L, 1L))))
+        )
+        case 70 -> dragMove(580.0, 304.0)
+        case 71 -> dragRelease()
+        case 72 -> dragPress(180.0, 112.0)
+        case 73 -> dragMove(420.0, 176.0)
+        case 74 -> {
+            records = rangeRows(10L);
+            model.replaceData(records)
+        }
+        case 75 -> dragMove(580.0, 304.0)
+        case 76 -> dragRelease()
+        case 77 -> resetDrag()
+        case 78 -> dragPress(180.0, 112.0)
+        case 79 -> dragMove(516.0, 112.0)
+        case 80 -> {}
+        case 81 -> dragMove(330.0, 176.0)
+        case 82 -> dragRelease()
+        case 83 -> {
+            beginDragIdle();
+            return
+        }
+        case 84 -> resetDrag(true)
+        case 85 -> dragPress(180.0, 112.0)
+        case 86 -> dragMove(180.0, 284.0)
+        case 87 -> {}
+        case 88 -> dragMove(-10.0, 112.0)
+        case 89 -> dragRelease()
+        case 90 -> resetDrag(rtl = true)
+        case 91 -> dragPress(460.0, 112.0)
+        case 92 -> dragMove(220.0, 176.0)
+        case 93 -> dragRelease()
+        case 94 -> resetDrag()
+        case 95 -> contact(1L, 0, 180.0, 176.0)
+        case 96 -> contact(1L, 1, 180.0, 112.0)
+        case 97 -> contact(1L, 3, 180.0, 112.0)
+        case 98 -> {
+            touchSelection.value = true;
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 99 -> contact(1L, 0, 180.0, 112.0)
+        case 100 -> contact(1L, 1, 420.0, 176.0)
+        case 101 -> contact(2L, 0, 300.0, 200.0)
+        case 102 -> contact(1L, 1, 580.0, 304.0)
+        case 103 -> {
+            contact(1L, 3, 580.0, 304.0);
+            contact(2L, 3, 300.0, 200.0)
+        }
+        case 104 -> contact(3L, 0, 180.0, 112.0, true)
+        case 105 -> contact(3L, 1, 420.0, 176.0, true)
+        case 106 -> contact(3L, 3, 420.0, 176.0, true)
+        case 107 -> dragPress(180.0, 112.0)
+        case 108 -> dragMove(420.0, 176.0)
+        case 109 -> assertTrue(outside.requestFocus())
+        case 110 -> dragMove(580.0, 304.0)
+        case 111 -> dragRelease()
+        case 112 -> {
+            assertTrue(handle.beginEdit(rangeAddress(2L, 1L)));
+            editor!!.state.replaceAll("bad")
+        }
+        case 113 -> dragPress(60.0, 48.0)
+        case 114 -> dragMove(580.0, 304.0)
+        case 115 -> dragRelease()
+        case 116 -> {
+            assertTrue(handle.cancelEdit());
+            dragPress(180.0, 112.0)
+        }
+        case 117 -> dragMove(420.0, 176.0)
+        case 118 -> touchSelection.value = false
+        case 119 -> dragMove(580.0, 304.0)
+        case 120 -> dragRelease()
+        case 121 -> dragPress(180.0, 112.0)
+        case 122 -> dragMove(420.0, 176.0)
+        else -> fail(Some("unexpected drag action"))
+    }
+    frame!!.requestFrame()
+}
+
+internal fun RangeProbe.inspectDrag() {
+    when (phase) {
+        case 43 -> assertEquals(None, model.cellRange)
+        case 44 -> assertEquals(None, model.cellRange)
+        case 45 -> {
+            selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+            assertEquals(Some(rangeAddress(2L, 1L)), handle.focusedCell)
+            assertEquals(None, handle.editingCell)
+        }
+        case 46 -> retry = handle.focusedCell != Some(rangeAddress(4L, 3L))
+        case 48 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(0L))
+        case 49 -> retry = handle.focusedCell != Some(rangeAddress(0L))
+        case 51 -> {
+            selectedRange(rangeAddress(0L), rangeAddress(11L, 79L))
+            assertEquals(Point(0.0, 0.0), scroll.offset)
+        }
+        case 52 -> retry = handle.focusedCell != Some(rangeAddress(11L, 79L))
+        case 55 -> selectedRange(rangeAddress(0L), rangeAddress(11L, 79L))
+        case 56 -> {
+            selectedRange(rangeAddress(0L), rangeAddress(11L, 79L))
+            assertEquals(dragClicks, clicks)
+        }
+        case 58 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 59 -> assertEquals(None, model.cellRange)
+        case 60 -> assertEquals(None, model.cellRange)
+        case 61 -> assertEquals(None, model.cellRange)
+        case 63 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 64 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 65 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 66 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 68 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 69 -> selectedRange(rangeAddress(0L), rangeAddress(1L, 1L))
+        case 70 -> selectedRange(rangeAddress(0L), rangeAddress(1L, 1L))
+        case 71 -> selectedRange(rangeAddress(0L), rangeAddress(1L, 1L))
+        case 73 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 74 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 75 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 76 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 80 -> {
+            retry = scroll.offset.x < 360.0
+            assertEquals(rangeAddress(2L, 1L), model.cellRange!!.anchor)
+            assertTrue(live.contains(rangeAddress(2L, 1L)))
+            assertTrue(live.size < 250L)
+            if (!retry)
+                assertTrue(model.cellRange!!.end.column != GridColumnId("c4"))
+        }
+        case 81 -> dragRange = model.cellRange
+        case 82 -> {
+            assertEquals(dragRange, model.cellRange)
+            retry = handle.focusedCell != Some(model.cellRange!!.end)
+        }
+        case 87 -> {
+            retry = scroll.offset.y < 160.0
+            assertEquals(rangeAddress(2L, 1L), model.cellRange!!.anchor)
+            assertTrue(live.contains(rangeAddress(2L, 1L)))
+            assertTrue(live.size < 250L)
+            dragRange = model.cellRange
+        }
+        case 88 -> {
+            assertEquals(dragRange, model.cellRange)
+            dragScroll = scroll.offset
+        }
+        case 89 -> {
+            assertEquals(dragRange, model.cellRange)
+            retry = handle.focusedCell != Some(model.cellRange!!.end)
+        }
+        case 92 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 93 -> retry = handle.focusedCell != Some(rangeAddress(4L, 3L))
+        case 96 -> {
+            assertEquals(None, model.cellRange)
+            assertTrue(scroll.offset.y > 0.0)
+        }
+        case 97 -> assertEquals(None, model.cellRange)
+        case 100 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 101 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 102 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 103 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 105 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 106 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 108 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 109 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 110 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 111 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 113 -> invalidDrag()
+        case 114 -> invalidDrag()
+        case 115 -> invalidDrag()
+        case 117 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 118 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 119 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 120 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        case 122 -> selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+        else -> {}
+    }
+}
+
+private fun RangeProbe.invalidDrag() {
+    selectedRange(rangeAddress(2L, 1L), rangeAddress(4L, 3L))
+    assertEquals(Some(rangeAddress(2L, 1L)), handle.editingCell)
+    assertEquals("bad", editor!!.state.text)
+}

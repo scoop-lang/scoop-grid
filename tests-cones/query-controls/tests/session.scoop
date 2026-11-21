@@ -1,0 +1,547 @@
+package scoop.grid.tests.querycontrols
+
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridQueryControlsWindowTest {
+    @Test
+    fun `native query controls preserve drafts pages and pending edits`() {
+        val probe = QueryToolProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(1, probe.submissions)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+internal class QueryToolProbe: Closeable {
+    private var rows = toolRows()
+    private var queryEvents = 0
+    private var expectedEvents = 0
+    private val original =
+        DataGridState(rows, toolColumns(this), toolQuery(), Some { _ -> queryEvents += 1 })
+    private val selected = state(original)
+    val model: DataGridState<QueryToolRow> get() = selected.value
+    val handle = DataGridHandle()
+    val enabled = state(true)
+    val localized = state(false)
+    var frame: ComponentScope? = None
+    var editor: GridTextEditor<Long>? = None
+    var submissions = 0
+    var finished = false
+    private val address = GridCellAddress(ViewKey.Number(0L), GridColumnId("amount"))
+    private var pending: GridCommit<QueryToolRow>? = None
+    private var pendingRows: TableRows<QueryToolRow>? = None
+    private var expected = toolQuery()
+    private var ordered: TableSource<QueryToolRow>? = None
+    private var phase = 0
+    private var waiting = false
+    private var retry = false
+    val diagnostic: String get() =
+        f"query controls phase=${phase}, waiting=${waiting}, retry=${retry}"
+    private var active: ActiveApplication? = None
+    private var window: Window? = None
+    private var ui: UiWindow? = None
+    private var calls: NativeCalls? = None
+    private var root: NativeNode? = None
+    private var view: ViewProbe? = None
+    private var field: NativeNode? = None
+    private var apply: NativeNode? = None
+    private var clear: NativeNode? = None
+    private var size: NativeNode? = None
+    private var next: NativeNode? = None
+    private var previous: NativeNode? = None
+    private var option: NativeNode? = None
+    private var header: NativeNode? = None
+    private val held = ArrayList<NativeNode>()
+
+    fun save(change: GridChange<QueryToolRow, Long>, completion: GridCommit<QueryToolRow>) {
+        submissions += 1
+        pending = Some(completion)
+        val current = rows
+        pendingRows =
+            Some(
+                TableRows(
+                    Array<TableRecord<QueryToolRow>>(current.count) {
+                        index ->
+                        val key = current.keyAt(index)
+                        TableRecord(
+                            key,
+                            if (key == change.address.row.dataKey!!)
+                                QueryToolRow(change.row.group, change.value)
+                            else
+                                current.rowAt(index)
+                        )
+                    }
+                )
+            )
+    }
+
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                active = Some(application)
+                application.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
+                )
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid query controls"
+                            size = LogicalSize(640.0, 420.0)
+                        }
+                    )
+                window = Some(native)
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> view = Some(ViewProbe(pointer))
+                            }
+                        }
+                    }
+                }
+                ui = host.attach(native, { mount -> QueryToolScene(this, mount) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(application.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(
+                Some(f"${diagnostic}, nativeFocus=${window?.isFocused ?: false}")
+            )
+            else -> {}
+        }
+    }
+
+    fun accepted() {
+        if (finished || waiting || !(window?.isFocused ?: false))
+            return
+        waiting = true
+        retry = false
+        when (phase) {
+            case 1 -> calls!!.post(next!!, phase)
+            case 3 -> calls!!.post(previous!!, phase, 2)
+            case 6 -> calls!!.post(field!!, phase, 2)
+            case 9 -> calls!!.post(apply!!, phase)
+            case 11 -> calls!!.post(field!!, phase, 1, "A")
+            case 14 -> calls!!.post(next!!, phase)
+            case 16 -> calls!!.post(field!!, phase, 1, "B")
+            case 20 -> calls!!.post(field!!, phase, 1, "B")
+            case 22 -> calls!!.post(apply!!, phase)
+            case 24 -> calls!!.post(clear!!, phase)
+            case 26 -> calls!!.post(size!!, phase)
+            case 28 -> calls!!.post(option!!, phase)
+            case 30 -> calls!!.post(size!!, phase)
+            case 32 -> calls!!.post(option!!, phase)
+            case 36 -> calls!!.post(size!!, phase)
+            case 38 -> calls!!.post(option!!, phase)
+            case 41 -> calls!!.post(next!!, phase)
+            case 44 -> calls!!.post(field!!, phase, 1, "B")
+            case 46 -> calls!!.post(apply!!, phase)
+            case 48 -> calls!!.post(apply!!, phase)
+            case 50 -> calls!!.post(apply!!, phase)
+            case 53 -> calls!!.post(apply!!, phase)
+            case 55 -> calls!!.post(clear!!, phase)
+            case 56 -> calls!!.post(field!!, phase, 1, "unsent")
+            case 60 -> calls!!.post(header!!, phase, 2)
+            case 62 -> calls!!.post(field!!, phase, 2)
+            case 64 -> calls!!.post(field!!, phase, 1, "A")
+            case 68 -> calls!!.post(apply!!, phase)
+            case 70 -> calls!!.post(size!!, phase)
+            case 72 -> calls!!.post(option!!, phase)
+            case 74 -> calls!!.post(clear!!, phase)
+            case 76 -> calls!!.post(next!!, phase)
+            case 78 -> calls!!.post(size!!, phase)
+            case 80 -> calls!!.post(option!!, phase)
+            case 84 -> calls!!.post(header!!, phase, 2)
+            else -> calls!!.post(root!!, phase, 20)
+        }
+    }
+
+    private fun keep(node: NativeNode): NativeNode {
+        held.add(node);
+        return node
+    }
+    private fun find(node: NativeNode, name: String, value: Boolean = false): NativeNode? {
+        if (
+            node.flag(0) &&
+                node.text(
+                    if (value)
+                        1
+                    else
+                        0,
+                    Some(name)
+                )
+        )
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val found = find(keep(node.child(index)), name, value)
+            when (found) {
+                case Some(_) -> return found;
+                case None -> {}
+            }
+        }
+        return None
+    }
+    private fun named(name: String): NativeNode =
+        find(root!!, name) ?: fail(Some(f"missing ${name} at ${phase}"))
+    private fun caption(text: String) {
+        when (find(root!!, text, true)) {
+            case Some(_) -> {}
+            case None -> {
+                named(text);
+                Unit
+            }
+        }
+    }
+    private fun value(text: String) {
+        assertTrue(field!!.text(1, Some(text)), Some(f"draft at ${phase}: ${text}"))
+    }
+    private fun pageControls() {
+        previous = Some(named("上一页"))
+        next = Some(named("下一页"))
+    }
+
+    private fun inspect(tag: Int) {
+        assertEquals(phase, tag)
+        assertEquals(expected, model.query, Some(f"query at ${phase}"))
+        assertEquals(expectedEvents, queryEvents, Some(f"query notifications at ${phase}"))
+        when (phase) {
+            case 0 -> {
+                field = Some(named("快速筛选"))
+                apply = Some(named("应用快速筛选"))
+                clear = Some(named("清除快速筛选"))
+                size = Some(named("每页条数"))
+                pageControls()
+                ordered = Some(model.result.ordered)
+                caption("共 5 条 · 1 / 3 页")
+                assertFalse(previous!!.flag(1));
+                assertTrue(next!!.flag(1))
+                assertEquals(2L, model.result.rows.count)
+            }
+            case 2 -> {
+                caption("共 5 条 · 2 / 3 页")
+                assertTrue(model.result.ordered === ordered!!)
+                assertTrue(previous!!.flag(1));
+                assertTrue(next!!.flag(1))
+            }
+            case 4 -> retry = !previous!!.flag(4)
+            case 5 -> caption("共 5 条 · 1 / 3 页")
+            case 7 -> retry = !field!!.flag(4)
+            case 8 -> {
+                value("中😀");
+                assertFalse(apply!!.flag(1))
+            }
+            case 10 -> value("")
+            case 12 -> value("A")
+            case 13 -> {
+                caption("共 3 条 · 1 / 2 页");
+                assertEquals(2L, model.result.rows.count)
+            }
+            case 15 -> {
+                caption("共 3 条 · 2 / 2 页");
+                assertFalse(next!!.flag(1));
+                assertEquals(1L, model.result.rows.count)
+            }
+            case 17 -> value("B")
+            case 18 -> value("B")
+            case 19 -> {
+                value("Z");
+                caption("共 0 条")
+                assertEquals(0L, model.result.rows.count)
+                assertFalse(next!!.flag(1));
+                assertFalse(previous!!.flag(1))
+            }
+            case 21 -> value("B")
+            case 23 -> {
+                value("B");
+                caption("共 2 条 · 1 / 1 页");
+                assertTrue(clear!!.flag(1))
+            }
+            case 25 -> {
+                value("");
+                caption("共 5 条 · 1 / 3 页")
+            }
+            case 27 -> option = Some(named("全部"))
+            case 29 -> {
+                caption("共 5 条");
+                assertEquals(5L, model.result.rows.count)
+                assertTrue(size!!.text(1, Some("全部")))
+                when (find(root!!, "下一页")) {
+                    case Some(_) -> fail(Some("disabled pagination still has navigation"));
+                    case None -> {}
+                }
+            }
+            case 31 -> option = Some(named("3 / 页"))
+            case 33 -> {
+                pageControls();
+                caption("共 5 条 · 1 / 2 页");
+                assertEquals(3L, model.result.rows.count)
+            }
+            case 35 -> {
+                assertTrue(size!!.text(1, Some("4 / 页")));
+                assertEquals(4L, model.result.rows.count)
+            }
+            case 37 -> {
+                named("4 / 页");
+                option = Some(named("2 / 页"))
+            }
+            case 39 -> assertEquals(2L, model.result.rows.count)
+            case 40 -> {
+                assertFalse(field!!.flag(1));
+                assertFalse(size!!.flag(1));
+                assertFalse(next!!.flag(1))
+            }
+            case 43 -> retry = handle.focusedCell != Some(address) || handle.isPending
+            case 45 -> value("B")
+            case 47 -> {
+                value("B");
+                assertEquals(Some(address), handle.editingCell)
+                assertTrue(handle.editError != None);
+                assertEquals(0, submissions)
+            }
+            case 49 -> {
+                value("B");
+                assertTrue(handle.isSubmitting);
+                assertEquals(1, submissions)
+                assertFalse(apply!!.flag(1));
+                assertFalse(size!!.flag(1))
+            }
+            case 52 -> {
+                value("B");
+                assertEquals(None, handle.editingCell);
+                assertEquals(7L, rows.rowAt(0L).amount)
+            }
+            case 54 -> {
+                value("B");
+                caption("共 2 条");
+                assertEquals(2L, model.result.rows.count)
+            }
+            case 57 -> value("unsent")
+            case 59 -> {
+                value("B");
+                assertEquals("", original.query.quickFilter)
+                header = Some(named("Group"))
+            }
+            case 61 -> retry = !header!!.flag(4)
+            case 63 -> retry = !field!!.flag(4)
+            case 65 -> value("A")
+            case 66 -> {
+                if (!field!!.text(0, Some("Quick search"))) {
+                    retry = true
+                    return
+                }
+                assertTrue(field!!.flag(4))
+                assertTrue(apply!!.text(0, Some("Apply search")))
+                assertTrue(clear!!.text(0, Some("Clear search")))
+                assertTrue(size!!.text(0, Some("Rows per page")))
+                assertTrue(size!!.text(1, Some("All records")))
+                assertTrue(model.result.ordered === ordered!!)
+                value("A")
+                caption("total:2")
+            }
+            case 69 -> {
+                value("A")
+                caption("total:3")
+                assertEquals(3L, model.result.rows.count)
+            }
+            case 71 -> option = Some(named("size:2"))
+            case 73 -> {
+                previous = Some(named("Back"))
+                next = Some(named("Forward"))
+                named("Page #1")
+                named("Result pages")
+                caption("total:3; page:1/2")
+                assertTrue(size!!.text(1, Some("size:2")))
+                assertFalse(previous!!.flag(1))
+                assertTrue(next!!.flag(1))
+            }
+            case 75 -> caption("total:5; page:1/3")
+            case 77 -> caption("total:5; page:2/3")
+            case 79 -> option = Some(named("All records"))
+            case 81 -> {
+                caption("total:5")
+                assertFalse(next!!.flag(0))
+                assertFalse(previous!!.flag(0))
+            }
+            case 83 -> {
+                assertTrue(field!!.text(0, Some("快速筛选")))
+                assertTrue(apply!!.text(0, Some("应用快速筛选")))
+                assertTrue(clear!!.text(0, Some("清除快速筛选")))
+                assertTrue(size!!.text(0, Some("每页条数")))
+                assertTrue(size!!.text(1, Some("全部")))
+                assertTrue(model.result.ordered === ordered!!)
+                value("")
+                caption("共 5 条")
+            }
+            case 85 -> retry = !header!!.flag(4)
+            else -> {}
+        }
+    }
+
+    private fun expect(value: GridQuery) {
+        if (expected != value)
+            expectedEvents += 1
+        expected = value
+    }
+    private fun expectPage(index: Long, size: Long) {
+        expect(expected.withPagination(GridPagination.Page(index, size)))
+    }
+    private fun expectQuick(text: String) {
+        val pagination =
+            when (expected.pagination) {
+                case Page(_, val size) -> GridPagination.Page(0L, size)
+                case Disabled -> GridPagination.Disabled
+            }
+        expect(GridQuery(expected.sorting, expected.filter, text, pagination))
+    }
+    private fun key(code: Int) {
+        val text =
+            when (code) {
+                case 36 -> "\r"
+                case 49 -> " "
+                case 53 -> "\u001b"
+                else -> fail(Some("unexpected query controls key"))
+            }
+        assertEquals(0, queryToolKey(window!!, code, text))
+    }
+
+    private fun completed(tag: Int, result: Int) {
+        assertEquals(phase, tag)
+        assertEquals(
+            if (phase == 9 || phase == 41 || phase == 50)
+                0
+            else
+                1,
+            result
+        )
+        waiting = false
+        if (retry) {
+            frame!!.requestFrame();
+            return
+        }
+        phase += 1
+        when (phase) {
+            case 1 -> expectPage(1L, 2L)
+            case 5 -> {
+                expectPage(0L, 2L);
+                key(49)
+            }
+            case 8 -> assertTrue(view!!.preedit())
+            case 10 -> key(53)
+            case 13 -> {
+                expectQuick("A");
+                key(36)
+            }
+            case 14 -> expectPage(1L, 2L)
+            case 18 -> {
+                expectPage(0L, 2L);
+                model.setPage(0L)
+            }
+            case 19 -> {
+                expectQuick("Z");
+                model.setQuery(expected)
+            }
+            case 22 -> expectQuick("B")
+            case 24 -> expectQuick("")
+            case 28 -> expect(expected.withPagination(GridPagination.Disabled))
+            case 32 -> expectPage(0L, 3L)
+            case 34 -> {
+                expectPage(0L, 4L);
+                model.setPagination(GridPagination.Page(0L, 4L))
+            }
+            case 38 -> expectPage(0L, 2L)
+            case 40 -> enabled.value = false
+            case 42 -> {
+                enabled.value = true
+                expect(expected.withPagination(GridPagination.Disabled))
+                model.setPagination(GridPagination.Disabled)
+                assertTrue(handle.beginEdit(address))
+                editor!!.state.replaceAll("bad")
+            }
+            case 48 -> editor!!.state.replaceAll("7")
+            case 51 -> {
+                val next = pendingRows!!
+                assertTrue(pending!!.accept(next))
+                rows = next
+            }
+            case 53 -> expectQuick("B")
+            case 55 -> expectQuick("")
+            case 58 -> {
+                expected = GridQuery(quickFilter = "B")
+                selected.value =
+                    DataGridState(rows, toolColumns(this), expected, Some { _ -> queryEvents += 1 })
+            }
+            case 66 -> {
+                ordered = Some(model.result.ordered)
+                localized.value = true
+            }
+            case 68 -> expectQuick("A")
+            case 72 -> expectPage(0L, 2L)
+            case 74 -> expectQuick("")
+            case 76 -> expectPage(1L, 2L)
+            case 80 -> expect(expected.withPagination(GridPagination.Disabled))
+            case 82 -> {
+                ordered = Some(model.result.ordered)
+                localized.value = false
+            }
+            case 86 -> {
+                finished = true
+                ui!!.close()
+                active!!.requestExit()
+                return
+            }
+            else -> {}
+        }
+        frame!!.requestFrame()
+    }
+
+    public override fun close() {
+        calls?.close()
+        for (node in held)
+            node.close()
+        view?.close()
+    }
+}

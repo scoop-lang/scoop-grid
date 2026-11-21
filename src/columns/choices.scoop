@@ -1,0 +1,153 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.window.accessibility.*
+import scoop.ui.component.row as columnsRow
+import scoop.ui.component.checkbox as columnsCheckbox
+import scoop.ui.component.button as columnsButton
+
+internal class GridColumnChoices<Row>(
+    val input: GridColumnsPanelProps<Row>,
+    val entries: Array<GridColumnState>,
+    val selected: GridColumnId,
+    val appearance: GridAppearance,
+    val enabled: Boolean,
+    private val choose: (GridColumnId) -> Boolean,
+    private val show: (GridColumnId, Boolean) -> Unit
+): ItemSource {
+    private val positions = HashMap<GridColumnId, Long>()
+    private val viewPositions = HashMap<ViewKey, Long>()
+    private val filtered = HashSet<GridColumnId>()
+    private val sorting = HashMap<GridColumnId, String>()
+    private val titles =
+        Array<String>(entries.size) { index -> input.state.column(entries[index].id).title }
+    init {
+        for (index in 0L ..< entries.size) {
+            positions.put(entries[index].id, index)
+            viewPositions.put(entries[index].id.viewKey, index)
+        }
+        collectGridFilterColumns(input.state.query.filter, filtered)
+        val sorts = input.state.query.sorting
+        for (index in 0L ..< sorts.size) {
+            sorting.put(sorts[index].column, input.labels.sort(index + 1L, sorts[index].direction))
+        }
+    }
+    public override val count: Long get() = entries.size
+    public override fun keyAt(index: Long): ViewKey = entries[index].id.viewKey
+    public override fun indexOfKey(key: ViewKey): Long? = viewPositions[key]
+    private fun chooseKey(key: ViewKey): Boolean {
+        val at = viewPositions[key] ?: return false
+        return choose(entries[at].id)
+    }
+    private fun caption(id: GridColumnId): String {
+        var text = titles[positions[id]!!]
+        when (val sort = sorting[id]) {
+            case Some(val label) -> text = input.labels.decorate(text, label);
+            case None -> {}
+        }
+        if (id in filtered)
+            text = input.labels.decorate(text, input.labels.filtered)
+        return text
+    }
+    private fun visible(id: GridColumnId): Boolean {
+        val states = input.state.columnState
+        val index = gridColumnStateIndex(states, id) ?: return false
+        return states[index].visible
+    }
+    public override fun build(index: Long): View {
+        val entry = entries[index]
+        val title = titles[index]
+        val source = this
+        return columnsRow {
+            add(
+                columnsCheckbox(
+                    binding(
+                        { source.visible(entry.id) },
+                        { visible -> source.show(entry.id, visible) }
+                    )
+                ) {
+                    enabled = source.enabled
+                    theme = source.input.theme
+                    semantics =
+                        gridColumnControl(
+                            entry.id,
+                            "visible",
+                            source.input.labels.visibleName(title)
+                        )
+                }
+            )
+            item(
+                columnsButton(
+                    source.caption(entry.id),
+                    {
+                        source.choose(entry.id);
+                        Unit
+                    }
+                ) {
+                    enabled = source.enabled
+                    variant =
+                        if (entry.id == source.selected)
+                            ButtonVariant.Secondary
+                        else
+                            ButtonVariant.Ghost
+                    fonts = source.input.fonts
+                    theme = source.input.theme
+                    semantics =
+                        gridColumnControl(entry.id, "choose", source.input.labels.chooseName(title))
+                }
+            ) { grow = 1.0 }
+            spacing = 6.0 * source.appearance.density
+            alignment = CrossAlignment.Center
+        }
+    }
+    fun semantics(): ItemSemantics =
+        ItemSemantics(
+            this,
+            {
+                index ->
+                val entry = entries[index]
+                Some(
+                    SemanticItemProperties(
+                        name = Some(caption(entry.id)),
+                        automationId = Some(f"grid-columns-${entry.id.value}-item"),
+                        enabled = enabled,
+                        selected = Some(entry.id == selected),
+                        focusable = true
+                    )
+                )
+            },
+            search = SemanticItemSearch(name = true, automationId = true),
+            selection = Some(SemanticCollectionSelection([SemanticItemKey.Text(selected.encoded)])),
+            setSelected =
+                Some {
+                    key,
+                    checked -> if (!enabled || !checked)
+                        SemanticActionResult.Rejected
+                    else
+                        when (key) {
+                            case Text(val id) -> if (chooseKey(ViewKey.Text(id)))
+                                SemanticActionResult.Completed
+                            else
+                                SemanticActionResult.Unavailable
+                            else -> SemanticActionResult.InvalidArgument
+                        }
+                }
+        )
+}
+
+private fun collectGridFilterColumns(filter: GridFilter, result: HashSet<GridColumnId>) {
+    when (filter) {
+        case All -> {}
+        case Column(val id, _) -> {
+            result.add(id);
+            Unit
+        }
+        case And(val children) -> for (child in children)
+            collectGridFilterColumns(child, result)
+        case Or(val children) -> for (child in children)
+            collectGridFilterColumns(child, result)
+    }
+}

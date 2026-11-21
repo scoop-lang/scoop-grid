@@ -1,0 +1,308 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class OperationRows(public override val count: Long): TableSource<Long> {
+    var reads = 0L
+    var onRead: (() -> Unit)? = None
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val at) -> if (at >= 0L && at < count)
+                Some(at)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long {
+        reads += 1L
+        val action = onRead
+        onRead = None
+        action?.invoke()
+        return index
+    }
+}
+
+private fun operationAddress(row: Long, column: String = "id"): GridCellAddress =
+    GridCellAddress(ViewKey.Number(row), GridColumnId(column))
+
+private fun operationColumns(): Array<GridColumn<Long>> =
+    [
+        gridColumn<Long, Long>(
+            GridColumnId("id"),
+            "ID",
+            { row -> row },
+            gridLongValues(),
+            cell = Some { _ -> throw IllegalStateException(Some("operation built a view")) }
+        ),
+        gridColumn<Long, String>(
+            GridColumnId("text"),
+            "Text",
+            { row -> f"记录 AbC ${row}" },
+            gridTextValues()
+        ),
+        gridActionColumn<Long>(
+            GridColumnId("action"),
+            "Action",
+            { _ -> throw IllegalStateException(Some("operation built an action view")) }
+        ),
+        gridColumn<Long, String>(
+            GridColumnId("private"),
+            "Private",
+            { _ -> "secret" },
+            gridTextValues(),
+            exportable = false
+        )
+    ]
+
+@Test
+private class GridFindExportTest {
+    @Test
+    fun `find moves in logical order wraps once and keeps query selection and range unchanged`() {
+        val rows = OperationRows(3L)
+        val model =
+            DataGridState(rows, operationColumns(), rowSelection = GridRowSelectionMode.Multiple)
+        model.setRowSelected(ViewKey.Number(2L), true)
+        val range = Some(GridCellRange(operationAddress(0L), operationAddress(1L, "text")))
+        assertTrue(model.setCellRange(range))
+        val query = model.query
+        val result = model.result
+        assertEquals(
+            Some(GridFindMatch(operationAddress(0L, "text"), false)),
+            model.findCell("abc")
+        )
+        assertEquals(
+            Some(GridFindMatch(operationAddress(1L, "text"), false)),
+            model.findCell("记录", Some(operationAddress(0L, "text")))
+        )
+        assertEquals(
+            Some(GridFindMatch(operationAddress(2L, "text"), true)),
+            model.findCell("AbC", Some(operationAddress(0L, "text")), backwards = true)
+        )
+        assertEquals(None, model.findCell("abc", matchCase = true))
+        assertEquals(None, model.findCell("secret"))
+        assertEquals(None, model.findCell("记录", Some(operationAddress(2L, "text")), wrap = false))
+        val before = rows.reads
+        assertEquals(None, model.findCell(""))
+        assertEquals(before, rows.reads)
+        assertTrue(query === model.query)
+        assertTrue(result === model.result)
+        assertTrue(model.isRowSelected(ViewKey.Number(2L)))
+        assertEquals(range, model.cellRange)
+    }
+
+    @Test
+    fun `find uses the current page fixed identities visible columns and valid fallback boundaries`() {
+        val model =
+            DataGridState(
+                OperationRows(6L),
+                operationColumns(),
+                query = GridQuery(pagination = GridPagination.Page(1L, 2L)),
+                pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(5L)])
+            )
+        assertEquals(Some(GridFindMatch(operationAddress(0L), false)), model.findCell("0"))
+        assertEquals(None, model.findCell("记录 AbC 1"))
+        assertEquals(
+            Some(GridFindMatch(operationAddress(5L, "text"), false)),
+            model.findCell("记录", backwards = true)
+        )
+        model.setColumnState(GridColumnState(GridColumnId("text"), visible = false))
+        assertEquals(None, model.findCell("记录"))
+        assertEquals(
+            Some(GridFindMatch(operationAddress(2L), false)),
+            model.findCell("2", Some(operationAddress(2L, "text")))
+        )
+        model.setColumnState(GridColumnState(GridColumnId("text"), pin = GridPin.Start))
+        assertEquals(Some(GridFindMatch(operationAddress(0L, "text"), false)), model.findCell("0"))
+        assertEquals(
+            Some(GridFindMatch(operationAddress(0L), false)),
+            model.findCell("0", Some(operationAddress(0L, "text")))
+        )
+        assertEquals(
+            Some(GridFindMatch(operationAddress(5L), false)),
+            model.findCell("5", Some(operationAddress(99L)), backwards = true)
+        )
+    }
+
+    @Test
+    fun `a huge find visits only needed rows and does not multiply dimensions`() {
+        val rows = OperationRows(9223372036854775807L)
+        val model = DataGridState(rows, operationColumns())
+        assertEquals(
+            Some(GridFindMatch(operationAddress(0L), true)),
+            model.findCell("0", Some(operationAddress(rows.count - 1L, "private")))
+        )
+        assertEquals(1L, rows.reads)
+        assertEquals(
+            Some(GridFindMatch(operationAddress(rows.count - 1L, "text"), true)),
+            model.findCell("9223372036854775806", Some(operationAddress(0L)), backwards = true)
+        )
+        assertEquals(2L, rows.reads)
+        assertEquals(
+            None,
+            model.findCell("x", Some(operationAddress(rows.count - 1L, "private")), wrap = false)
+        )
+        assertEquals(2L, rows.reads)
+    }
+
+    @Test
+    fun `find and CSV retain their captured result when a formatter publishes new data`() {
+        val rows = OperationRows(3L)
+        val model = DataGridState(rows, operationColumns())
+        val replacement = TableRows([TableRecord(ViewKey.Number(99L), 99L)])
+        rows.onRead = Some { model.replaceData(replacement) }
+        assertEquals(
+            Some(GridFindMatch(operationAddress(2L, "text"), false)),
+            model.findCell("AbC 2")
+        )
+        assertEquals(1L, model.result.rows.count)
+        model.replaceData(rows)
+        rows.onRead = Some { model.replaceData(replacement) }
+        assertEquals("ID,Text\r\n0,记录 AbC 0\r\n1,记录 AbC 1\r\n2,记录 AbC 2\r\n", model.exportCsv())
+        assertEquals(1L, model.result.rows.count)
+    }
+
+    @Test
+    fun `export distinguishes presented pages all filtered data selected records and fixed rows`() {
+        val model =
+            DataGridState(
+                OperationRows(5L),
+                operationColumns(),
+                query =
+                    GridQuery(
+                        [GridSort(GridColumnId("id"), GridSortDirection.Descending)],
+                        pagination = GridPagination.Page(0L, 2L)
+                    ),
+                pinnedRows = GridPinnedRows([ViewKey.Number(1L)], [ViewKey.Number(4L)]),
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        val columns = Some([GridColumnId("id")])
+        assertEquals("ID\r\n1\r\n3\r\n4\r\n", model.exportCsv(GridCsvOptions(columns = columns)))
+        assertEquals(
+            "ID\r\n3\r\n",
+            model.exportCsv(GridCsvOptions(includePinnedRows = false, columns = columns))
+        )
+        assertEquals(
+            "ID\r\n1\r\n3\r\n2\r\n0\r\n4\r\n",
+            model.exportCsv(GridCsvOptions(GridExportScope.AllFiltered, columns = columns))
+        )
+        assertEquals(
+            "3\r\n2\r\n0\r\n",
+            model.exportCsv(
+                GridCsvOptions(
+                    GridExportScope.AllFiltered,
+                    includeHeaders = false,
+                    includePinnedRows = false,
+                    columns = columns
+                )
+            )
+        )
+        model.setSelectedRows([ViewKey.Number(4L), ViewKey.Number(0L), ViewKey.Number(2L)])
+        model.setQuery(
+            GridQuery(
+                filter =
+                    GridFilter.Column(
+                        GridColumnId("id"),
+                        GridCondition.In([GridLiteral.Integer(2L), GridLiteral.Integer(4L)])
+                    )
+            )
+        )
+        assertEquals(
+            "ID\r\n4\r\n0\r\n2\r\n",
+            model.exportCsv(GridCsvOptions(GridExportScope.SelectedRows, columns = columns))
+        )
+        assertEquals(
+            "ID\r\n0\r\n2\r\n",
+            model.exportCsv(
+                GridCsvOptions(
+                    GridExportScope.SelectedRows,
+                    includePinnedRows = false,
+                    columns = columns
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `export honors logical and explicit column order visibility and exportability`() {
+        val model = DataGridState(OperationRows(1L), operationColumns())
+        model.setColumnState(
+            GridColumnState(GridColumnId("text"), visible = false, pin = GridPin.Start)
+        )
+        assertEquals("ID\r\n0\r\n", model.exportCsv())
+        assertEquals(
+            "Text,ID\r\n记录 AbC 0,0\r\n",
+            model.exportCsv(GridCsvOptions(includeHiddenColumns = true))
+        )
+        assertEquals(
+            "ID,Text\r\n0,记录 AbC 0\r\n",
+            model.exportCsv(
+                GridCsvOptions(
+                    includeHiddenColumns = true,
+                    columns =
+                        Some(
+                            [
+                                GridColumnId("action"),
+                                GridColumnId("id"),
+                                GridColumnId("private"),
+                                GridColumnId("text")
+                            ]
+                        )
+                )
+            )
+        )
+        assertFailsWith<IllegalArgumentException> {
+            model.exportCsv(
+                GridCsvOptions(columns = Some([GridColumnId("id"), GridColumnId("id")]))
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.exportCsv(GridCsvOptions(columns = Some([GridColumnId("gone")])))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.exportCsv(GridCsvOptions(columns = Some([GridColumnId("private")])))
+        }
+    }
+
+    @Test
+    fun `selected export reads only selected keys from a huge source and empty output keeps its contract`() {
+        val rows = OperationRows(100000000L)
+        val model =
+            DataGridState(rows, operationColumns(), rowSelection = GridRowSelectionMode.Multiple)
+        model.setSelectedRows([ViewKey.Number(90000000L), ViewKey.Number(2L)])
+        assertEquals(
+            "ID\r\n90000000\r\n2\r\n",
+            model.exportCsv(
+                GridCsvOptions(GridExportScope.SelectedRows, columns = Some([GridColumnId("id")]))
+            )
+        )
+        assertEquals(2L, rows.reads)
+        model.clearRowSelection()
+        assertEquals("ID,Text\r\n", model.exportCsv(GridCsvOptions(GridExportScope.SelectedRows)))
+        assertEquals(
+            "",
+            model.exportCsv(GridCsvOptions(GridExportScope.SelectedRows, includeHeaders = false))
+        )
+        assertEquals(2L, rows.reads)
+    }
+
+    @Test
+    fun `unmounted find rejects and read failures do not publish model changes`() {
+        val handle = DataGridHandle()
+        when (handle.findCell("a")) {
+            case Rejected(_) -> {}
+            else -> fail(Some("unmounted find was accepted"))
+        }
+        val rows = OperationRows(2L)
+        val model = DataGridState(rows, operationColumns())
+        val result = model.result
+        val range = Some(GridCellRange(operationAddress(0L), operationAddress(1L)))
+        model.setCellRange(range)
+        rows.onRead = Some { throw IllegalStateException(Some("read failed")) }
+        assertFailsWith<IllegalStateException> { model.exportCsv() }
+        assertTrue(result === model.result)
+        assertEquals(range, model.cellRange)
+    }
+}

@@ -1,0 +1,266 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class CellRangeRows(
+    public override val count: Long,
+    private val offset: Long = 0L,
+    private val swapped: Boolean = false
+): TableSource<Long> {
+    var reads = 0L
+    var keys = 0L
+    var failKeys = false
+    var onRead: (() -> Unit)? = None
+    private fun position(index: Long): Long =
+        if (swapped && index == 1L)
+            2L
+        else
+            if (swapped && index == 2L)
+                1L
+            else
+                index
+    public override fun keyAt(index: Long): ViewKey {
+        keys += 1L
+        if (failKeys && index == 1L)
+            throw IllegalStateException(Some("failed row identity"))
+        return ViewKey.Number(position(index))
+    }
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(position(value))
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long {
+        reads += 1L
+        val action = onRead
+        onRead = None
+        action?.invoke()
+        return position(index) + offset
+    }
+}
+
+private fun rangeAddress(row: Long, column: String = "a"): GridCellAddress =
+    GridCellAddress(ViewKey.Number(row), GridColumnId(column))
+
+private fun rangeColumns(): Array<GridColumn<Long>> =
+    [
+        gridColumn<Long, Long>(
+            GridColumnId("a"),
+            "A",
+            { row -> row },
+            gridLongValues(),
+            cell = Some { _ -> throw IllegalStateException(Some("range copy created a view")) }
+        ),
+        gridActionColumn<Long>(
+            GridColumnId("actions"),
+            "Actions",
+            { _ -> throw IllegalStateException(Some("range copy created an action view")) }
+        ),
+        gridColumn<Long, String>(GridColumnId("b"), "B", { row -> f"值${row}" }, gridTextValues()),
+        gridColumn<Long, Long>(
+            GridColumnId("private"),
+            "Private",
+            { row -> row },
+            gridLongValues(),
+            exportable = false
+        )
+    ]
+
+@Test
+private class GridCellRangeTest {
+    @Test
+    fun `huge ranges only retain endpoints and invalid targets preserve the old range`() {
+        val rows = CellRangeRows(Long.MAX_VALUE)
+        val model =
+            DataGridState(rows, rangeColumns(), rowSelection = GridRowSelectionMode.Multiple)
+        val result = model.result
+        val notifications = ArrayList<Int>()
+        val observer = model.observe { notifications.add(1) }
+        val range = GridCellRange(rangeAddress(Long.MAX_VALUE - 1L, "b"), rangeAddress(0L))
+        assertTrue(model.setCellRange(Some(range)))
+        assertTrue(model.isCellInRange(rangeAddress(50000000L, "actions")))
+        assertFalse(model.isCellInRange(rangeAddress(50000000L, "private")))
+        assertFalse(model.setCellRange(Some(GridCellRange(rangeAddress(-1L), rangeAddress(1L)))))
+        assertFalse(
+            model.setCellRange(Some(GridCellRange(rangeAddress(0L, "absent"), rangeAddress(1L))))
+        )
+        assertEquals(Some(range), model.cellRange)
+        assertEquals(0L, rows.reads)
+        assertEquals(0L, rows.keys)
+        assertEquals(0L, notifications.size)
+        assertTrue(result === model.result)
+        assertEquals(0L, model.selectedRowKeys.size)
+        assertFailsWith<IllegalArgumentException> {
+            GridCellRange(GridCellAddress(ViewKey.Position, GridColumnId("a")), rangeAddress(1L))
+        }
+        model.clearCellRange()
+        assertFalse(model.isCellInRange(rangeAddress(1L)))
+        assertEquals(None, model.copyText())
+        observer.close()
+    }
+
+    @Test
+    fun `width and geometry-only freezing retain a range while logical columns invalidate it`() {
+        val rows = CellRangeRows(5L)
+        val model = DataGridState(rows, rangeColumns())
+        val range = GridCellRange(rangeAddress(0L), rangeAddress(4L, "b"))
+        assertTrue(model.setCellRange(Some(range)))
+        model.setColumnState(
+            GridColumnState(GridColumnId("a"), width = Some(160.0), pin = GridPin.Start)
+        )
+        assertEquals(Some(range), model.cellRange)
+        model.setColumnState(GridColumnState(GridColumnId("b"), visible = false))
+        assertEquals(None, model.cellRange)
+        assertFalse(model.setCellRange(Some(range)))
+        model.setColumnState(GridColumnState(GridColumnId("b")))
+        assertTrue(model.setCellRange(Some(range)))
+        model.moveColumn(GridColumnId("b"), 1L)
+        assertEquals(None, model.cellRange)
+        assertEquals(0L, rows.reads)
+        assertEquals(0L, rows.keys)
+    }
+
+    @Test
+    fun `query changes clear a rectangle even when the same records remain in place`() {
+        val model = DataGridState(CellRangeRows(5L), rangeColumns())
+        val range = GridCellRange(rangeAddress(0L), rangeAddress(4L, "b"))
+        assertTrue(model.setCellRange(Some(range)))
+        model.setQuery(GridQuery())
+        assertEquals(Some(range), model.cellRange)
+        model.toggleSort(GridColumnId("a"))
+        assertEquals(None, model.cellRange)
+        assertTrue(model.setCellRange(Some(range)))
+        model.setQuery(GridQuery(quickFilter = "值"))
+        assertEquals(None, model.cellRange)
+        assertTrue(model.setCellRange(Some(range)))
+        model.setPagination(GridPagination.Page(0L, 5L))
+        assertEquals(None, model.cellRange)
+        assertTrue(model.setCellRange(Some(range)))
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(GridQuery([GridSort(GridColumnId("actions"))]))
+        }
+        assertEquals(Some(range), model.cellRange)
+        model.pinRow(ViewKey.Number(0L), GridRowPin.Top)
+        assertEquals(None, model.cellRange)
+    }
+
+    @Test
+    fun `data replacement compares interior identities without reading values and fails atomically`() {
+        val original = CellRangeRows(5L)
+        val model = DataGridState(original, rangeColumns())
+        val range = GridCellRange(rangeAddress(0L), rangeAddress(4L, "b"))
+        assertTrue(model.setCellRange(Some(range)))
+        val changed = CellRangeRows(5L, 100L)
+        model.replaceData(changed)
+        assertEquals(Some(range), model.cellRange)
+        assertEquals(0L, changed.reads)
+        assertEquals(5L, changed.keys)
+        assertEquals(
+            Some("100\t\t值100\n101\t\t值101\n102\t\t值102\n103\t\t值103\n104\t\t值104"),
+            model.copyText()
+        )
+        val failed = CellRangeRows(5L)
+        failed.failKeys = true
+        assertFailsWith<IllegalStateException> { model.replaceData(failed) }
+        assertTrue(model.source === changed)
+        assertEquals(Some(range), model.cellRange)
+        val reordered = CellRangeRows(5L, swapped = true)
+        model.replaceData(reordered)
+        assertEquals(None, model.cellRange)
+        assertEquals(0L, reordered.reads)
+        val inactive = CellRangeRows(100000000L)
+        model.replaceData(inactive)
+        assertEquals(0L, inactive.keys)
+        assertEquals(0L, inactive.reads)
+    }
+
+    @Test
+    fun `column replacement preserves stable logical columns and rejects invalid updates atomically`() {
+        val model = DataGridState(CellRangeRows(3L), rangeColumns())
+        val range = GridCellRange(rangeAddress(0L), rangeAddress(2L, "b"))
+        assertTrue(model.setCellRange(Some(range)))
+        model.replaceColumns(rangeColumns())
+        assertEquals(Some(range), model.cellRange)
+        val before = model.columns
+        assertFailsWith<IllegalArgumentException> { model.replaceColumns([before[0L], before[0L]]) }
+        assertEquals(Some(range), model.cellRange)
+        assertTrue(before === model.columns)
+        model.replaceColumns([before[0L], before[2L], before[3L]])
+        assertEquals(None, model.cellRange)
+    }
+
+    @Test
+    fun `copy keeps empty fields headers unicode and integer precision in one rectangle`() {
+        val columns = rangeColumns()
+        val rich =
+            gridColumn<Long, String>(
+                GridColumnId("b"),
+                "B\t头",
+                { _ -> "中文🙂\t\"尾\"\n次行" },
+                gridTextValues()
+            )
+        val rows = CellRangeRows(2L, 9007199254740993L)
+        val model = DataGridState(rows, [columns[0L], columns[1L], rich, columns[3L]])
+        assertEquals(None, model.copyText(Some(rangeAddress(2L))))
+        assertEquals(Some("9007199254740993"), model.copyText(Some(rangeAddress(0L))))
+        assertTrue(
+            model.setCellRange(Some(GridCellRange(rangeAddress(1L, "private"), rangeAddress(0L))))
+        )
+        assertEquals(
+            Some(
+                "A\t\t\"B\t头\"\t\n9007199254740993\t\t\"中文🙂\t\"\"尾\"\"\n次行\"\t\n9007199254740994\t\t\"中文🙂\t\"\"尾\"\"\n次行\"\t"
+            ),
+            model.copyText(Some(rangeAddress(1L)), true)
+        )
+        assertEquals(3L, rows.reads)
+        model.clearCellRange()
+        assertEquals(Some(""), model.copyText(Some(rangeAddress(0L, "actions"))))
+        assertEquals(Some(""), model.copyText(Some(rangeAddress(0L, "private"))))
+    }
+
+    @Test
+    fun `copy follows fixed row and frozen logical column order without duplicate records`() {
+        val model =
+            DataGridState(
+                CellRangeRows(5L),
+                rangeColumns(),
+                GridQuery(pagination = GridPagination.Page(0L, 2L)),
+                pinnedRows = GridPinnedRows([ViewKey.Number(4L)], [ViewKey.Number(0L)])
+            )
+        model.setColumnStates(
+            [
+                GridColumnState(GridColumnId("a"), pin = GridPin.End),
+                GridColumnState(GridColumnId("actions")),
+                GridColumnState(GridColumnId("b"), pin = GridPin.Start),
+                GridColumnState(GridColumnId("private"), visible = false)
+            ]
+        )
+        assertTrue(model.setCellRange(Some(GridCellRange(rangeAddress(0L), rangeAddress(4L, "b")))))
+        assertEquals(
+            Some("B\t\tA\n值4\t\t4\n值1\t\t1\n值0\t\t0"),
+            model.copyText(includeHeaders = true)
+        )
+    }
+
+    @Test
+    fun `copy uses its captured rows and columns through callbacks that publish a new model`() {
+        val source = CellRangeRows(3L)
+        val model = DataGridState(source, rangeColumns())
+        assertTrue(model.setCellRange(Some(GridCellRange(rangeAddress(0L), rangeAddress(1L, "b")))))
+        source.onRead =
+            Some {
+                model.replaceData(CellRangeRows(4L, 100L))
+                val columns = model.columns
+                model.replaceColumns([columns[0L]])
+            }
+        assertEquals(Some("0\t\t值0\n1\t\t值1"), model.copyText())
+        assertEquals(None, model.cellRange)
+        assertEquals(1L, model.columns.size)
+        assertEquals(2L, source.reads)
+    }
+}

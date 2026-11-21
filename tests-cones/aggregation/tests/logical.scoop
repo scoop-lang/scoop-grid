@@ -1,0 +1,217 @@
+package scoop.grid.tests.aggregation
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.ui.*
+
+private fun AggregationProbe.findTotalTable(node: NativeNode): NativeNode? {
+    if (node.text(2, Some("AXTable")))
+        return Some(node)
+    for (index in 0L ..< node.count) {
+        val found = findTotalTable(keep(node.child(index)))
+        when (found) {
+            case Some(_) -> return found
+            case None -> {}
+        }
+    }
+    return None
+}
+
+internal fun AggregationProbe.acceptedTotal() {
+    if (finished || waiting || !(window?.isFocused ?: false))
+        return
+    waiting = true
+    retry = false
+    when (phase) {
+        case 1 -> calls!!.post(totalCell!!, phase, 2)
+        case 3 -> calls!!.post(totalRow!!, phase, 16)
+        case 18 -> calls!!.post(totalCell!!, phase, 2)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun AggregationProbe.inspectTotal(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            totalTable = findTotalTable(root!!)
+            assertEquals(3L, totalTable!!.rowCount)
+            totalCell = Some(keep(totalTable!!.cell(2L, 0L)!!))
+            totalRow = Some(keep(totalCell!!.parent()!!))
+            assertTrue(totalRow!!.flag(1))
+            assertFalse(totalRow!!.flag(19))
+            assertFalse(totalRow!!.flag(20))
+            assertEquals(0L, totalTable!!.selectedCount)
+            assertTrue(totalCell!!.text(1, Some("10")))
+            assertTrue(totalRow!!.text(0, Some("Grand total")))
+            assertTrue(keep(totalTable!!.cell(2L, 1L)!!).text(1, Some("Grand total")))
+            when (root!!.find("grid-row-selection-2")) {
+                case Some(val node) -> {
+                    keep(node);
+                    fail(Some("a total has a business checkbox"))
+                }
+                case None -> {}
+            }
+            totals = Some(model.result.aggregates)
+        }
+        case 2 -> {
+            retry = handle.focusedCell != Some(totalAddress)
+            if (!retry) {
+                assertTrue(totalCell!!.flag(4))
+                assertEquals(None, handle.editingCell)
+            }
+        }
+        case 4 -> {
+            assertEquals(0L, model.selectedRowKeys.size)
+            assertEquals(Some(totalAddress), handle.focusedCell)
+            assertEquals(0, submissions)
+        }
+        case 5 -> {
+            assertTrue(totalCell!!.same(keep(totalTable!!.cell(0L, 0L)!!)))
+            assertTrue(totalRow!!.text(0, Some("Summary")))
+            assertTrue(keep(totalTable!!.cell(0L, 1L)!!).text(1, Some("Summary")))
+            assertTrue(totals!! === model.result.aggregates)
+        }
+        case 6 -> {
+            assertEquals(4L, totalTable!!.rowCount)
+            assertTrue(totalCell!!.same(keep(totalTable!!.cell(0L, 0L)!!)))
+            assertTrue(totalCell!!.text(1, Some("10")))
+            assertEquals(2L, model.result.pageRows.count)
+            assertEquals(1L, model.result.bottomCount)
+        }
+        case 7 -> {
+            assertEquals(2L, model.selectedRowKeys.size)
+            assertFalse(model.isRowSelected(ViewKey.Number(2L)))
+            assertEquals(2L, totalTable!!.selectedCount)
+            assertFalse(totalRow!!.flag(19))
+            assertFalse(totalRow!!.flag(20))
+        }
+        case 8 -> retry = !focused
+        case 9 -> {
+            assertTrue(handle.editError != None)
+            assertEquals(Some(address), handle.editingCell)
+            assertEquals("bad", editor!!.state.text)
+            assertTrue(totalCell!!.text(1, Some("10")))
+            retry = !focused
+        }
+        case 10 -> retry = handle.focusedCell != Some(totalAddress)
+        case 11 -> {
+            assertTrue(totalCell!!.same(keep(totalTable!!.cell(0L, 0L)!!)))
+            assertTrue(totalCell!!.text(1, Some("11")))
+            assertFalse(totalRow!!.flag(19))
+            assertFalse(totalRow!!.flag(20))
+            assertEquals(Some(totalAddress), handle.focusedCell)
+        }
+        case 12 -> {
+            assertEquals(Some("11"), model.copyText())
+            assertEquals(Some(totalAddress), model.findCell("11")?.address)
+        }
+        case 13 -> {
+            assertEquals(2L, totalTable!!.rowCount)
+            assertEquals(None, model.cellRange)
+            assertFalse(retiredTotal!!.flag(0))
+            assertFalse(totalRow!!.flag(0))
+        }
+        case 14 -> {
+            totalCell = Some(keep(totalTable!!.cell(2L, 0L)!!))
+            totalRow = Some(keep(totalCell!!.parent()!!))
+            assertFalse(totalCell!!.same(retiredTotal!!))
+            assertFalse(retiredTotal!!.flag(0))
+            assertTrue(totalCell!!.text(1, Some("11")))
+        }
+        case 15 -> retry = handle.focusedCell != Some(totalAddress)
+        case 16 -> assertFalse(totalCell!!.flag(1))
+        case 17 -> assertTrue(totalCell!!.flag(1))
+        case 19 -> retry = handle.focusedCell != Some(totalAddress)
+        case 20 -> {
+            assertTrue(keep(totalTable!!.cell(0L, 0L)!!).same(totalCell!!))
+            assertEquals(0L, model.result.totalRows)
+            assertEquals(1L, totalTable!!.rowCount)
+            assertTrue(totalCell!!.text(1, Some("")))
+            assertTrue(totalRow!!.text(0, Some("All empty")))
+        }
+        case 21 -> assertTrue(totalCell!!.text(1, Some("0")))
+        case 22 -> {
+            assertEquals(1L, totalTable!!.rowCount)
+            assertFalse(totalCell!!.flag(0))
+            assertTrue(totalRow!!.flag(0))
+            assertTrue(keep(totalTable!!.cell(0L, 0L)!!).text(1, Some("All empty")))
+        }
+        case 23 -> {
+            assertFalse(handle.isAttached)
+            assertFalse(totalRow!!.flag(0))
+            assertFalse(totalTable!!.flag(0))
+        }
+        else -> {}
+    }
+}
+
+internal fun AggregationProbe.completedTotal(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(1, result)
+    waiting = false
+    if (retry) {
+        frame!!.requestFrame()
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 5 -> {
+            assertFalse(handle.beginEdit(totalAddress))
+            when (handle.pasteCell(totalAddress, "99")) {
+                case Rejected(_) -> {}
+                else -> fail(Some("a total accepted editing"))
+            }
+            assertEquals(0, submissions)
+            model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "Summary")))
+        }
+        case 6 -> {
+            model.toggleSort(GridColumnId("amount"))
+            model.pinRow(ViewKey.Number(2L), GridRowPin.Bottom)
+        }
+        case 7 -> assertTrue(model.selectPageRows(true))
+        case 8 -> assertTrue(handle.beginEdit(address))
+        case 9 -> {
+            editor!!.state.replaceAll("bad")
+            assertFalse(handle.focusCell(totalAddress))
+        }
+        case 10 -> {
+            assertTrue(handle.cancelEdit())
+            assertTrue(handle.focusCell(totalAddress))
+        }
+        case 11 -> model.replaceData(aggregateRows([5L, 6L]))
+        case 12 -> assertTrue(handle.setCellRange(Some(GridCellRange(totalAddress, totalAddress))))
+        case 13 -> {
+            retiredTotal = totalCell
+            model.setQuery(model.query.withTotals(GridTotals()))
+        }
+        case 14 -> model.setQuery(
+            model.query.withTotals(GridTotals(GridTotalPlacement.After, "Summary"))
+        )
+        case 15 -> assertTrue(handle.focusCell(totalAddress))
+        case 16 -> enabled.value = false
+        case 17 -> enabled.value = true
+        case 20 -> {
+            model.replaceData(aggregateRows([]))
+            model.setQuery(
+                model.query.withTotals(GridTotals(GridTotalPlacement.Before, "All empty"))
+            )
+        }
+        case 21 -> model.setAggregation(GridColumnId("amount"), Some(GridAggregateId("count")))
+        case 22 -> model.replaceColumns([model.column(GridColumnId("category"))])
+        case 23 -> {
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+            return
+        }
+        case 24 -> {
+            finished = true
+            active!!.requestExit()
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}

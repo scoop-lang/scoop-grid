@@ -1,0 +1,151 @@
+package scoop.grid.tests.slots
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class SlotsScene(private val probe: SlotsProbe, scope: ComponentScope): Component(scope) {
+    public override fun render(): View {
+        val probe = this.probe
+        return element(
+            { scope -> SlotsLayout(probe, scope) },
+            [
+                direction(
+                    dataGrid(probe.model) {
+                        width = Some(640.0)
+                        height = probe.height.value
+                        headerHeight = 32.0
+                        rowHeight = 32.0
+                        handle = Some(probe.handle)
+                        scroll = Some(probe.scroll)
+                        enabled = probe.enabled.value
+                        labels = probe.labels.value
+                        if (probe.toolbarShown.value)
+                            toolbar =
+                                Some(
+                                    slotView(
+                                        button("Toolbar", { probe.toolbarClicks += 1 }) {
+                                            focus = FocusOptions(Some(probe.toolbarFocus))
+                                            semantics =
+                                                ComponentSemantics(
+                                                    automationId = Some("slot-toolbar")
+                                                )
+                                        },
+                                        40.0
+                                    )
+                                )
+                        if (probe.footerShown.value)
+                            footer =
+                                Some(
+                                    slotView(
+                                        button("Footer", { probe.footerClicks += 1 }) {
+                                            semantics =
+                                                ComponentSemantics(
+                                                    automationId = Some("slot-footer")
+                                                )
+                                        },
+                                        32.0
+                                    )
+                                )
+                        if (probe.loading.value)
+                            loading =
+                                Some(
+                                    slotView(
+                                        label("Fetching records") {
+                                            semantics =
+                                                ComponentSemantics(
+                                                    automationId = Some("slot-loading")
+                                                )
+                                        },
+                                        24.0
+                                    )
+                                )
+                        if (probe.failed.value)
+                            error =
+                                Some(
+                                    slotView(
+                                        button(
+                                            "Retry",
+                                            {
+                                                probe.retries += 1
+                                                probe.failed.value = false
+                                                probe.loading.value = false
+                                                probe.enabled.value = true
+                                            }
+                                        ) {
+                                            semantics =
+                                                ComponentSemantics(
+                                                    automationId = Some("slot-error")
+                                                )
+                                        },
+                                        32.0
+                                    )
+                                )
+                        empty =
+                            Some(
+                                slotView(
+                                    button("Clear filter", { probe.model.setQuery(GridQuery()) }) {
+                                        semantics =
+                                            ComponentSemantics(automationId = Some("slot-empty"))
+                                    },
+                                    40.0,
+                                    Some(180.0)
+                                )
+                            )
+                    },
+                    probe.direction.value
+                )
+            ]
+        )
+    }
+}
+
+private class SlotsLayout(private val probe: SlotsProbe, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    init {
+        probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val child =
+            context.measureChild(0L, Constraints(maxWidth = Some(640.0), maxHeight = Some(360.0)))
+        probe.gridSize = child.size
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(640.0, 360.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, measured: Unit) {
+        context.children()
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted)
+                probe.accepted()
+        }
+    }
+}
+
+private class SlotSize(val height: Double, val width: Double?)
+
+private fun slotView(content: View, height: Double, width: Double? = None): View =
+    element(SlotSize(height, width), { props, scope -> FixedSlot(props, scope) }, [content])
+
+private class FixedSlot(private val props: Props<SlotSize>, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val size =
+            constraints.constrain(
+                Size(props.value.width ?: constraints.maxWidth ?: 640.0, props.value.height)
+            )
+        context.measureChild(0L, Constraints.tight(size))
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(LayoutMetrics(size), Unit)
+    }
+    public override fun scene(context: SceneContext, measured: Unit) {
+        context.children()
+    }
+}

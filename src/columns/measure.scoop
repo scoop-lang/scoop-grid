@@ -1,0 +1,178 @@
+package scoop.grid
+
+import scoop.ui.*
+
+private class GridColumnContent<Row>(
+    val fit: GridColumnFit,
+    val id: GridColumnId,
+    val model: DataGridState<Row>,
+    val definitions: Array<GridColumn<Row>>,
+    val states: Array<GridColumnState>,
+    val result: GridResult<Row>,
+    val appearance: GridAppearance,
+    val scroll: ScrollState
+) {
+    val fontRevision = appearance.fonts.revision
+}
+
+/** Keeps request state outside measurement; only Accepted publishes the measured width. */
+internal class GridColumnSizing<Row>(private val session: GridSession<Row>): Closeable {
+    private var input: GridRootProps<Row>? = None
+    private var accepted: GridMeasurePlan? = None
+    private val active = state<GridColumnContent<Row>?>(None)
+
+    fun update(value: GridRootProps<Row>) {
+        when (input) {
+            case Some(val old) -> if (
+                old.input.state !== value.input.state || old.scroll !== value.scroll
+            )
+                accepted = None
+            case None -> {}
+        }
+        input = Some(value)
+        when (active.value) {
+            case Some(val pending) -> if (!pending.fit.isPending || !valid(pending, value))
+                cancelCurrent()
+            case None -> {}
+        }
+    }
+
+    fun begin(id: GridColumnId): GridColumnFit {
+        val current = input ?: return gridRejectedColumnFit("网格未挂载")
+        if (!session.active || !current.input.enabled)
+            return gridRejectedColumnFit("网格未挂载或已禁用")
+        val plan = accepted ?: return gridRejectedColumnFit("请等待网格完成布局")
+        if (plan.columns.viewport <= 0.0 || plan.headerHeight + plan.bands.available <= 0.0)
+            return gridRejectedColumnFit("网格没有可见区域")
+        val model = current.input.state
+        if (
+            current.columns.definitions !==
+                model.columns ||
+                current.columns.states !==
+                model.columnState
+        )
+            return gridRejectedColumnFit("请等待当前列配置完成布局")
+        when (val error = session.columnActions.prepare(model, id)) {
+            case Some(val message) -> return gridRejectedColumnFit(message)
+            case None -> {}
+        }
+        cancelCurrent()
+        val fit = GridColumnFit(onComplete = Some { session.requestLayout() })
+        active.value =
+            Some(
+                GridColumnContent(
+                    fit,
+                    id,
+                    model,
+                    model.columns,
+                    model.columnState,
+                    model.result,
+                    current.columns.appearance,
+                    current.scroll
+                )
+            )
+        session.requestLayout()
+        return fit
+    }
+
+    private fun valid(pending: GridColumnContent<Row>, value: GridRootProps<Row>): Boolean =
+        value.input.enabled &&
+            !session.submitting &&
+            session.editingCell ==
+            None &&
+            value.input.state ===
+            pending.model &&
+            pending.model.columns ===
+            pending.definitions &&
+            pending.model.columnState ===
+            pending.states &&
+            pending.model.result ===
+            pending.result &&
+            value.rows.source ===
+            pending.result.rows &&
+            value.columns.appearance ===
+            pending.appearance &&
+            pending.appearance.fonts.revision ==
+            pending.fontRevision &&
+            value.scroll ===
+            pending.scroll
+
+    fun probe(value: GridRootProps<Row>, plan: GridMeasurePlan): GridColumnProbe? {
+        val pending = active.value ?: return None
+        if (
+            !pending.fit.isPending ||
+                !valid(pending, value) ||
+                plan.columns.viewport <=
+                0.0 ||
+                plan.headerHeight +
+                plan.bands.available <=
+                0.0
+        )
+            return None
+        val column = value.columns.indexOf(pending.id) ?: return None
+        val rows = plan.bands.visible(plan.scroll.presentationOffset.y, 0.0, plan.columns.viewport)
+        return Some(GridColumnProbe(pending.fit, column, rows))
+    }
+
+    fun accept(plan: GridMeasurePlan, value: GridRootProps<Row>, measured: GridColumnMeasured?) {
+        val current = input ?: return
+        if (
+            current.input.state !==
+                value.input.state ||
+                value.columns.definitions !==
+                value.input.state.columns ||
+                value.columns.states !==
+                value.input.state.columnState ||
+                value.rows.source !==
+                value.input.state.result.rows
+        )
+            return
+        accepted = Some(plan)
+        val pending = active.value ?: return
+        if (
+            !pending.fit.isPending ||
+                !valid(pending, current) ||
+                !valid(pending, value) ||
+                plan.columns.viewport <=
+                0.0 ||
+                plan.headerHeight +
+                plan.bands.available <=
+                0.0
+        )
+            return cancelCurrent()
+        val result = measured ?: return
+        if (result.fit !== pending.fit)
+            return
+        val size =
+            session.columnActions.resizeSize(pending.model, pending.id) ?: return cancelCurrent()
+        val width = size.constrain(result.width)
+        val entry = pending.states[gridColumnStateIndex(pending.states, pending.id)!!]
+        active.value = None
+        val changed =
+            session.columnActions.change(
+                GridColumnState(entry.id, entry.visible, Some(width), entry.pin)
+            )
+        pending.fit.complete(
+            when (changed) {
+                case Applied -> GridColumnFitResult.Applied(width)
+                case Rejected(val message) -> GridColumnFitResult.Rejected(message)
+            }
+        )
+    }
+
+    private fun cancelCurrent() {
+        when (active.value) {
+            case Some(val pending) -> {
+                active.value = None
+                pending.fit.cancel()
+            }
+            case None -> {}
+        }
+    }
+
+    public override fun close() {
+        cancelCurrent()
+        input = None
+        accepted = None
+    }
+}

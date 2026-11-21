@@ -1,0 +1,128 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+
+@Test
+private class GridDetailsModelTest {
+    @Test
+    fun `sparse detail metadata preserves a huge lazy source and disjoint identities`() {
+        val source = DetailSource(100000000L)
+        val model = DataGridState(source, detailColumns(), details = Some(detailDefinition<Long>()))
+        model.setExpandedDetails(
+            [ViewKey.Number(99999999L), ViewKey.Number(0L), ViewKey.Number(90000000L)]
+        )
+        val rows = model.result.rows
+        assertEquals(100000003L, rows.count)
+        assertEquals(100000000L, model.result.totalRows)
+        assertEquals(3L, model.result.detailCount)
+        assertEquals(Some(1L), rows.indexOfKey(detailKey(0L)))
+        assertEquals(Some(90000002L), rows.indexOfKey(detailKey(90000000L)))
+        assertEquals(Some(100000002L), rows.indexOfKey(detailKey(99999999L)))
+        for (
+            at in [0L, 1L, 2L, 90000000L, 90000001L, 90000002L, 90000003L, 100000001L, 100000002L]
+        ) {
+            assertEquals(Some(at), rows.indexOfKey(rows.keyAt(at)))
+            assertEquals(rows.keyAt(at), rows.infoAt(at).key.viewKey)
+        }
+        assertEquals(Some("Record details"), rows.infoAt(1L).label)
+        assertEquals(None, rows.infoAt(1L).dataKey)
+        assertEquals(0L, source.reads)
+        assertTrue(source.lookups < 40L)
+        when (rows.rowAt(90000002L)) {
+            case Detail(val value, val info) -> {
+                assertEquals(90000000L, value)
+                assertEquals(ViewKey.Number(value), info.parent)
+            }
+            else -> fail(Some("expected detail payload"))
+        }
+        assertEquals(1L, source.reads)
+        assertFalse(detailKey(7L).hasCells)
+        assertTrue(GridRowKey.Data(ViewKey.Text("x:n7")).viewKey != detailKey(7L).viewKey)
+        assertTrue(GridRowKey.Detail(ViewKey.Text("7")).viewKey != detailKey(7L).viewKey)
+    }
+
+    @Test
+    fun `detail installation validates keys and leaves the current result unchanged on failure`() {
+        val model = DataGridState(DetailSource(5L), detailColumns())
+        assertFalse(model.setDetailExpanded(ViewKey.Number(0L), true))
+        assertFailsWith<IllegalArgumentException> { model.setExpandedDetails([ViewKey.Number(0L)]) }
+        model.setDetails(Some(detailDefinition<Long>()))
+        model.setExpandedDetails([ViewKey.Number(1L), ViewKey.Number(3L)])
+        val result = model.result
+        for (
+            keys in [
+                [ViewKey.Position],
+                [ViewKey.Number(5L)],
+                [ViewKey.Number(1L), ViewKey.Number(1L)]
+            ]
+        )
+            assertFailsWith<IllegalArgumentException> { model.setExpandedDetails(keys) }
+        assertFalse(model.setDetailExpanded(ViewKey.Position, true))
+        assertFalse(model.setDetailExpanded(ViewKey.Number(9L), false))
+        model.setExpandedDetails([ViewKey.Number(3L), ViewKey.Number(1L)])
+        assertTrue(result === model.result)
+        model.setDetails(None)
+        assertEquals(0L, model.expandedDetails.size)
+        assertEquals(0L, model.result.detailCount)
+        assertEquals(5L, model.result.rows.count)
+    }
+
+    @Test
+    fun `detail changes reuse business aggregates and reject stale preparations`() {
+        val source = DetailSource(5L)
+        val model =
+            DataGridState(
+                source,
+                detailColumns(),
+                query =
+                    GridQuery(
+                        aggregations =
+                            [GridAggregationSelection(GridColumnId("id"), GridAggregateId("sum"))]
+                    ),
+                details = Some(detailDefinition<Long>())
+            )
+        val aggregate = model.result.aggregates
+        val ordered = model.result.ordered
+        val query = model.query
+        val reads = source.reads
+        model.setDetailExpanded(ViewKey.Number(1L), true)
+        assertTrue(aggregate === model.result.aggregates)
+        assertTrue(ordered === model.result.ordered)
+        assertTrue(query === model.query)
+        assertEquals(reads, source.reads)
+        val prior = model.result
+        source.onLookup = Some { throw IllegalStateException(Some("lookup failed")) }
+        assertFailsWith<IllegalStateException> { model.setExpandedDetails([ViewKey.Number(2L)]) }
+        assertTrue(prior === model.result)
+        source.onLookup = Some { model.setPagination(GridPagination.Page(1L, 2L)) }
+        assertFailsWith<IllegalStateException> { model.setExpandedDetails([ViewKey.Number(2L)]) }
+        assertEquals(GridPagination.Page(1L, 2L), model.query.pagination)
+        assertTrue(model.isDetailExpanded(ViewKey.Number(1L)))
+        assertFalse(model.isDetailExpanded(ViewKey.Number(2L)))
+    }
+
+    @Test
+    fun `actual row count overflow is rejected without materializing the source`() {
+        val source = DetailSource(Long.MAX_VALUE)
+        val model = DataGridState(source, detailColumns(), details = Some(detailDefinition<Long>()))
+        assertFailsWith<IllegalArgumentException> {
+            model.setDetailExpanded(ViewKey.Number(0L), true)
+        }
+        assertEquals(0L, model.expandedDetails.size)
+        assertEquals(Long.MAX_VALUE, model.result.rows.count)
+        assertEquals(0L, source.reads)
+        val near =
+            DataGridState(
+                DetailSource(Long.MAX_VALUE - 1L),
+                detailColumns(),
+                details = Some(detailDefinition<Long>()),
+                expandedDetails = [ViewKey.Number(Long.MAX_VALUE - 2L)]
+            )
+        assertEquals(Long.MAX_VALUE, near.result.rows.count)
+        assertEquals(
+            Some(Long.MAX_VALUE - 1L),
+            near.result.rows.indexOfKey(detailKey(Long.MAX_VALUE - 2L))
+        )
+    }
+}

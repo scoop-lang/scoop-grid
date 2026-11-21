@@ -1,0 +1,58 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+public class GridResult<Row> internal constructor(
+    public val rows: GridRowSource<Row>,
+    public val pageRows: TableSource<Row>,
+    public val ordered: TableSource<Row>,
+    public val totalRows: Long,
+    public val pageCount: Long,
+    public val topCount: Long,
+    public val bottomCount: Long,
+    public val aggregates: GridAggregations,
+    public val rootCount: Long,
+    public val pageUnit: GridPageUnit,
+    public val detailCount: Long = 0L,
+    public val external: GridExternalAvailability? = None,
+    public val availableRows: GridRowSource<Row> = rows
+) {
+    public val bodyCount: Long get() = rows.count - topCount - bottomCount
+}
+
+internal class GridOrderedRows<Row>(
+    private val source: TableSource<Row>,
+    private val indices: Array<Long>
+): TableSource<Row> {
+    private val positions = HashMap<ViewKey, Long>()
+    init {
+        for (index in 0L ..< indices.size)
+            positions.put(source.keyAt(indices[index]), index)
+    }
+    public override val count: Long get() = indices.size
+    public override fun keyAt(index: Long): ViewKey = source.keyAt(indices[index])
+    public override fun rowAt(index: Long): Row = source.rowAt(indices[index])
+    public override fun indexOfKey(key: ViewKey): Long? = positions[key]
+}
+
+internal class GridPageRows<Row>(
+    private val source: TableSource<Row>,
+    private val start: Long,
+    public override val count: Long
+): TableSource<Row> {
+    private fun offset(index: Long): Long {
+        gridRequire(index >= 0L && index < count, "grid row index is out of range")
+        return start + index
+    }
+    public override fun keyAt(index: Long): ViewKey = source.keyAt(offset(index))
+    public override fun rowAt(index: Long): Row = source.rowAt(offset(index))
+    public override fun indexOfKey(key: ViewKey): Long? {
+        val index = source.indexOfKey(key) ?: return None
+        return if (index >= start && index - start < count)
+            Some(index - start)
+        else
+            None
+    }
+}

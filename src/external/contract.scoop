@@ -1,0 +1,168 @@
+package scoop.grid
+
+import scoop.ui.ViewKey
+import scoop.ui.state
+import scoop.ui.component.TableSource
+import scoop.ui.component.TableColumnSize
+
+public class GridExternalFilter public constructor(
+    public val column: GridColumnId,
+    public val operations: Array<GridFilterOperator>,
+    public val values: ((GridQuery) -> Array<GridFilterValue>)? = None
+)
+
+/** The application owns transport and cancellation; the grid owns only UI result lifetime. */
+public class GridExternalSource<Row> public constructor(
+    public val load: (GridExternalRequest<Row>) -> (() -> Unit)?,
+    public val blockSize: Long = 100L,
+    public val quickFilter: Boolean = false,
+    public val filters: Array<GridExternalFilter> = [],
+    public val treeColumn: GridColumnId? = None
+) {
+    init {
+        gridRequire(blockSize > 0L, "external block size must be positive")
+    }
+}
+
+public class GridExternalItem<Row> public constructor(
+    public val row: GridRow<Row>,
+    public val hasChildren: Boolean = false,
+    public val contextOnly: Boolean = false,
+    public val members: Array<ViewKey>? = None
+) {
+    init {
+        when (row) {
+            case Data(_, val key) -> gridRequire(
+                key != ViewKey.Position,
+                "external record requires a key"
+            )
+            case Group(_) -> {}
+            case Total(_) -> gridRequire(
+                !hasChildren && !contextOnly,
+                "totals have no children or context"
+            )
+            else -> throw IllegalArgumentException(
+                Some("external pages contain only data, group and total rows")
+            )
+        }
+        gridRequire(
+            !hasChildren ||
+                row.key.dataKey !=
+                None ||
+                when (row) {
+                    case Group(_) -> true
+                    else -> false
+                },
+            "only records and groups have child branches"
+        )
+        when (members) {
+            case Some(val keys) -> {
+                gridRequire(
+                    when (row) {
+                        case Group(_) -> true;
+                        else -> false
+                    },
+                    "members belong to a group"
+                )
+                val checked = GridSelectedRows(keys)
+            }
+            case None -> {}
+        }
+    }
+    internal val branch: GridExternalBranch? get() =
+        if (!hasChildren)
+            None
+        else
+            when (row) {
+                case Data(_, val key) -> Some(GridExternalBranch.Tree(key))
+                case Group(val group) -> Some(GridExternalBranch.Group(group.path))
+                else -> None
+            }
+}
+
+public class GridExternalColumns<Row> public constructor(
+    public val columns: Array<GridColumn<Row>>,
+    headers: Array<GridHeaderNode>? = None
+) {
+    internal val definitions = GridColumns(columns, true)
+    internal val tree =
+        GridHeaders(Array<GridColumnId>(columns.size) { at -> columns[at].id }, headers)
+    public val headers: Array<GridHeaderNode> get() = tree.values
+}
+
+public fun <Row> gridResultColumn(
+    id: GridColumnId,
+    title: String,
+    size: TableColumnSize = TableColumnSize()
+): GridColumn<Row> = GridPivotColumn<Row>(id, title, size)
+
+public class GridExternalPage<Row> public constructor(
+    public val items: Array<GridExternalItem<Row>>,
+    public val total: Long? = None,
+    public val end: Boolean = false,
+    public val columns: GridExternalColumns<Row>? = None,
+    public val aggregates: GridAggregations? = None,
+    public val recordCount: Long? = None,
+    public val pinned: TableSource<Row>? = None
+)
+
+/** A reply is paired with this exact request, including synchronous application loaders. */
+public class GridExternalRequest<Row> internal constructor(
+    public val query: GridQuery,
+    public val range: GridExternalRange,
+    public val pinnedRows: GridPinnedRows,
+    private val available: () -> Boolean,
+    private val completed: (GridExternalPage<Row>) -> Boolean,
+    private val failed: (String) -> Boolean
+) {
+    private val guard = state(Unit)
+    private var resolved = false
+    private var cancelled = false
+    private var cancellation: (() -> Unit)? = None
+    public val isActive: Boolean get() {
+        guard.value
+        return !resolved && !cancelled && available()
+    }
+    public fun complete(page: GridExternalPage<Row>): Boolean {
+        guard.checkMutation()
+        if (!isActive)
+            return false
+        if (!completed(page))
+            return false
+        resolved = true
+        cancellation = None
+        return true
+    }
+    public fun fail(message: String): Boolean {
+        guard.checkMutation()
+        gridRequire(message != "", "external failure requires a message")
+        if (!isActive || !failed(message))
+            return false
+        resolved = true
+        cancellation = None
+        return true
+    }
+    internal fun started(value: (() -> Unit)?) {
+        if (cancelled)
+            value?.invoke()
+        else
+            if (!resolved)
+                cancellation = value
+    }
+    internal fun cancel() {
+        if (cancelled || resolved)
+            return
+        cancelled = true
+        val action = cancellation
+        cancellation = None
+        action?.invoke()
+    }
+}
+
+public class GridExternalAvailability internal constructor(
+    public val loadedRows: Long,
+    public val rootTotal: Long?,
+    public val recordTotal: Long?,
+    public val hasNextPage: Boolean,
+    public val pageComplete: Boolean
+)

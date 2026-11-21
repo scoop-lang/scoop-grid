@@ -1,0 +1,211 @@
+package scoop.grid
+
+import scoop.text.*
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+internal class GridDataRows<Row>(private val source: TableSource<Row>): GridRowSource<Row> {
+    public override val count: Long get() = source.count
+    public override fun infoAt(index: Long): GridRowInfo = GridRowInfo.Data(source.keyAt(index))
+    public override fun keyAt(index: Long): ViewKey = rowKeyAt(index).viewKey
+    public override fun rowAt(index: Long): GridRow<Row> =
+        GridRow.Data(source.rowAt(index), source.keyAt(index))
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (gridBusinessKey(key)) {
+            case Some(val data) -> source.indexOfKey(data)
+            case None -> None
+        }
+}
+
+internal fun gridBusinessKey(key: ViewKey): ViewKey? =
+    when (key) {
+        case Number(_) -> Some(key)
+        case Text(val text) -> if (text.startsWith("d"))
+            Some(ViewKey.Text(text.substring(1L)))
+        else
+            None
+        case Position -> None
+    }
+
+internal class GridWithTotalRows<Row>(
+    private val source: GridRowSource<Row>,
+    private val total: GridTotalRow,
+    private val before: Boolean
+): GridRowSource<Row> {
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> {
+        val first =
+            if (before && start > 0L)
+                start - 1L
+            else
+                start
+        val includes = totalIndex >= start && totalIndex - start < count
+        val length =
+            count -
+                if (includes)
+                    1L
+                else
+                    0L
+        return if (length > 0L)
+            source.unavailable(first, length)
+        else
+            []
+    }
+    init {
+        gridRequire(source.count < Long.MAX_VALUE, "grid result row count overflow")
+    }
+    public override val count: Long get() = source.count + 1L
+    private val totalIndex: Long get() =
+        if (before)
+            0L
+        else
+            source.count
+    private fun sourceIndex(index: Long): Long {
+        gridRequire(index >= 0L && index < count, "grid row index is out of range")
+        return if (before)
+            index - 1L
+        else
+            index
+    }
+    public override fun infoAt(index: Long): GridRowInfo =
+        if (index == totalIndex)
+            GridRowInfo.Total(total)
+        else
+            source.infoAt(sourceIndex(index))
+    public override fun keyAt(index: Long): ViewKey = rowKeyAt(index).viewKey
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? =
+        if (index == totalIndex)
+            None
+        else
+            source.hierarchyAt(sourceIndex(index))
+    public override fun rowAt(index: Long): GridRow<Row> =
+        if (index == totalIndex)
+            GridRow.Total(total)
+        else
+            source.rowAt(sourceIndex(index))
+    public override fun indexOfKey(key: ViewKey): Long? =
+        if (key == GridRowKey.Total(total.key).viewKey)
+            Some(totalIndex)
+        else
+            source.indexOfKey(key)?.plus(
+                if (before)
+                    1L
+                else
+                    0L
+            )
+}
+
+internal class GridCombinedRows<Row>(
+    private val top: GridRowSource<Row>,
+    private val body: GridRowSource<Row>,
+    private val bottom: GridRowSource<Row>
+): GridRowSource<Row> {
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> {
+        val result = ArrayList<GridExternalRange>()
+        var offset = start
+        var left = count
+        while (left > 0L) {
+            val(part, index) = at(offset)
+            val size =
+                if (left < part.count - index)
+                    left
+                else
+                    part.count - index
+            for (range in part.unavailable(index, size))
+                result.add(range)
+            offset += size
+            left -= size
+        }
+        return result.toArray()
+    }
+    init {
+        gridRequire(
+            top.count <=
+                Long.MAX_VALUE -
+                body.count &&
+                bottom.count <=
+                Long.MAX_VALUE -
+                top.count -
+                body.count,
+            "grid result row count overflow"
+        )
+    }
+    public override val count: Long get() = top.count + body.count + bottom.count
+    private fun at(index: Long): (GridRowSource<Row>, Long) {
+        gridRequire(index >= 0L && index < count, "grid row index is out of range")
+        return if (index < top.count)
+            (top, index)
+        else
+            if (index - top.count < body.count)
+                (body, index - top.count)
+            else
+                (bottom, index - top.count - body.count)
+    }
+    public override fun infoAt(index: Long): GridRowInfo {
+        val(rows, offset) = at(index)
+        return rows.infoAt(offset)
+    }
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? {
+        val(rows, offset) = at(index)
+        return rows.hierarchyAt(offset)
+    }
+    public override fun keyAt(index: Long): ViewKey = rowKeyAt(index).viewKey
+    public override fun rowAt(index: Long): GridRow<Row> {
+        val(rows, offset) = at(index)
+        return rows.rowAt(offset)
+    }
+    public override fun indexOfKey(key: ViewKey): Long? {
+        when (val index = top.indexOfKey(key)) {
+            case Some(_) -> return index
+            case None -> {}
+        }
+        when (bottom.indexOfKey(key)) {
+            case Some(val index) -> return Some(top.count + body.count + index)
+            case None -> {}
+        }
+        return body.indexOfKey(key)?.plus(top.count)
+    }
+}
+
+internal fun <Row> gridTotalRows(
+    rows: GridRowSource<Row>,
+    aggregates: GridAggregations,
+    totals: GridTotals
+): GridRowSource<Row> =
+    when (totals.placement) {
+        case Hidden -> rows
+        case Before -> GridWithTotalRows(
+            rows,
+            GridTotalRow(GridTotalKey.AllFiltered, totals.label, aggregates),
+            true
+        )
+        case After -> GridWithTotalRows(
+            rows,
+            GridTotalRow(GridTotalKey.AllFiltered, totals.label, aggregates),
+            false
+        )
+    }
+
+internal class GridSliceRows<Row>(
+    private val source: GridRowSource<Row>,
+    private val start: Long,
+    public override val count: Long
+): GridRowSource<Row> {
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> =
+        source.unavailable(this.start + start, count)
+    private fun offset(index: Long): Long {
+        gridRequire(index >= 0L && index < count, "grid row index is out of range")
+        return start + index
+    }
+    public override fun infoAt(index: Long): GridRowInfo = source.infoAt(offset(index))
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? =
+        source.hierarchyAt(offset(index))
+    public override fun keyAt(index: Long): ViewKey = source.keyAt(offset(index))
+    public override fun rowAt(index: Long): GridRow<Row> = source.rowAt(offset(index))
+    public override fun indexOfKey(key: ViewKey): Long? {
+        val at = source.indexOfKey(key) ?: return None
+        return if (at >= start && at - start < count)
+            Some(at - start)
+        else
+            None
+    }
+}

@@ -1,0 +1,54 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.ui.LayoutDirection
+
+internal class GridHeaderDrop(
+    val key: GridHeaderKey,
+    val before: Boolean,
+    val x: Double,
+    val region: Rect
+)
+
+/** A visual leaf hit resolves to one complete sibling of the dragged logical node. */
+internal fun gridHeaderDrop(
+    headers: GridHeadersPlan,
+    columns: GridColumnLayout,
+    source: GridHeaderTarget,
+    offset: Double,
+    point: Point,
+    headerRowHeight: Double,
+    headerHeight: Double
+): GridHeaderDrop? {
+    val index = headers.indexOf(source) ?: return None
+    val column = headers.items[index].first
+    val hit = gridColumnDrop(columns, column, offset, point, headerHeight) ?: return None
+    val parent = headers.tree.get(source.key).parent
+    var target = headers.tree.get(headers.items[hit.anchor].target.key)
+    while (target.parent != parent) {
+        val key = target.parent ?: return None
+        target = headers.tree.get(key)
+    }
+    val fragment = headers.indexOf(GridHeaderTarget(target.key, source.pin)) ?: return None
+    val box = headers.box(fragment, columns, offset, headerRowHeight, headerHeight)
+    if (point.y < box.y || point.y >= box.y + box.height)
+        return None
+    val x = box.x - offset
+    val rtl = columns.direction == LayoutDirection.Rtl
+    val before =
+        if (rtl)
+            point.x > x + box.width / 2.0
+        else
+            point.x < x + box.width / 2.0
+    return Some(
+        GridHeaderDrop(
+            target.key,
+            before,
+            if (before == rtl)
+                x + box.width
+            else
+                x,
+            box.region
+        )
+    )
+}

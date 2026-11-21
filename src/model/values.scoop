@@ -1,0 +1,167 @@
+package scoop.grid
+
+import scoop.datetime.LocalDate
+
+public enum GridValueKind {
+    Text, Integer, Number, BooleanValue, Date
+}
+
+public class GridValues<T> public constructor(
+    public val kind: GridValueKind,
+    public val format: (T) -> String,
+    public val compare: (T, T) -> Long,
+    public val literal: (GridLiteral) -> T,
+    public val encode: (T) -> GridLiteral,
+    public val missing: (T) -> Boolean = { _ -> false },
+    public val number: (T) -> Double? = { _ -> None }
+)
+
+public fun gridTextValues(): GridValues<String> =
+    GridValues(
+        GridValueKind.Text,
+        { value -> value },
+        { a, b -> a.compareTo(b) },
+        {
+            literal -> when (literal) {
+                case Text(val value) -> value
+                else -> throw IllegalArgumentException(Some("text column requires a text literal"))
+            }
+        },
+        { value -> GridLiteral.Text(value) }
+    )
+
+public fun gridLongValues(): GridValues<Long> =
+    GridValues(
+        GridValueKind.Integer,
+        { value -> f"${value}" },
+        { a, b -> a.compareTo(b) },
+        {
+            literal -> when (literal) {
+                case Integer(val value) -> value
+                else -> throw IllegalArgumentException(
+                    Some("integer column requires an integer literal")
+                )
+            }
+        },
+        { value -> GridLiteral.Integer(value) },
+        number = { value -> Some(value.toDouble()) }
+    )
+
+public fun gridDoubleValues(): GridValues<Double> =
+    GridValues(
+        GridValueKind.Number,
+        { value -> f"${value}" },
+        { a, b -> a.compareTo(b) },
+        {
+            literal -> when (literal) {
+                case Number(val value) -> {
+                    gridRequire(value.isFinite(), "number filter requires a finite value")
+                    value
+                }
+                case Integer(val value) -> value.toDouble()
+                else -> throw IllegalArgumentException(
+                    Some("number column requires a numeric literal")
+                )
+            }
+        },
+        {
+            value ->
+            gridRequire(value.isFinite(), "number filter values must be finite")
+            GridLiteral.Number(value)
+        },
+        number =
+            {
+                value -> if (value.isFinite())
+                    Some(value)
+                else
+                    None
+            }
+    )
+
+public fun gridBooleanValues(): GridValues<Boolean> =
+    GridValues(
+        GridValueKind.BooleanValue,
+        {
+            value -> if (value)
+                "true"
+            else
+                "false"
+        },
+        {
+            a,
+            b -> if (a == b)
+                0L
+            else
+                if (a)
+                    1L
+                else
+                    -1L
+        },
+        {
+            literal -> when (literal) {
+                case BooleanValue(val value) -> value
+                else -> throw IllegalArgumentException(
+                    Some("boolean column requires a boolean literal")
+                )
+            }
+        },
+        { value -> GridLiteral.BooleanValue(value) }
+    )
+
+public fun gridDateValues(): GridValues<LocalDate> =
+    GridValues(
+        GridValueKind.Date,
+        { value -> value.toString() },
+        { a, b -> a.compareTo(b) },
+        {
+            literal -> when (literal) {
+                case Date(val value) -> value
+                else -> throw IllegalArgumentException(Some("date column requires a date literal"))
+            }
+        },
+        { value -> GridLiteral.Date(value) }
+    )
+
+public fun <T> nullableGridValues(values: GridValues<T>): GridValues<T?> =
+    GridValues<T?>(
+        values.kind,
+        {
+            value -> when (value) {
+                case Some(val item) -> values.format(item);
+                case None -> ""
+            }
+        },
+        {
+            a,
+            b -> when ((a, b)) {
+                case(Some(val left), Some(val right)) -> values.compare(left, right)
+                case(None, None) -> 0L
+                case(None, Some(_)) -> 1L
+                case(Some(_), None) -> -1L
+            }
+        },
+        {
+            literal -> when (literal) {
+                case Empty -> None
+                else -> Some(values.literal(literal))
+            }
+        },
+        {
+            value -> when (value) {
+                case Some(val item) -> values.encode(item)
+                case None -> GridLiteral.Empty
+            }
+        },
+        {
+            value -> when (value) {
+                case Some(val item) -> values.missing(item);
+                case None -> true
+            }
+        },
+        {
+            value -> when (value) {
+                case Some(val item) -> values.number(item);
+                case None -> None
+            }
+        }
+    )

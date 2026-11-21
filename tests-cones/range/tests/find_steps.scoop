@@ -1,0 +1,216 @@
+package scoop.grid.tests.range
+
+import scoop.graphics.Point
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.window.nativeEditorText
+import scoop.ui.*
+
+internal fun RangeProbe.postFind() {
+    when (phase) {
+        case 137 -> calls!!.post(findField!!, phase, 1, "R1C7")
+        case 139 -> calls!!.post(findNext!!, phase)
+        case 141 -> calls!!.post(findNext!!, phase)
+        case 143 -> calls!!.post(findPrevious!!, phase)
+        case 145 -> calls!!.post(findField!!, phase, 1, "R2C0")
+        case 147 -> calls!!.post(findNext!!, phase)
+        case 149 -> calls!!.post(findField!!, phase, 2)
+        case 152 -> calls!!.post(findField!!, phase, 2)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun RangeProbe.advanceFind() {
+    when (phase) {
+        case 123 -> {
+            dragRelease();
+            records = rangeRows();
+            resetDrag()
+        }
+        case 124 -> lastFind = Some(handle.findCell("R9C70"))
+        case 125 -> lastFind = Some(handle.findCell("R9C", after = Some(rangeAddress(9L, 70L))))
+        case 126 -> lastFind =
+            Some(handle.findCell("R9C", after = Some(rangeAddress(9L, 71L)), backwards = true))
+        case 127 -> lastFind = Some(handle.findCell("R0C0", after = Some(rangeAddress(9L, 70L))))
+        case 128 -> {
+            assertTrue(
+                handle.setCellRange(Some(GridCellRange(rangeAddress(0L), rangeAddress(1L, 1L))))
+            )
+            lastFind = Some(handle.findCell("no-match"))
+        }
+        case 129 -> enabled.value = false
+        case 130 -> {
+            lastFind = Some(handle.findCell("R1C0"));
+            enabled.value = true
+        }
+        case 131 -> {
+            assertTrue(handle.beginEdit(rangeAddress(2L, 1L)))
+            editor!!.state.replaceAll("bad")
+            lastFind = Some(handle.findCell("R1C0"))
+        }
+        case 132 -> lastFind = Some(handle.findCell(""))
+        case 133 -> assertTrue(handle.cancelEdit())
+        case 134 -> {
+            failCopy = true;
+            lastFind = Some(handle.findCell("R1C0"));
+            failCopy = false
+        }
+        case 135 -> {
+            onTextRead = Some { model.replaceData(rangeRows(100L)) }
+            lastFind = Some(handle.findCell("R1C0"))
+        }
+        case 136 -> {
+            model.replaceData(records);
+            findQuery = Some(model.query);
+            assertTrue(outside.requestFocus())
+        }
+        case 150 -> key(36)
+        case 153 -> {
+            findLabels.value =
+                GridFindLabels(input = "Search values", found = { _ -> "Current match" })
+            findText(1, "pin")
+        }
+        case 155 -> {
+            findLabels.value = GridFindLabels()
+            findText(2, "")
+        }
+        case 156 -> enabled.value = false
+        case 157 -> enabled.value = true
+        else -> {}
+    }
+    frame!!.requestFrame()
+}
+
+private fun RangeProbe.found(row: Long, column: Long, wrapped: Boolean = false) {
+    when (lastFind!!) {
+        case Found(val match) -> {
+            assertEquals(rangeAddress(row, column), match.address)
+            assertEquals(wrapped, match.wrapped)
+        }
+        case Rejected(val reason) -> fail(Some(reason))
+        case NotFound -> fail(Some("expected a find match"))
+    }
+    retry = handle.focusedCell != Some(rangeAddress(row, column))
+}
+
+private fun RangeProbe.findRejected() {
+    when (lastFind!!) {
+        case Rejected(_) -> {}
+        else -> fail(Some("find should reject"))
+    }
+}
+
+private fun RangeProbe.findMissing() {
+    when (lastFind!!) {
+        case NotFound -> {}
+        else -> fail(Some("find should miss"))
+    }
+}
+
+internal fun RangeProbe.inspectFind() {
+    if (phase >= 137 && phase < 158)
+        assertTrue(findQuery!! === model.query)
+    when (phase) {
+        case 124 -> {
+            found(9L, 70L)
+            assertEquals(None, model.cellRange)
+            if (!retry) {
+                assertTrue(scroll.offset.x > 6000.0)
+                assertTrue(scroll.offset.y > 0.0)
+            }
+        }
+        case 125 -> found(9L, 71L)
+        case 126 -> found(9L, 70L)
+        case 127 -> found(0L, 0L, true)
+        case 128 -> {
+            findMissing()
+            selectedRange(rangeAddress(0L), rangeAddress(1L, 1L))
+            assertEquals(Some(rangeAddress(0L)), handle.focusedCell)
+        }
+        case 130 -> findRejected()
+        case 131 -> {
+            findRejected()
+            assertEquals(Some(rangeAddress(2L, 1L)), handle.editingCell)
+            assertEquals("bad", editor!!.state.text)
+        }
+        case 132 -> {
+            findMissing()
+            assertEquals(Some(rangeAddress(2L, 1L)), handle.editingCell)
+            assertEquals("bad", editor!!.state.text)
+        }
+        case 134 -> {
+            findRejected()
+            selectedRange(rangeAddress(0L), rangeAddress(1L, 1L))
+        }
+        case 135 -> {
+            findRejected()
+            assertEquals(100L, nativeGridData(model.result.rows.rowAt(0L)).value)
+            selectedRange(rangeAddress(0L), rangeAddress(1L, 1L))
+        }
+        case 136 -> {
+            findField = Some(keep(root!!.find("grid-find-input")!!))
+            findNext = Some(keep(root!!.find("grid-find-next")!!))
+            findPrevious = Some(keep(root!!.find("grid-find-previous")!!))
+            assertFalse(findNext!!.flag(1))
+        }
+        case 138 -> {
+            assertTrue(findField!!.text(1, Some("R1C7")))
+            assertTrue(findNext!!.flag(1))
+            assertEquals(0, searches)
+        }
+        case 140 -> {
+            found(1L, 7L);
+            assertEquals(1, searches)
+        }
+        case 142 -> {
+            found(1L, 70L);
+            assertEquals(2, searches)
+        }
+        case 144 -> {
+            found(1L, 7L);
+            assertEquals(3, searches)
+        }
+        case 146 -> assertTrue(findField!!.text(1, Some("R2C0")))
+        case 148 -> {
+            found(2L, 0L);
+            assertEquals(4, searches)
+        }
+        case 151 -> {
+            found(2L, 0L, true);
+            assertEquals(5, searches)
+        }
+        case 154 -> {
+            assertFalse(findNext!!.flag(1));
+            assertEquals(5, searches)
+            assertTrue(findField!!.text(0, Some("Search values")))
+            assertTrue(findField!!.flag(4))
+            assertTrue(findField!!.same(keep(root!!.find("grid-find-input")!!)))
+            assertTrue(keep(root!!.find("grid-find-status")!!).text(1, Some("Current match")))
+        }
+        case 155 -> {
+            assertTrue(findNext!!.flag(1))
+            assertTrue(findField!!.text(0, Some("查找单元格")))
+            assertTrue(keep(root!!.find("grid-find-status")!!).text(1, Some("已从边界继续查找")))
+        }
+        case 156 -> assertFalse(findNext!!.flag(1))
+        case 157 -> {
+            assertTrue(findNext!!.flag(1));
+            node = Some(cell(2L, 0L))
+        }
+        else -> {}
+    }
+}
+
+private fun RangeProbe.findText(kind: Int, text: String) {
+    @Unsafe
+    {
+        text.withUtf8Bytes {
+            bytes,
+            length -> @Unsafe
+            {
+                assertEquals(0, nativeEditorText(view!!, kind, bytes, length, 0L, length, -1L, 0L))
+            }
+        }
+    }
+    inputQueued()
+}

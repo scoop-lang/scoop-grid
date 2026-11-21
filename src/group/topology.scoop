@@ -1,0 +1,130 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+/** Numeric positions are private to this immutable query topology. */
+internal class GridGroupNode(
+    val path: GridGroupPath,
+    val label: String,
+    val parent: Long,
+    val representative: Long,
+    val ancestry: Array<Long>
+) {
+    val children = ArrayList<Long>()
+    val byValue = HashMap<GridLiteral, Long>()
+    val records = ArrayList<Long>()
+    var count = 0L
+}
+
+internal class GridGroupTopology<Row>(
+    val source: TableSource<Row>,
+    val columns: GridColumns<Row>,
+    val dimensions: Array<GridColumnId>,
+    val values: Array<GridColumnGrouping<Row>>,
+    val nodes: Array<GridGroupNode>,
+    val roots: Array<Long>,
+    val leaves: Array<Long>,
+    val paths: HashMap<GridGroupPath, Long>,
+    val records: HashMap<ViewKey, Long>
+)
+
+internal fun <Row> gridGroupTopology(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    dimensions: Array<GridColumnId>,
+    pivot: Boolean = false
+): GridGroupTopology<Row> {
+    val seen = HashSet<GridColumnId>()
+    val values =
+        Array<GridColumnGrouping<Row>>(dimensions.size) {
+            index ->
+            gridRequire(seen.add(dimensions[index]), "duplicate grouping column")
+            val column = columns.get(dimensions[index])
+            (
+                if (pivot)
+                    column.pivoting
+                else
+                    column.grouping
+            ) ?:
+                throw IllegalArgumentException(Some("grid column does not allow this dimension"))
+        }
+    val nodes = ArrayList<GridGroupNode>()
+    val roots = ArrayList<Long>()
+    val rootValues = HashMap<GridLiteral, Long>()
+    val leaves = ArrayList<Long>()
+    val paths = HashMap<GridGroupPath, Long>()
+    val records = HashMap<ViewKey, Long>()
+    for (index in 0L ..< source.count) {
+        val key = source.keyAt(index)
+        gridRequire(
+            key != ViewKey.Position && !records.containsKey(key),
+            "invalid grouping row key"
+        )
+        val row = source.rowAt(index)
+        var parent = -1L
+        var siblings = rootValues
+        for (depth in 0L ..< dimensions.size) {
+            val value = values[depth].value(row)
+            val node =
+                when (siblings[value.key]) {
+                    case Some(val found) -> found
+                    case None -> {
+                        val part = GridGroupPart(dimensions[depth], value.key)
+                        val at = nodes.size
+                        val prior =
+                            if (parent < 0L)
+                                None
+                            else
+                                Some(nodes[parent])
+                        val path =
+                            GridGroupPath(
+                                Array<GridGroupPart>(depth + 1L) {
+                                    position -> if (position == depth)
+                                        part
+                                    else
+                                        prior!!.path.parts[position]
+                                }
+                            )
+                        val ancestry =
+                            Array<Long>(depth + 2L) {
+                                position -> if (position == depth + 1L)
+                                    at + 1L
+                                else
+                                    if (position == 0L)
+                                        0L
+                                    else
+                                        prior!!.ancestry[position]
+                            }
+                        nodes.add(GridGroupNode(path, value.label, parent, index, ancestry))
+                        paths.put(path, at)
+                        siblings.put(value.key, at)
+                        if (parent < 0L)
+                            roots.add(at)
+                        else
+                            nodes[parent].children.add(at)
+                        at
+                    }
+                }
+            nodes[node].count += 1L
+            parent = node
+            siblings = nodes[node].byValue
+        }
+        nodes[parent].records.add(index)
+        records.put(key, parent)
+        leaves.add(parent)
+    }
+    return GridGroupTopology(
+        source,
+        columns,
+        dimensions,
+        values,
+        nodes.toArray(),
+        roots.toArray(),
+        leaves.toArray(),
+        paths,
+        records
+    )
+}

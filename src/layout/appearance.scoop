@@ -1,0 +1,76 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.graphics.text.*
+import scoop.math.max
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+
+internal class GridAppearance(
+    val theme: Theme,
+    val fonts: FontCollection,
+    val direction: LayoutDirection
+) {
+    val density = theme.tokens.typography.body.fontSize / 14.0
+    val padding = 8.0 * density
+    val body =
+        theme.tokens.typography.body.copy {
+            weight = 400
+            color = theme.tokens.palette.background.foreground
+        }
+    val head =
+        theme.tokens.typography.body.copy {
+            weight = 500
+            color = theme.tokens.palette.background.foreground
+        }
+    val paragraph =
+        paragraphStyle {
+            maxLines = Some(1L)
+            ellipsis = "…"
+            this.direction =
+                if (this @GridAppearance.direction == LayoutDirection.Rtl)
+                    TextDirection.Rtl
+                else
+                    TextDirection.Ltr
+        }
+    val wrapping =
+        paragraphStyle {
+            this.direction =
+                if (this @GridAppearance.direction == LayoutDirection.Rtl)
+                    TextDirection.Rtl
+                else
+                    TextDirection.Ltr
+        }
+    fun label(text: String): View =
+        component(
+            LabelProps(
+                LabelText.Plain(text, None),
+                Some(fonts),
+                Some(paragraph),
+                baseStyle = Some(head)
+            ),
+            { props, scope -> Label(props, scope) }
+        )
+    fun natural(column: TableColumnSize, title: String): Double {
+        when (column.track) {
+            case Auto -> {
+                var width = measure(title)
+                for (sample in column.samples)
+                    width = max(width, measure(sample))
+                return max(column.minimum, width + padding * 2.0 / density)
+            }
+            else -> return column.minimum
+        }
+    }
+    fun sampleWidth(column: TableColumnSize): Double {
+        var width = 0.0
+        for (sample in column.samples)
+            width = max(width, measure(sample))
+        return width + padding * 2.0 / density
+    }
+    private fun measure(text: String): Double =
+        Paragraph(fonts, text, head, paragraph).use {
+            value -> value.layoutUnwrapped().use { layout -> layout.size.width / density }
+        }
+}

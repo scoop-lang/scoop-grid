@@ -1,0 +1,48 @@
+package scoop.grid
+
+internal fun <Row> gridPresentPivot(
+    pivot: GridPivoted<Row>,
+    query: GridQuery,
+    expanded: GridExpandedRows,
+    previous: GridComputed<Row>? = None,
+    includeGroups: Boolean = true
+): (GridResult<Row>, GridQuery) {
+    when (pivot.groups) {
+        case Some(val groups) -> return gridPresentGroups(
+            groups,
+            query,
+            expanded,
+            GridPinnedRows(),
+            includeGroups,
+            previous,
+            false
+        )
+        case None -> {}
+    }
+    val bounds = gridPageRange(1L, query.pagination)
+    val empty = GridDataRows(GridPageRows(pivot.ordered, 0L, 0L))
+    val rows =
+        GridWithTotalRows(
+            empty,
+            GridTotalRow(GridTotalKey.AllFiltered, query.totals.label, pivot.aggregates),
+            true
+        )
+    return (
+        GridResult(
+            rows,
+            pivot.ordered,
+            pivot.ordered,
+            pivot.source.count,
+            bounds.pages,
+            0L,
+            0L,
+            pivot.aggregates,
+            1L,
+            GridPageUnit.Roots
+        ),
+        if (bounds.pagination == query.pagination)
+            query
+        else
+            query.withPagination(bounds.pagination)
+    )
+}

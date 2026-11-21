@@ -1,0 +1,196 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+
+@Test
+private class GridExternalModelTest {
+    @Test
+    fun `metadata reads do not load and known distant positions remain sparse`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        assertEquals(1L, model.result.rows.count)
+        assertFalse(model.result.rows.rowKeyAt(0L).hasCells)
+        assertEquals(None, model.result.rows.infoAt(0L).dataKey)
+        assertEquals(None, model.findCell("absent"))
+        assertEquals(0L, probe.requests.size)
+        val consumer = probe.attach(model)
+        assertEquals(externalRange(0L, 2L), probe.last.range)
+        assertTrue(model.loadExternal(externalPosition(0L)))
+        assertEquals(1L, probe.requests.size)
+        assertTrue(probe.last.complete(externalPage(0L, 2L, Some(100000000L))))
+        assertEquals(100000000L, model.result.rows.count)
+        assertEquals(2L, model.result.external!!.loadedRows)
+        val far = externalPosition(99999999L)
+        val key = GridRowKey.Unloaded(far)
+        assertEquals(Some(99999999L), model.result.rows.indexOfKey(key))
+        assertEquals(key, model.result.rows.infoAt(99999999L).key)
+        assertEquals(1L, probe.requests.size)
+        assertTrue(model.loadExternal(far))
+        assertEquals(externalRange(99999998L, 2L), probe.last.range)
+        assertTrue(probe.last.complete(externalPage(99999998L, 2L, Some(100000000L), true)))
+        assertEquals(
+            Some(GridFindMatch(externalAddress(99999999L), false)),
+            model.findCell("99999999")
+        )
+        assertEquals(4L, model.result.external!!.loadedRows)
+        assertTrue(probe.reads < 10L)
+        val missing = model.result.rows.unavailable(0L, 100000000L)
+        assertEquals(1L, missing.size)
+        assertEquals(externalRange(2L, 99999996L), missing[0L])
+        consumer.close()
+        assertEquals(0L, probe.cancelled)
+    }
+
+    @Test
+    fun `unknown totals expose one finite tail and converge at an actual end`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        val consumer = probe.attach(model)
+        assertTrue(probe.last.complete(externalPage(0L, 2L)))
+        assertEquals(3L, model.result.rows.count)
+        assertEquals(None, model.result.external!!.rootTotal)
+        assertTrue(model.loadExternal(externalPosition(2L)))
+        assertEquals(externalRange(2L, 2L), probe.last.range)
+        assertTrue(probe.last.complete(externalPage(2L, 1L, end = true)))
+        assertEquals(3L, model.result.rows.count)
+        assertEquals(Some(3L), model.result.external!!.rootTotal)
+        assertTrue(model.result.external!!.pageComplete)
+        assertFalse(model.loadExternal(externalPosition(3L)))
+        consumer.close()
+        val empty = ExternalProbe()
+        val emptyModel = empty.model()
+        val emptyConsumer = empty.attach(emptyModel)
+        assertTrue(empty.last.complete(externalPage(0L, 0L, end = true)))
+        assertEquals(0L, emptyModel.result.rows.count)
+        assertEquals(Some(0L), emptyModel.result.external!!.recordTotal)
+        emptyConsumer.close()
+    }
+
+    @Test
+    fun `query replacement and the final unmount cancel pending work and ignore late replies`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        val firstConsumer = probe.attach(model)
+        val secondConsumer = probe.attach(model)
+        val first = probe.last
+        assertEquals(1L, probe.requests.size)
+        firstConsumer.close()
+        assertTrue(first.isActive)
+        probe.forbidReads = true
+        val query = GridQuery(sorting = [GridSort(GridColumnId("id"))], quickFilter = "remote")
+        model.setQuery(query)
+        assertEquals(1L, probe.cancelled)
+        assertEquals(query, probe.last.query)
+        assertFalse(first.complete(externalPage(0L, 2L, Some(2L), true)))
+        assertFalse(first.fail("late"))
+        val current = probe.last
+        assertTrue(current.complete(externalPage(90L, 2L, Some(2L), true)))
+        assertEquals(ViewKey.Number(90L), model.result.rows.infoAt(0L).dataKey!!)
+        assertEquals(0L, probe.reads)
+        model.refreshExternal()
+        val pending = probe.last
+        secondConsumer.close()
+        assertEquals(2L, probe.cancelled)
+        assertFalse(pending.complete(externalPage(0L, 2L, Some(2L), true)))
+        assertFalse(model.retryExternal(externalPosition(0L)))
+    }
+
+    @Test
+    fun `failures remain explicit and malformed completions publish no partial rows`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        val consumer = probe.attach(model)
+        val request = probe.last
+        val loading = model.result
+        assertFailsWith<IllegalArgumentException> { request.complete(externalPage(0L, 1L)) }
+        assertTrue(loading === model.result)
+        assertTrue(request.isActive)
+        assertFailsWith<IllegalArgumentException> {
+            request.complete(GridExternalPage([externalItem(1L), externalItem(1L)], Some(2L), true))
+        }
+        assertTrue(loading === model.result)
+        assertTrue(request.fail("offline"))
+        model.synchronizeExternal()
+        model.loadExternal(externalPosition(0L))
+        assertEquals(1L, probe.requests.size)
+        when (model.result.rows.infoAt(0L)) {
+            case Unloaded(val row) -> when (row.state) {
+                case Failed(val message) -> assertEquals("offline", message)
+                else -> fail(Some("missing explicit failure"))
+            }
+            else -> fail(Some("failure became a business row"))
+        }
+        assertTrue(model.retryExternal(externalPosition(0L)))
+        assertEquals(2L, probe.requests.size)
+        assertTrue(probe.last.complete(externalPage(0L, 2L, Some(8L))))
+        model.loadExternal(externalPosition(2L))
+        assertFailsWith<IllegalArgumentException> {
+            probe.last.complete(externalPage(2L, 1L, end = true))
+        }
+        assertEquals(8L, model.result.rows.count)
+        consumer.close()
+    }
+
+    @Test
+    fun `synchronous loaders close request lifetimes and cache reuse survives page navigation`() {
+        val probe = ExternalProbe()
+        val source =
+            GridExternalSource<Long>(
+                {
+                    request ->
+                    probe.requests.add(request)
+                    request.complete(
+                        externalPage(
+                            request.range.offset,
+                            request.range.count,
+                            Some(8L),
+                            request.range.end == 8L
+                        )
+                    )
+                    Some { probe.cancelled += 1L }
+                },
+                blockSize = 2L
+            )
+        val model =
+            DataGridState<Long>(
+                columns = probe.columns(),
+                external = Some(source),
+                query = GridQuery(pagination = GridPagination.Page(0L, 2L))
+            )
+        val consumer = probe.attach(model)
+        assertEquals(2L, model.result.rows.count)
+        assertEquals(1L, probe.requests.size)
+        model.setPagination(GridPagination.Page(2L, 2L))
+        assertEquals(2L, probe.requests.size)
+        assertEquals(Some(ViewKey.Number(4L)), model.result.rows.infoAt(0L).dataKey)
+        model.setPagination(GridPagination.Page(0L, 2L))
+        assertEquals(2L, probe.requests.size)
+        assertEquals(Some(ViewKey.Number(0L)), model.result.rows.infoAt(0L).dataKey)
+        consumer.close()
+        assertEquals(0L, probe.cancelled)
+    }
+
+    @Test
+    fun `eviction preserves selected identities and retains live records without meaning deletion`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        val consumer = probe.attach(model)
+        probe.last.complete(externalPage(0L, 2L, Some(8L)))
+        model.setSelectedRows([ViewKey.Number(0L), ViewKey.Number(77L)])
+        probe.retained.add(ViewKey.Number(1L))
+        assertTrue(model.evictExternal(externalRange(0L, 2L)))
+        assertEquals(None, model.source.indexOfKey(ViewKey.Number(0L)))
+        assertEquals(Some(0L), model.source.indexOfKey(ViewKey.Number(1L)))
+        assertTrue(model.isRowSelected(ViewKey.Number(0L)))
+        assertEquals(1L, probe.requests.size)
+        model.loadExternal(externalPosition(0L))
+        assertEquals(externalRange(0L, 1L), probe.last.range)
+        assertFalse(model.evictExternal(externalRange(0L, 2L)))
+        probe.last.complete(externalPage(0L, 1L, Some(8L)))
+        model.refreshExternal([ViewKey.Number(0L)])
+        assertFalse(model.isRowSelected(ViewKey.Number(0L)))
+        assertTrue(model.isRowSelected(ViewKey.Number(77L)))
+        consumer.close()
+    }
+}

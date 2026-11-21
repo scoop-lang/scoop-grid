@@ -1,0 +1,121 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.min
+import scoop.ui.*
+import scoop.ui.component.*
+
+/** Ordinary slots surround the same viewport and remain outside its input domain. */
+internal fun <Row> gridFrame(
+    input: DataGridProps<Row>,
+    viewport: View,
+    density: Double,
+    headerHeight: Double,
+    emptyResult: Boolean
+): View {
+    val status: View? =
+        when (input.error) {
+            case Some(val value) -> Some(value)
+            case None -> input.loading
+        }
+    val statusName =
+        when (input.error) {
+            case Some(_) -> "error"
+            case None -> "loading"
+        }
+    val showEmpty =
+        when (status) {
+            case Some(_) -> false
+            case None -> emptyResult
+        }
+    val body = ArrayList<View>()
+    body.add(viewport)
+    if (showEmpty)
+        when (input.empty) {
+            case Some(val content) -> body.add(
+                element({ scope -> GridEmpty(scope) }, [content], ViewKey.Text("grid-slot-empty"))
+            )
+            case None -> {}
+        }
+    val content =
+        column {
+            alignment = CrossAlignment.Stretch
+            clip = true
+            when (input.toolbar) {
+                case Some(val value) -> add(gridSlot("toolbar", value))
+                case None -> {}
+            }
+            when (status) {
+                case Some(val value) -> add(gridSlot(statusName, value))
+                case None -> {}
+            }
+            item(
+                element(
+                    headerHeight,
+                    { props, scope -> GridViewport(props, scope) },
+                    body.toArray(),
+                    ViewKey.Text("grid-viewport")
+                )
+            ) {
+                basis = FlexBasis.Fixed(0.0)
+                grow = 1.0
+            }
+            when (input.footer) {
+                case Some(val value) -> add(gridSlot("footer", value))
+                case None -> {}
+            }
+        }
+    return frame(content) {
+        width = input.width?.times(density)
+        height = Some(input.height * density)
+    }
+}
+
+private fun gridSlot(name: String, content: View): View =
+    frame(content) { key = ViewKey.Text(f"grid-slot-${name}") }
+
+/** Only the empty view needs grid-specific placement below the fixed header. */
+private class GridViewport(private val headerHeight: Props<Double>, scope: ComponentScope): Element<
+    Unit
+>(scope) {
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val grid = context.measureChild(0L, constraints)
+        context.placeChild(0L, Point(0.0, 0.0))
+        if (context.childCount > 1L) {
+            val top = min(grid.size.height, headerHeight.value)
+            context.measureChild(
+                1L,
+                Constraints.tight(Size(grid.size.width, grid.size.height - top))
+            )
+            context.placeChild(1L, Point(0.0, top))
+        }
+        return LayoutResult(grid, Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+    }
+}
+
+private class GridEmpty(scope: ComponentScope): Element<Unit>(scope) {
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val size = constraints.constrain(Size(0.0, 0.0))
+        val child =
+            context.measureChild(
+                0L,
+                Constraints(maxWidth = Some(size.width), maxHeight = Some(size.height))
+            )
+        context.placeChild(
+            0L,
+            Point((size.width - child.size.width) / 2.0, (size.height - child.size.height) / 2.0)
+        )
+        return LayoutResult(LayoutMetrics(size), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.clipRect(Rect(0.0, 0.0, context.size.width, context.size.height))
+        context.children()
+    }
+}

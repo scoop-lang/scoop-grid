@@ -1,0 +1,228 @@
+package scoop.grid.tests.external
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+
+internal fun ExternalWindowProbe.accepted() {
+    if (finished || waiting || waitingInput)
+        return
+    waiting = true
+    retry = false
+    if (phase == 17)
+        calls!!.post(retryButton!!, phase)
+    else
+        calls!!.post(root!!, phase, 20)
+}
+
+internal fun ExternalWindowProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            retry =
+                model.result.external!!.rootTotal !=
+                    Some(100000L) ||
+                    model.result.external!!.loadedRows <
+                    8L
+            if (!retry) {
+                table = find(root!!, "AXTable");
+                assertEquals(100000L, table!!.rowCount)
+            }
+        }
+        case 1 -> {
+            val before = requests.size
+            val far = keep(table!!.row(50000L)!!)
+            assertEquals(0L, far.count)
+            assertEquals(None, table!!.cell(50000L, 0L)?.numericValue)
+            assertEquals(before, requests.size)
+            assertEquals(readsBefore, requests.size)
+        }
+        case 2 -> {
+            assertEquals(
+                Some(GridPositionTarget(remotePosition(50000L), GridColumnId("id"))),
+                handle.pendingPosition
+            )
+            assertEquals(None, handle.focusedCell)
+            assertFalse(model.result.rows.infoAt(50000L).key.hasCells)
+            val row = keep(table!!.row(50000L)!!)
+            retry = !(find(row, "AXGroup")?.flag(4) ?: false)
+        }
+        case 3 -> {
+            retry = handle.focusedCell != Some(remoteAddress(50000L))
+            if (!retry) {
+                assertEquals(None, handle.pendingPosition);
+                assertTrue(scroll.offset.y > 1000000.0)
+            }
+        }
+        case 4 -> retry = handle.focusedCell != Some(remoteAddress(50001L))
+        case 5 -> assertEquals(Some(remotePosition(70000L)), handle.pendingPosition?.position)
+        case 6 -> {
+            retry = handle.focusedCell != Some(remoteAddress(50001L))
+            if (!retry)
+                assertEquals(None, handle.pendingPosition)
+        }
+        case 7 -> {
+            assertEquals(Some(remotePosition(70000L)), handle.pendingPosition?.position)
+            retry = scroll.offset.y < 2200000.0
+        }
+        case 8 -> {
+            retry = !outside.hasFocus
+            if (!retry)
+                assertEquals(None, handle.pendingPosition)
+        }
+        case 9 -> {
+            assertTrue(outside.hasFocus);
+            assertEquals(None, handle.pendingPosition);
+            assertEquals(None, handle.focusedCell)
+        }
+        case 10 -> {
+            retry = !(options?.focus?.hasFocus ?: false)
+            if (!retry) {
+                val cell = keep(table!!.cell(50000L, 1L)!!)
+                assertTrue(find(cell, "AXTextField")!!.flag(1))
+            }
+        }
+        case 11 -> {
+            assertTrue(handle.isSubmitting)
+            assertEquals(Some("50001"), model.copyText(Some(remoteAddress(50000L, "amount"))))
+        }
+        case 12 -> {
+            assertFalse(handle.isSubmitting)
+            assertEquals(None, handle.editingCell)
+            assertEquals(Some("7"), model.copyText(Some(remoteAddress(50000L, "amount"))))
+        }
+        case 13 -> assertEquals(Some(remotePosition(80000L)), handle.pendingPosition?.position)
+        case 14 -> {
+            assertEquals(None, handle.pendingPosition);
+            assertTrue(cancelled > 0L);
+            assertFalse(oldRequest!!.isActive)
+        }
+        case 15 -> {
+            retry = model.result.rows.infoAt(0L).dataKey != Some(ViewKey.Number(100000L))
+            if (!retry)
+                assertEquals(None, handle.pendingPosition)
+        }
+        case 16 -> {
+            when (model.result.rows.infoAt(0L)) {
+                case Unloaded(val row) -> when (row.state) {
+                    case Failed(_) -> {
+                        val native = keep(table!!.row(0L)!!)
+                        retryButton = native.find("grid-load-retry-r:0")
+                        when (retryButton) {
+                            case Some(val button) -> keep(button);
+                            case None -> retry = true
+                        }
+                    }
+                    else -> retry = true
+                }
+                else -> retry = true
+            }
+        }
+        case 17 -> {}
+        case 18 -> retry = model.result.external!!.loadedRows < 8L
+        case 19 -> {
+            retry = model.result.external!!.loadedRows < 8L
+            if (!retry) {
+                assertEquals(None, model.result.external!!.rootTotal)
+                assertEquals(model.result.external!!.loadedRows + 1L, model.result.rows.count)
+            }
+        }
+        case 20 -> {
+            retry = model.result.external!!.rootTotal != Some(24L)
+            if (!retry) {
+                assertEquals(24L, table!!.rowCount);
+                assertTrue(requests.size - readsBefore < 8L)
+            }
+        }
+        case 21 -> assertTrue(requests[requests.size - 1L].isActive)
+        case 22 -> {
+            assertFalse(handle.isAttached)
+            assertEquals(None, handle.pendingPosition)
+            for (request in requests)
+                assertFalse(request.isActive)
+        }
+        else -> fail(Some(diagnostic))
+    }
+}
+
+internal fun ExternalWindowProbe.completed(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(1, result, Some(f"external native action ${phase}"))
+    waiting = false
+    if (retry) {
+        if (phase == 20)
+            scroll.scrollTo(Point(0.0, model.result.rows.count.toDouble() * 32.0))
+        frame!!.requestFrame()
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 1 -> {
+            readsBefore = requests.size;
+            scroll.scrollTo(Point(120.0, 0.0))
+        }
+        case 2 -> {
+            autoReply = false;
+            assertTrue(handle.focusPosition(remotePosition(50000L), GridColumnId("id")))
+        }
+        case 3 -> release()
+        case 4 -> key(125, "\uf701")
+        case 5 -> {
+            autoReply = false;
+            assertTrue(handle.focusPosition(remotePosition(70000L), GridColumnId("id")))
+        }
+        case 6 -> key(53, "\u001b")
+        case 7 -> assertTrue(handle.focusPosition(remotePosition(70000L), GridColumnId("id")))
+        case 8 -> outside.requestFocus()
+        case 9 -> release()
+        case 10 -> assertTrue(handle.beginEdit(remoteAddress(50000L, "amount")))
+        case 11 -> {
+            editor!!.state.replaceAll("7")
+            assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+            assertFalse(handle.focusPosition(remotePosition(80000L), GridColumnId("id")))
+            assertTrue(model.evictExternal(remoteRange(50000L, 8L)))
+        }
+        case 12 -> assertTrue(commit!!.acceptRow(RemoteRecord(50000L, 7L)))
+        case 13 -> {
+            autoReply = false
+            assertTrue(handle.focusPosition(remotePosition(80000L), GridColumnId("id")))
+            oldRequest = Some(requests[requests.size - 1L])
+        }
+        case 14 -> model.setQuery(model.query.withQuickFilter("changed"))
+        case 15 -> {
+            assertFalse(reply(oldRequest!!));
+            release()
+        }
+        case 16 -> {
+            failNext = true;
+            model.refreshExternal()
+        }
+        case 18 -> {}
+        case 19 -> {
+            unknown = true;
+            model.refreshExternal()
+        }
+        case 20 -> {
+            readsBefore = requests.size;
+            scroll.scrollTo(Point(0.0, model.result.rows.count.toDouble() * 32.0))
+        }
+        case 21 -> {
+            autoReply = false;
+            model.refreshExternal()
+        }
+        case 22 -> {
+            ui!!.close();
+            waiting = true;
+            calls!!.post(root!!, phase, 20);
+            return
+        }
+        case 23 -> {
+            finished = true;
+            application!!.requestExit();
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}

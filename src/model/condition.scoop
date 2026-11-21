@@ -1,0 +1,87 @@
+package scoop.grid
+
+import scoop.text.*
+
+private fun gridCompareMatches(result: Long, operation: GridComparison): Boolean =
+    when (operation) {
+        case Equal -> result == 0L
+        case NotEqual -> result != 0L
+        case Less -> result < 0L
+        case LessOrEqual -> result <= 0L
+        case Greater -> result > 0L
+        case GreaterOrEqual -> result >= 0L
+    }
+
+internal fun <T> gridCondition(values: GridValues<T>, condition: GridCondition): (T) -> Boolean =
+    when (condition) {
+        case Missing(val expected) -> ({ value -> values.missing(value) == expected })
+        case Compare(val operation, val literal) -> {
+            val expected = values.literal(literal)
+            gridRequire(!values.missing(expected), "use Missing or In to match missing values");
+            (
+                {
+                    value -> !values.missing(value) &&
+                        gridCompareMatches(values.compare(value, expected), operation)
+                }
+            )
+        }
+        case Between(val lower, val upper) -> {
+            val first = values.literal(lower)
+            val last = values.literal(upper)
+            gridRequire(
+                !values.missing(first) && !values.missing(last),
+                "range bounds must not be missing"
+            )
+            gridRequire(values.compare(first, last) <= 0L, "区间下限不能大于上限");
+            (
+                {
+                    value -> !values.missing(value) &&
+                        values.compare(value, first) >=
+                        0L &&
+                        values.compare(value, last) <=
+                        0L
+                }
+            )
+        }
+        case In(val literals) -> {
+            val expected = Array<T>(literals.size) { index -> values.literal(literals[index]) };
+            contains@{
+                value ->
+                for (item in expected) {
+                    val leftMissing = values.missing(value)
+                    val rightMissing = values.missing(item)
+                    if (
+                        (leftMissing && rightMissing) ||
+                            (!leftMissing && !rightMissing && values.compare(value, item) == 0L)
+                    )
+                        return@contains true
+                }
+                false
+            }
+        }
+        case Text(val operation, val text, val caseSensitive) -> {
+            gridRequire(values.kind == GridValueKind.Text, "text matching requires a text column")
+            val needle =
+                if (caseSensitive)
+                    text
+                else
+                    text.lowercaseAscii();
+            (
+                {
+                    value ->
+                    val formatted = values.format(value)
+                    val haystack =
+                        if (caseSensitive)
+                            formatted
+                        else
+                            formatted.lowercaseAscii()
+                    !values.missing(value) &&
+                        when (operation) {
+                            case Contains -> haystack.contains(needle)
+                            case StartsWith -> haystack.startsWith(needle)
+                            case EndsWith -> haystack.endsWith(needle)
+                        }
+                }
+            )
+        }
+    }

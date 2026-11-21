@@ -1,0 +1,55 @@
+package scoop.grid
+
+/** Interactive expansion shares the edit gate and restores a hidden descendant's cell. */
+internal class GridHierarchyActions<Row>(private val session: GridSession<Row>) {
+    fun expand(key: GridRowKey, value: Boolean): GridRowActionResult {
+        val model = session.currentModel ?: return GridRowActionResult.Rejected("网格未挂载")
+        if (!session.active || !session.enabled || !session.inputEnabled)
+            return GridRowActionResult.Rejected("网格未挂载或已禁用")
+        if (!model.canExpand(key))
+            return GridRowActionResult.Rejected("当前结果行不可展开")
+        val focus =
+            when (val current = session.focused) {
+                case Some(_) -> current
+                case None -> when (val editing = session.editingCell) {
+                    case Some(_) -> editing
+                    case None -> session.requested
+                }
+            }
+        when (session.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return GridRowActionResult.Rejected("请先完成当前单元格的编辑或保存")
+        }
+        if (
+            !session.active ||
+                !session.enabled ||
+                !session.inputEnabled ||
+                !session.usesModel(model)
+        )
+            return GridRowActionResult.Rejected("网格已更新，请重试")
+        if (!model.setExpanded(key, value))
+            return GridRowActionResult.Rejected("当前层级节点已移除")
+        when (focus) {
+            case Some(val address) -> if (
+                !value &&
+                    model.result.rows.indexOfKey(address.row) ==
+                    None &&
+                    model.result.rows.indexOfKey(key) !=
+                    None
+            ) {
+                session.cancel()
+                if (model.visibleColumn(address.column))
+                    session.requestCell(GridCellAddress(key, address.column))
+                else
+                    for (column in model.columnState)
+                        if (column.visible) {
+                            session.requestCell(GridCellAddress(key, column.id))
+                            break
+                        }
+            }
+            case None -> {}
+        }
+        return GridRowActionResult.Applied
+    }
+}

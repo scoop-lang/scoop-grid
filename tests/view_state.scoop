@@ -1,0 +1,374 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class SavedRows(public override val count: Long): TableSource<Long> {
+    var reads = 0L
+    var failRead = false
+    var onRead: (() -> Unit)? = None
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(value)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long {
+        reads += 1L
+        val callback = onRead
+        onRead = None
+        callback?.invoke()
+        if (failRead)
+            throw IllegalStateException(Some("saved state source failed"))
+        return index
+    }
+}
+
+private fun savedColumns(): Array<GridColumn<Long>> =
+    [
+        gridColumn<Long, Long>(
+            GridColumnId("id"),
+            "ID",
+            { value -> value },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(100.0), 40.0, Some(200.0))
+        ),
+        gridColumn<Long, String>(
+            GridColumnId("text"),
+            "Text",
+            { value -> f"记录 ${value}" },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(120.0), 40.0, Some(200.0))
+        ),
+        gridActionColumn<Long>(
+            GridColumnId("action"),
+            "Action",
+            { _ -> throw IllegalStateException(Some("restore built a view")) }
+        )
+    ]
+
+private fun savedAddress(row: Long, column: String = "id"): GridCellAddress =
+    GridCellAddress(ViewKey.Number(row), GridColumnId(column))
+
+private fun savedFilter(): GridFilter =
+    GridFilter.Column(
+        GridColumnId("id"),
+        GridCondition.Compare(GridComparison.GreaterOrEqual, GridLiteral.Integer(8L))
+    )
+
+@Test
+private class GridViewStateTest {
+    @Test
+    fun `restore publishes final columns query pins selection and range once and preserves the requested page`() {
+        val rows = SavedRows(40L)
+        val queryChanges = state(0L)
+        val selectionChanges = state(0L)
+        val observed = ArrayList<GridViewState>()
+        val current = state<DataGridState<Long>?>(None)
+        val model =
+            DataGridState(
+                rows,
+                savedColumns(),
+                onQueryChange =
+                    Some {
+                        _ ->
+                        queryChanges.value += 1L;
+                        observed.add(current.value!!.saveViewState())
+                    },
+                rowSelection = GridRowSelectionMode.Multiple,
+                onSelectionChange =
+                    Some {
+                        _ ->
+                        selectionChanges.value += 1L;
+                        observed.add(current.value!!.saveViewState())
+                    }
+            )
+        current.value = Some(model)
+        val watch = model.observe { observed.add(model.saveViewState()) }
+        val columns =
+            [
+                GridColumnState(GridColumnId("text"), pin = GridPin.Start),
+                GridColumnState(GridColumnId("id"), width = Some(150.0)),
+                GridColumnState(GridColumnId("action"), visible = false)
+            ]
+        val range = Some(GridCellRange(savedAddress(18L), savedAddress(22L, "text")))
+        val snapshot =
+            GridViewState(
+                columns,
+                GridQuery(filter = savedFilter(), pagination = GridPagination.Page(2L, 5L)),
+                GridPinnedRows([ViewKey.Number(9L)], [ViewKey.Number(39L)]),
+                [ViewKey.Number(35L), ViewKey.Number(1L)],
+                range,
+                Some(GridReadingPosition(ViewKey.Number(19L), 7.0, 25.0)),
+                Some(savedAddress(20L))
+            )
+        val report = model.restoreViewState(snapshot)
+        assertEquals(0L, report.issues.size)
+        assertEquals(40L, rows.reads)
+        assertEquals(GridPagination.Page(2L, 5L), model.query.pagination)
+        assertEquals(32L, model.result.totalRows)
+        assertEquals(ViewKey.Number(18L), model.result.pageRows.keyAt(0L))
+        assertEquals(1L, queryChanges.value)
+        assertEquals(1L, selectionChanges.value)
+        assertEquals(3L, observed.size)
+        for (seen in observed) {
+            assertEquals(snapshot.query, seen.query)
+            assertTrue(gridArrayEqual(columns, seen.columns))
+            assertTrue(gridArrayEqual(snapshot.selectedRows, seen.selectedRows))
+            assertEquals(range, seen.cellRange)
+            assertEquals(ViewKey.Number(9L), seen.pinnedRows.top[0L])
+        }
+        val ordered = model.result.ordered
+        val saved = model.saveViewState()
+        model.restoreViewState(saved)
+        assertTrue(ordered === model.result.ordered)
+        assertEquals(40L, rows.reads)
+        assertEquals(1L, queryChanges.value)
+        assertEquals(1L, selectionChanges.value)
+        watch.close()
+    }
+
+    @Test
+    fun `restore reports obsolete invalid and duplicate state while retaining useful values`() {
+        val rows = SavedRows(20L)
+        val model =
+            DataGridState(
+                rows,
+                savedColumns(),
+                rowSelection = GridRowSelectionMode.Single,
+                selectable = Some { value -> value % 2L == 0L }
+            )
+        model.setColumnState(GridColumnState(GridColumnId("id"), width = Some(90.0)))
+        val snapshot =
+            GridViewState(
+                [
+                    GridColumnState(GridColumnId("removed")),
+                    GridColumnState(GridColumnId("id"), width = Some(Double.NaN)),
+                    GridColumnState(GridColumnId("id"), visible = false),
+                    GridColumnState(GridColumnId("text"), width = Some(500.0), pin = GridPin.End)
+                ],
+                GridQuery(
+                    [
+                        GridSort(GridColumnId("id")),
+                        GridSort(GridColumnId("id")),
+                        GridSort(GridColumnId("action")),
+                        GridSort(GridColumnId("removed"))
+                    ],
+                    GridFilter.And(
+                        [
+                            GridFilter.Column(GridColumnId("removed"), GridCondition.Missing(true)),
+                            GridFilter.Or(
+                                [
+                                    GridFilter.Column(
+                                        GridColumnId("id"),
+                                        GridCondition.Text(GridTextMatch.Contains, "1", false)
+                                    ),
+                                    GridFilter.Column(
+                                        GridColumnId("text"),
+                                        GridCondition.Text(GridTextMatch.Contains, "1", false)
+                                    )
+                                ]
+                            ),
+                            GridFilter.And([])
+                        ]
+                    ),
+                    pagination = GridPagination.Page(100L, 3L)
+                ),
+                GridPinnedRows([ViewKey.Number(30L)], [ViewKey.Number(3L)]),
+                [
+                    ViewKey.Number(-1L),
+                    ViewKey.Position,
+                    ViewKey.Number(12L),
+                    ViewKey.Number(12L),
+                    ViewKey.Number(19L)
+                ],
+                Some(GridCellRange(savedAddress(1L), savedAddress(12L))),
+                Some(GridReadingPosition(ViewKey.Number(2L))),
+                Some(savedAddress(9L))
+            )
+        val report = model.restoreViewState(snapshot)
+        assertEquals(19L, report.issues.size)
+        assertEquals(Some(90.0), model.columnState[0L].width)
+        assertEquals(Some(200.0), model.columnState[1L].width)
+        assertEquals(GridColumnId("action"), model.columnState[2L].id)
+        assertEquals(GridPagination.Page(3L, 3L), model.query.pagination)
+        assertEquals(11L, model.result.totalRows)
+        assertEquals(1L, model.query.sorting.size)
+        assertEquals(1L, model.selectedRowKeys.size)
+        assertEquals(ViewKey.Number(12L), model.selectedRowKeys[0L])
+        assertEquals(0L, model.pinnedRows.top.size)
+        assertEquals(None, model.cellRange)
+        assertEquals(None, report.state.readingPosition)
+        assertEquals(None, report.state.focusedCell)
+        var filterIssues = 0L
+        for (issue in report.issues)
+            when (issue.part) {
+                case Filter(val path) -> {
+                    assertTrue(path.size > 0L);
+                    filterIssues += 1L
+                }
+                else -> {}
+            }
+        assertEquals(3L, filterIssues)
+    }
+
+    @Test
+    fun `column groups reject incompatible order without discarding other restored column properties`() {
+        val rows = SavedRows(100000000L)
+        val model =
+            DataGridState(
+                rows,
+                savedColumns(),
+                headers =
+                    Some(
+                        [
+                            GridHeaderNode.Group(
+                                GridColumnGroupId("data"),
+                                "Data",
+                                [
+                                    GridHeaderNode.Column(GridColumnId("id")),
+                                    GridHeaderNode.Column(GridColumnId("text"))
+                                ]
+                            ),
+                            GridHeaderNode.Column(GridColumnId("action"))
+                        ]
+                    )
+            )
+        val snapshot =
+            GridViewState(
+                [
+                    GridColumnState(GridColumnId("id"), width = Some(140.0)),
+                    GridColumnState(GridColumnId("action")),
+                    GridColumnState(GridColumnId("text"), pin = GridPin.End)
+                ],
+                cellRange = Some(GridCellRange(savedAddress(1L), savedAddress(3L, "action")))
+            )
+        val report = model.restoreViewState(snapshot)
+        assertEquals(1L, report.issues.size)
+        assertEquals(GridColumnId("text"), model.columnState[1L].id)
+        assertEquals(GridPin.End, model.columnState[1L].pin)
+        assertEquals(Some(140.0), model.columnState[0L].width)
+        assertEquals(snapshot.cellRange, model.cellRange)
+        assertEquals(0L, rows.reads)
+        val changed =
+            GridViewState(
+                [GridColumnState(GridColumnId("id")), GridColumnState(GridColumnId("action"))],
+                cellRange = snapshot.cellRange
+            )
+        val added = model.restoreViewState(changed)
+        assertEquals(None, model.cellRange)
+        assertTrue(added.issues.size > 0L)
+        assertEquals(0L, rows.reads)
+    }
+
+    @Test
+    fun `read failures leave the complete old state and reentrant application updates win`() {
+        val rows = SavedRows(20L)
+        val changes = state(0L)
+        val model =
+            DataGridState(
+                rows,
+                savedColumns(),
+                onQueryChange = Some { _ -> changes.value += 1L },
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        model.setRowSelected(ViewKey.Number(2L), true)
+        model.setCellRange(Some(GridCellRange(savedAddress(1L), savedAddress(3L))))
+        val before = model.saveViewState()
+        val result = model.result
+        val snapshot =
+            GridViewState(
+                [
+                    GridColumnState(GridColumnId("text")),
+                    GridColumnState(GridColumnId("id")),
+                    GridColumnState(GridColumnId("action"))
+                ],
+                GridQuery(filter = savedFilter())
+            )
+        rows.failRead = true
+        assertFailsWith<IllegalStateException> { model.restoreViewState(snapshot) }
+        assertTrue(result === model.result)
+        assertTrue(before.columns === model.columnState)
+        assertEquals(before.cellRange, model.cellRange)
+        assertEquals(ViewKey.Number(2L), model.selectedRowKeys[0L])
+        assertEquals(0L, changes.value)
+        rows.failRead = false
+        rows.onRead =
+            Some { model.setColumnState(GridColumnState(GridColumnId("id"), width = Some(180.0))) }
+        assertFailsWith<IllegalStateException> { model.restoreViewState(snapshot) }
+        assertTrue(result === model.result)
+        assertEquals(Some(180.0), model.columnState[0L].width)
+        assertEquals(before.cellRange, model.cellRange)
+        assertEquals(0L, changes.value)
+    }
+
+    @Test
+    fun `huge view snapshots keep stable identities without scanning records or constructing views`() {
+        val rows = SavedRows(Long.MAX_VALUE)
+        val model =
+            DataGridState(rows, savedColumns(), rowSelection = GridRowSelectionMode.Multiple)
+        val address = savedAddress(Long.MAX_VALUE - 2L)
+        val snapshot =
+            GridViewState(
+                model.columnState,
+                selectedRows = [address.row.dataKey!!, ViewKey.Number(0L)],
+                cellRange = Some(GridCellRange(savedAddress(0L), address)),
+                readingPosition = Some(GridReadingPosition(address.row, 12.0, 150.0)),
+                focusedCell = Some(address)
+            )
+        val report = model.restoreViewState(snapshot)
+        assertEquals(0L, report.issues.size)
+        assertEquals(0L, rows.reads)
+        assertEquals(snapshot.cellRange, model.cellRange)
+        assertEquals(address.row, report.state.readingPosition!!.row)
+        assertEquals(Some(address), report.state.focusedCell)
+        assertEquals(address.row.dataKey!!, model.selectedRowKeys[0L])
+        model.restoreViewState(
+            GridViewState(
+                model.columnState,
+                selectedRows = [ViewKey.Number(0L), address.row.dataKey!!]
+            )
+        )
+        assertEquals(ViewKey.Number(0L), model.selectedRowKeys[0L])
+        assertEquals(0L, rows.reads)
+    }
+
+    @Test
+    fun `invalid or fixed reading anchors are reported and unattached handles reject restoration`() {
+        val rows = SavedRows(5L)
+        val model = DataGridState(rows, savedColumns())
+        for (
+            position in [
+                GridReadingPosition(ViewKey.Position),
+                GridReadingPosition(ViewKey.Number(0L), Double.NaN),
+                GridReadingPosition(ViewKey.Number(1L), 0.0, -1.0),
+                GridReadingPosition(ViewKey.Number(9L)),
+                GridReadingPosition(ViewKey.Number(4L))
+            ]
+        ) {
+            val report =
+                model.restoreViewState(
+                    GridViewState(
+                        model.columnState,
+                        pinnedRows = GridPinnedRows(bottom = [ViewKey.Number(4L)]),
+                        readingPosition = Some(position),
+                        focusedCell = Some(savedAddress(1L))
+                    )
+                )
+            assertEquals(1L, report.issues.size)
+            assertEquals(None, report.state.readingPosition)
+            assertEquals(Some(savedAddress(1L)), report.state.focusedCell)
+        }
+        val handle = DataGridHandle()
+        assertEquals(None, handle.saveViewState()?.focusedCell ?: None)
+        when (handle.restoreViewState(model.saveViewState())) {
+            case Rejected(_) -> {}
+            else -> fail(Some("unmounted restore must reject"))
+        }
+        assertEquals(0L, rows.reads)
+    }
+}

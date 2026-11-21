@@ -1,0 +1,152 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+internal struct TreeRecord(
+    val id: Long,
+    val parent: Long?,
+    val name: String,
+    val amount: Long?,
+    val note: String = ""
+)
+
+internal class TreeReads {
+    var rows = 0L
+    var parents = 0L
+    var values = 0L
+    var eligible = 0L
+    var forbidden = false
+    var action: (() -> Unit)? = None
+}
+
+internal class TreeSource(
+    val records: Array<TreeRecord>,
+    val reads: TreeReads = TreeReads()
+): TableSource<TreeRecord> {
+    public override val count: Long get() = records.size
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(records[index].id)
+    public override fun rowAt(index: Long): TreeRecord {
+        assertFalse(reads.forbidden, Some("tree presentation read a business record"))
+        reads.rows += 1L
+        return records[index]
+    }
+    public override fun indexOfKey(key: ViewKey): Long? {
+        for (index in 0L ..< records.size)
+            if (keyAt(index) == key)
+                return Some(index)
+        return None
+    }
+}
+
+internal fun treeRecords(): Array<TreeRecord> =
+    [
+        TreeRecord(10L, None, "same", Some(100L), "A"),
+        TreeRecord(11L, Some(10L), "leaf", Some(3L), "B"),
+        TreeRecord(20L, None, "same", Some(200L), "C"),
+        TreeRecord(12L, Some(10L), "branch", Some(5L), "D"),
+        TreeRecord(13L, Some(12L), "hit", Some(7L), "E"),
+        TreeRecord(21L, Some(20L), "leaf", None, "F"),
+        TreeRecord(30L, None, "other", Some(2L), "G")
+    ]
+
+internal fun treeDefinition(reads: TreeReads): GridTreeData<TreeRecord> =
+    GridTreeData(
+        {
+            row ->
+            reads.parents += 1L
+            when (row.parent) {
+                case Some(val id) -> Some(ViewKey.Number(id))
+                case None -> None
+            }
+        },
+        Some(GridColumnId("name"))
+    )
+
+internal fun treeColumns(reads: TreeReads): Array<GridColumn<TreeRecord>> =
+    [
+        gridColumn<TreeRecord, String>(
+            GridColumnId("name"),
+            "Name",
+            { row -> row.name },
+            gridTextValues(),
+            groupable = true
+        ),
+        gridColumn<TreeRecord, Long?>(
+            GridColumnId("amount"),
+            "Amount",
+            {
+                row ->
+                reads.values += 1L
+                reads.action?.invoke()
+                row.amount
+            },
+            nullableGridValues(gridLongValues()),
+            cell = Some { _ -> fail(Some("tree query built a view")) },
+            aggregations =
+                [
+                    nullableGridAggregation(gridSumLongAggregation()),
+                    nullableGridAggregation(gridCountAggregation<Long>())
+                ]
+        ),
+        gridColumn<TreeRecord, String>(
+            GridColumnId("note"),
+            "Note",
+            { row -> row.note },
+            gridTextValues(),
+            aggregations =
+                [
+                    gridAggregation<String, String, String>(
+                        GridAggregateId("join"),
+                        "Join",
+                        { "" },
+                        { a, b -> f"${a}${b}" },
+                        { value, _ -> value },
+                        { value -> value },
+                        { a, b -> a.compareTo(b) }
+                    )
+                ]
+        )
+    ]
+
+internal fun treeQuery(): GridQuery =
+    GridQuery(
+        aggregations =
+            [
+                GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum")),
+                GridAggregationSelection(GridColumnId("note"), GridAggregateId("join"))
+            ]
+    )
+
+internal fun treeModel(
+    source: TreeSource = TreeSource(treeRecords()),
+    query: GridQuery = treeQuery()
+): DataGridState<TreeRecord> =
+    DataGridState(
+        source,
+        treeColumns(source.reads),
+        query,
+        treeData = Some(treeDefinition(source.reads)),
+        expandedRows = GridExpandedRows(true),
+        rowSelection = GridRowSelectionMode.Multiple
+    )
+
+internal fun treeKey(id: Long): GridRowKey = GridRowKey.Data(ViewKey.Number(id))
+
+internal fun treeOnlyHit(): GridFilter =
+    GridFilter.Column(
+        GridColumnId("name"),
+        GridCondition.Compare(GridComparison.Equal, GridLiteral.Text("hit"))
+    )
+
+internal fun treeAssertRows(model: DataGridState<TreeRecord>, ids: Array<Long>) {
+    groupingAssertKeys(groupingDataKeys(model.result.rows), ids)
+}
+
+internal fun treeTotal(model: DataGridState<TreeRecord>, id: Long, expected: String) {
+    assertEquals(
+        Some(GridAggregateDisplay.Value(expected)),
+        model.treeAggregations(ViewKey.Number(id))!!.total(GridColumnId("amount"))
+    )
+}

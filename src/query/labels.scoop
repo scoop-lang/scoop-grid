@@ -1,0 +1,46 @@
+package scoop.grid
+
+/** Display text and accessible names do not participate in query identity. */
+public class GridQuickFilterLabels public constructor(
+    public val placeholder: String = "快速筛选",
+    public val inputName: String = "快速筛选",
+    public val apply: String = "应用",
+    public val applyName: String = "应用快速筛选",
+    public val clear: String = "清除",
+    public val clearName: String = "清除快速筛选"
+)
+
+public class GridPagerLabels public constructor(
+    public val all: String = "全部",
+    public val size: (Long) -> String = { count -> f"${count} / 页" },
+    public val sizeName: String = "每页条数",
+    public val rows: (Long) -> String = { count -> f"共 ${count} 条" },
+    public val status: (Long, Long, Long) -> String =
+        { count, page, pages -> f"共 ${count} 条 · ${page} / ${pages} 页" },
+    public val previous: String = "上一页",
+    public val next: String = "下一页",
+    public val page: (Long) -> String = { number -> f"第 ${number} 页" },
+    public val name: String = "结果分页",
+    public val rootSize: (Long) -> String = { count -> f"${count} 组 / 页" },
+    public val rootSizeName: String = "每页根组数",
+    public val roots: (Long, Long) -> String = { count, records -> f"共 ${count} 组 · ${records} 条" },
+    public val rootStatus: (Long, Long, Long, Long) -> String =
+        { count, records, page, pages -> f"共 ${count} 组 · ${records} 条 · ${page} / ${pages} 页" },
+    public val treeRootSize: (Long) -> String = { count -> f"${count} 根 / 页" },
+    public val treeRootSizeName: String = "每页根节点数",
+    public val treeRoots: (Long, Long) -> String =
+        { count, records -> f"共 ${count} 根 · 匹配 ${records} 条" },
+    public val treeRootStatus: (Long, Long, Long, Long) -> String =
+        { count, records, page, pages -> f"共 ${count} 根 · 匹配 ${records} 条 · ${page} / ${pages} 页" },
+    public val loaded: (GridExternalAvailability, Long) -> String =
+        {
+            value, page ->
+            val total =
+                when (value.rootTotal) {
+                    case Some(val count) -> f"共 ${count} 项";
+                    case None -> "总数未知"
+                }
+            f"已加载 ${value.loadedRows} 条 · ${total} · 第 ${page} 页"
+        },
+    public val ranges: String = "按需加载"
+)

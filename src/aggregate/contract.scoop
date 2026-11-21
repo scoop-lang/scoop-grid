@@ -1,0 +1,129 @@
+package scoop.grid
+
+import scoop.math.BigDecimal
+
+public class GridAggregateId public constructor(public val value: String): Equals<
+    GridAggregateId
+>, Hash {
+    init {
+        gridRequire(value != "", "grid aggregate id must not be empty")
+    }
+    public override operator fun equals(other: GridAggregateId): Boolean = value == other.value
+    public override fun hash(): Long = value.hash()
+}
+
+public struct GridAggregationSelection(
+    val column: GridColumnId,
+    val operation: GridAggregateId
+): Equals<GridAggregationSelection> {
+    public override operator fun equals(other: GridAggregationSelection): Boolean =
+        column == other.column && operation == other.operation
+}
+
+/** Display data is separate from the typed result retained by an aggregation. */
+public enum GridAggregateDisplay: Equals<GridAggregateDisplay> {
+    Value(String), Missing, Failed(String)
+    public override operator fun equals(other: GridAggregateDisplay): Boolean =
+        when ((this, other)) {
+            case(Value(val a), Value(val b)) -> a == b
+            case(Missing, Missing) -> true
+            case(Failed(val a), Failed(val b)) -> a == b
+            else -> false
+        }
+}
+
+public class GridAggregation<T> internal constructor(
+    public val id: GridAggregateId,
+    public val title: String,
+    internal val start: () -> GridValueAggregation<T>
+)
+
+/** Each factory retains A and R without widening them to a dynamic value. */
+public fun <T, A, R> gridAggregation(
+    id: GridAggregateId,
+    title: String,
+    seed: () -> A,
+    add: (A, T) -> A,
+    finish: (A, Long) -> R,
+    format: (R) -> String,
+    compare: (R, R) -> Long,
+    numericValue: (R) -> BigDecimal? = { _ -> None },
+    empty: R? = None
+): GridAggregation<T> =
+    GridAggregation(
+        id,
+        title,
+        { -> TypedGridAggregation(seed, add, finish, format, compare, numericValue, empty) }
+    )
+
+public fun <T> nullableGridAggregation(value: GridAggregation<T>): GridAggregation<T?> =
+    GridAggregation(value.id, value.title, { -> NullableGridAggregation(value.start()) })
+
+public class GridColumnAggregation<Row> internal constructor(
+    public val id: GridAggregateId,
+    public val title: String,
+    internal val start: () -> GridRowAggregation<Row>
+)
+
+internal fun <Row, T> gridBindAggregation(
+    value: (Row) -> T,
+    missing: (T) -> Boolean,
+    operation: GridAggregation<T>
+): GridColumnAggregation<Row> =
+    GridColumnAggregation(
+        operation.id,
+        operation.title,
+        { -> BoundGridAggregation(operation.start(), value, missing) }
+    )
+
+internal interface GridValueAggregation<T> {
+    fun ensure(group: Long)
+    fun add(group: Long, value: T)
+    fun finish(): GridAggregateValues
+}
+
+internal interface GridRowAggregation<Row> {
+    fun ensure(group: Long)
+    fun add(group: Long, row: Row)
+    fun addGroups(groups: Array<Long>, row: Row)
+    fun finish(): GridAggregateValues
+}
+
+internal interface GridAggregateValues {
+    fun display(group: Long): GridAggregateDisplay
+    fun number(group: Long): BigDecimal?
+    fun compare(left: Long, right: Long): Long
+}
+
+private class BoundGridAggregation<Row, T>(
+    private val target: GridValueAggregation<T>,
+    private val value: (Row) -> T,
+    private val missing: (T) -> Boolean
+): GridRowAggregation<Row> {
+    public override fun ensure(group: Long) = target.ensure(group)
+    public override fun add(group: Long, row: Row) {
+        val current = value(row)
+        if (!missing(current))
+            target.add(group, current)
+    }
+    public override fun addGroups(groups: Array<Long>, row: Row) {
+        val current = value(row)
+        if (!missing(current))
+            for (group in groups)
+                target.add(group, current)
+    }
+    public override fun finish(): GridAggregateValues = target.finish()
+}
+
+private class NullableGridAggregation<T>(
+    private val target: GridValueAggregation<T>
+): GridValueAggregation<T?> {
+    public override fun ensure(group: Long) = target.ensure(group)
+    public override fun add(group: Long, value: T?) {
+        when (value) {
+            case Some(val current) -> target.add(group, current)
+            case None -> {}
+        }
+    }
+    public override fun finish(): GridAggregateValues = target.finish()
+}

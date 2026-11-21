@@ -1,0 +1,30 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.ui.component.TableSource
+
+public struct GridFilterValue(val key: GridLiteral, val label: String)
+
+/** A complete local candidate snapshot, created only by an explicit model action. */
+public class GridFilterValues internal constructor(
+    public val values: Array<GridFilterValue>,
+    private val positions: HashMap<GridLiteral, Long>
+) {
+    internal fun indexOf(key: GridLiteral): Long? = positions[key]
+}
+
+internal fun <Row> collectGridFilterValues(
+    source: TableSource<Row>,
+    column: GridColumn<Row>
+): GridFilterValues {
+    val seen = HashMap<GridLiteral, Long>()
+    val values = ArrayList<GridFilterValue>()
+    for (index in 0L ..< source.count) {
+        val entry = column.filterValue(source.rowAt(index))
+        if (!seen.containsKey(entry.key)) {
+            seen.put(entry.key, values.size)
+            values.add(entry)
+        }
+    }
+    return GridFilterValues(values.toArray(), seen)
+}

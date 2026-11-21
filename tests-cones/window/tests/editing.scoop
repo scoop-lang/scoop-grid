@@ -1,0 +1,449 @@
+package scoop.grid.tests.window
+
+import scoop.graphics.Point
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.surface.sendSurfaceKey
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.text.TextEditorState
+import scoop.ui.text.TextInputStartOptions
+import scoop.window.*
+
+internal class EditRow(val id: Long, val name: String, val amount: Long)
+
+internal class TrackedEditor<T>(
+    val text: GridTextEditor<T>,
+    private val direct: Boolean = true
+): GridEditor<T> {
+    var focus: FocusHandle? = None
+    var submitting = false
+    public override val composing: Boolean get() = text.composing
+    public override fun candidate(): GridCandidate<T> = text.candidate()
+    public override fun importText(value: String): String? = text.importText(value)
+    public override fun startInput(state: TextEditorState): TextInputStartOptions? =
+        if (direct)
+            text.startInput(state)
+        else
+            None
+    public override fun cancelComposition() {
+        text.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        focus = Some(options.focus)
+        submitting = options.submitting
+        return text.view(options)
+    }
+    val focused: Boolean get() = focus?.hasFocus ?: false
+}
+
+internal class GridEditingProbe {
+    val visible = state(false)
+    val enabled = state(true)
+    val show = state(true)
+    val spanned = state(false)
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val outside = FocusHandle()
+    val ends = ArrayList<GridEditEnd>()
+    val pastes = ArrayList<GridPasteResult>()
+    var multiline = false
+    var text: TrackedEditor<String>? = None
+    var number: TrackedEditor<Long>? = None
+    var data =
+        TableRows(
+            Array<TableRecord<EditRow>>(200L) {
+                index -> TableRecord(ViewKey.Number(index), EditRow(index, f"row-${index}", index))
+            }
+        )
+    val model = DataGridState(data, columns())
+    val ime = GridSystemImeProbe(this)
+    val interaction = GridEditInteractionProbe(this)
+    val paste = GridPasteProbe(this)
+    val direct = GridDirectInputProbe(this)
+    var allowDirect = true
+    var connection: TextInputConnection? = None
+    var defer = false
+    var submissions = 0
+    var completion: GridCommit<EditRow>? = None
+    var pending: TableRows<EditRow>? = None
+    var created = 0
+    var window: Window? = None
+    var frame: ComponentScope? = None
+    var phase = 0
+    var finished = false
+    var observedEditing: GridCellAddress? = None
+    var observedError: String? = None
+    var observedSubmitting = false
+    fun columns(): Array<GridColumn<EditRow>> {
+        val probe = this
+        val size = TableColumnSize(GridTrack.Fixed(200.0))
+        return [
+            gridColumn<EditRow, String>(
+                GridColumnId("name"),
+                "Name",
+                { row -> row.name },
+                gridTextValues(),
+                size,
+                edit =
+                    Some(
+                        gridEdit<EditRow, String>(
+                            {
+                                value ->
+                                val editor =
+                                    TrackedEditor(
+                                        gridTextEditor(value, probe.multiline),
+                                        probe.allowDirect
+                                    )
+                                probe.text = Some(editor)
+                                probe.created += 1
+                                editor
+                            },
+                            {
+                                change,
+                                completion -> probe.submit(
+                                    EditRow(change.row.id, change.value, change.row.amount),
+                                    completion
+                                )
+                            }
+                        )
+                    )
+            ),
+            gridColumn<EditRow, Long>(
+                GridColumnId("amount"),
+                "Amount",
+                { row -> row.amount },
+                gridLongValues(),
+                size,
+                edit =
+                    Some(
+                        gridEdit<EditRow, Long>(
+                            {
+                                value ->
+                                val editor = TrackedEditor(gridLongEditor(value))
+                                probe.number = Some(editor)
+                                probe.created += 1
+                                editor
+                            },
+                            {
+                                change,
+                                completion -> probe.submit(
+                                    EditRow(change.row.id, change.row.name, change.value),
+                                    completion
+                                )
+                            },
+                            validate =
+                                {
+                                    _,
+                                    value -> if (value < 20L)
+                                        Some("至少为 20")
+                                    else
+                                        None
+                                }
+                        )
+                    )
+            ),
+            gridColumn<EditRow, Long>(
+                GridColumnId("id"),
+                "Id",
+                { row -> row.id },
+                gridLongValues(),
+                size
+            )
+        ]
+    }
+    fun address(row: Long, column: String): GridCellAddress =
+        GridCellAddress(ViewKey.Number(row), GridColumnId(column))
+    private fun replaced(row: EditRow): TableRows<EditRow> =
+        TableRows(
+            Array<TableRecord<EditRow>>(data.count) {
+                index ->
+                val old = data.rowAt(index)
+                TableRecord(
+                    data.keyAt(index),
+                    if (old.id == row.id)
+                        row
+                    else
+                        old
+                )
+            }
+        )
+    private fun submit(row: EditRow, value: GridCommit<EditRow>) {
+        submissions += 1
+        val next = replaced(row)
+        if (defer) {
+            completion = Some(value)
+            pending = Some(next)
+        } else {
+            assertTrue(value.accept(next))
+            data = next
+        }
+    }
+    private fun replace(row: EditRow) {
+        data = replaced(row)
+        model.replaceData(data)
+    }
+    private fun row(key: Long): EditRow = data.rowAt(data.indexOfKey(ViewKey.Number(key))!!)
+    fun accept() {
+        assertTrue(completion!!.accept(pending!!))
+        data = pending!!
+        assertFalse(completion!!.isActive)
+        assertFalse(completion!!.reject("late"))
+    }
+    fun start(window: Window) {
+        this.window = Some(window)
+        visible.value = true
+    }
+    fun next(active: ActiveApplication, target: Int, action: () -> Unit) {
+        phase = -1
+        assertTrue(
+            active.proxy().post {
+                _ ->
+                action()
+                phase = target
+                frame!!.requestFrame()
+            }
+        )
+    }
+    private fun key(active: ActiveApplication, target: Int, code: Int, shift: Boolean = false) {
+        next(active, target) {
+            assertTrue(sendSurfaceKey(window!!, code, true, shift = shift))
+            assertTrue(sendSurfaceKey(window!!, code, false, shift = shift))
+        }
+    }
+    fun advance(active: ActiveApplication) {
+        if (!(window?.isFocused ?: false))
+            return
+        if (phase >= 82) {
+            direct.advance(active)
+            return
+        }
+        if (phase >= 66) {
+            paste.advance(active)
+            return
+        }
+        if (phase >= 45) {
+            interaction.advance(active)
+            return
+        }
+        if (phase >= 34) {
+            ime.advance(active)
+            return
+        }
+        when (phase) {
+            case 0 -> {
+                assertFalse(handle.beginEdit(address(0L, "id")))
+                assertTrue(handle.focusCell(address(0L, "name")))
+                phase = 1
+            }
+            case 1 -> if (handle.focusedCell == Some(address(0L, "name"))) {
+                key(active, 2, 120)
+            }
+            case 2 -> if (text?.focused ?: false) {
+                assertEquals(handle.editingCell, observedEditing)
+                next(active, 3) { assertEquals(0, gridNativeText(window!!, "仮😀", 1)) }
+            }
+            case 3 -> {
+                assertTrue(text!!.composing)
+                assertTrue(gridNativeDocument(window!!, text!!.text.state))
+                assertEquals(GridEditAttempt.Composing, handle.commitEdit())
+                assertEquals(0, submissions)
+                key(active, 4, 53)
+            }
+            case 4 -> {
+                assertFalse(text!!.composing)
+                assertEquals(Some(address(0L, "name")), handle.editingCell)
+                key(active, 5, 53)
+            }
+            case 5 -> if (
+                handle.editingCell == None && handle.focusedCell == Some(address(0L, "name"))
+            ) {
+                assertEquals(GridEditEndReason.Cancelled, ends[ends.size - 1L].reason)
+                key(active, 6, 36)
+            }
+            case 6 -> if (text?.focused ?: false) {
+                val state = text!!.text.state
+                state.setSelection(Utf8Selection(0L, state.text.byteLength))
+                next(active, 7) { assertEquals(0, gridNativeText(window!!, "南😀")) }
+            }
+            case 7 -> {
+                assertEquals("南😀", text!!.text.state.text)
+                assertTrue(gridNativeDocument(window!!, text!!.text.state))
+                key(active, 8, 36)
+            }
+            case 8 -> if (handle.editingCell == None) {
+                assertEquals("南😀", row(0L).name)
+                assertEquals(1, submissions)
+                assertTrue(handle.beginEdit(address(0L, "amount")))
+                phase = 9
+            }
+            case 9 -> if (number?.focused ?: false) {
+                number!!.text.state.replaceAll("bad")
+                key(active, 10, 36)
+            }
+            case 10 -> {
+                assertTrue(handle.editError != None)
+                assertEquals(handle.editError, observedError)
+                assertTrue(number!!.focused)
+                assertEquals(1, submissions)
+                number!!.text.state.replaceAll("12")
+                key(active, 11, 36)
+            }
+            case 11 -> {
+                assertEquals(Some("至少为 20"), handle.editError)
+                number!!.text.state.replaceAll("20")
+                key(active, 12, 48)
+            }
+            case 12 -> if (handle.focusedCell == Some(address(0L, "id"))) {
+                assertEquals(None, handle.editingCell)
+                assertEquals(20L, row(0L).amount)
+                assertTrue(handle.beginEdit(address(0L, "name")))
+                phase = 13
+            }
+            case 13 -> if (text?.focused ?: false) {
+                assertEquals(GridEditAttempt.Committed, handle.commitEdit())
+                assertEquals(2, submissions)
+                assertEquals(GridEditEndReason.Unchanged, ends[ends.size - 1L].reason)
+                assertTrue(handle.beginEdit(address(0L, "name")))
+                phase = 14
+            }
+            case 14 -> if (text?.focused ?: false) {
+                defer = true
+                text!!.text.state.replaceAll("delayed")
+                assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+                assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+                assertFalse(handle.beginEdit(address(1L, "name")))
+                assertEquals(3, submissions)
+                assertTrue(handle.isSubmitting)
+                phase = 15
+            }
+            case 15 -> {
+                assertTrue(text!!.submitting)
+                assertTrue(observedSubmitting)
+                next(active, 16) { gridNativeText(window!!, "blocked") }
+            }
+            case 16 -> {
+                assertEquals("delayed", text!!.text.state.text)
+                assertTrue(completion!!.reject("保存失败"))
+                assertFalse(completion!!.reject("duplicate"))
+                phase = 17
+            }
+            case 17 -> {
+                assertEquals(Some("保存失败"), handle.editError)
+                assertFalse(handle.isSubmitting)
+                assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+                phase = 18
+            }
+            case 18 -> {
+                accept()
+                assertEquals("delayed", row(0L).name)
+                defer = false
+                assertTrue(handle.beginEdit(address(0L, "name")))
+                phase = 19
+            }
+            case 19 -> if (text?.focused ?: false) {
+                text!!.text.state.replaceAll("with-other-field")
+                replace(EditRow(0L, row(0L).name, 80L))
+                assertEquals(Some(address(0L, "name")), handle.editingCell)
+                assertEquals(GridEditAttempt.Committed, handle.commitEdit())
+                assertEquals(80L, row(0L).amount)
+                assertEquals("with-other-field", row(0L).name)
+                assertTrue(handle.beginEdit(address(0L, "name")))
+                phase = 20
+            }
+            case 20 -> if (text?.focused ?: false) {
+                text!!.text.state.replaceAll("obsolete")
+                replace(EditRow(0L, "external", 80L))
+                assertEquals(None, handle.editingCell)
+                assertEquals(GridEditEndReason.ValueChanged, ends[ends.size - 1L].reason)
+                assertTrue(handle.beginEdit(address(0L, "name")))
+                phase = 21
+            }
+            case 21 -> if (text?.focused ?: false) {
+                model.setColumnState(GridColumnState(GridColumnId("name"), visible = false))
+                assertEquals(None, handle.editingCell)
+                assertEquals(GridEditEndReason.Hidden, ends[ends.size - 1L].reason)
+                phase = 22
+            }
+            case 22 -> {
+                model.setColumnState(GridColumnState(GridColumnId("name")))
+                phase = 23
+            }
+            case 23 -> {
+                assertTrue(handle.beginEdit(address(0L, "name")))
+                phase = 24
+            }
+            case 24 -> if (text?.focused ?: false) {
+                model.replaceColumns(columns())
+                assertEquals(None, handle.editingCell)
+                assertEquals(GridEditEndReason.ColumnChanged, ends[ends.size - 1L].reason)
+                phase = 25
+            }
+            case 25 -> {
+                assertTrue(handle.beginEdit(address(0L, "name")))
+                phase = 26
+            }
+            case 26 -> if (text?.focused ?: false) {
+                data =
+                    TableRows(
+                        Array<TableRecord<EditRow>>(data.count - 1L) {
+                            index -> TableRecord(data.keyAt(index + 1L), data.rowAt(index + 1L))
+                        }
+                    )
+                model.replaceData(data)
+                assertEquals(None, handle.editingCell)
+                assertEquals(GridEditEndReason.RecordRemoved, ends[ends.size - 1L].reason)
+                phase = 27
+            }
+            case 27 -> if (handle.focusedCell == Some(address(1L, "name"))) {
+                assertTrue(handle.beginEdit(address(50L, "amount")))
+                phase = 28
+            }
+            case 28 -> if (number?.focused ?: false) {
+                scroll.scrollTo(Point(0.0, 0.0))
+                phase = 29
+            }
+            case 29 -> {
+                assertEquals(Some(address(50L, "amount")), handle.editingCell)
+                assertTrue(number!!.focus!!.isAttached)
+                assertTrue(number!!.focused)
+                enabled.value = false
+                phase = 30
+            }
+            case 30 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(GridEditEndReason.Disabled, ends[ends.size - 1L].reason)
+                enabled.value = true
+                phase = 31
+            }
+            case 31 -> {
+                assertTrue(handle.beginEdit(address(1L, "name")))
+                phase = 32
+            }
+            case 32 -> if (text?.focused ?: false) {
+                defer = true
+                text!!.text.state.replaceAll("after-close")
+                assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+                show.value = false
+                phase = 33
+            }
+            case 33 -> {
+                assertFalse(handle.isAttached)
+                assertFalse(completion!!.isActive)
+                assertFalse(completion!!.accept(pending!!))
+                assertEquals(GridEditEndReason.Detached, ends[ends.size - 1L].reason)
+                assertFalse(text!!.focus!!.isAttached)
+                defer = false
+                show.value = true
+                phase = 34
+            }
+            else -> {}
+        }
+    }
+}
+
+internal fun <Row> nativeGridData(row: GridRow<Row>): Row =
+    when (row) {
+        case Data(val value, _) -> value
+        else -> fail(Some("expected a business record"))
+    }

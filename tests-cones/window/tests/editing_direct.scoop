@@ -1,0 +1,286 @@
+package scoop.grid.tests.window
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.surface.sendSurfaceKey
+import scoop.tests.window.saveNativeInputSource
+import scoop.tests.window.restoreNativeInputSource
+import scoop.ui.ViewKey
+import scoop.ui.text.TextEditorState
+import scoop.window.*
+
+/** Uses the production cell and editor, including the system IME's first browsing key. */
+internal class GridDirectInputProbe(private val probe: GridEditingProbe) {
+    private var previous: TextInputConnection? = None
+    private var retained: TextInputConnection? = None
+    private var target = probe.address(4L, "name")
+    private var created = 0
+    private var originalName = ""
+    private var originalAmount = 0L
+    private var inputSource: Ptr<Unit>? = None
+    private var index = 0L
+    private var committed = ""
+    private val codes = [34, 4, 0, 31]
+    private val unicode = "é🙂é"
+    private val empty = TextEditorState()
+
+    fun close() {
+        when (inputSource) {
+            case Some(val source) -> {
+                inputSource = None
+                @Unsafe
+                {
+                    assertEquals(0, restoreNativeInputSource(source))
+                }
+            }
+            case None -> {}
+        }
+    }
+    private fun row(key: Long): EditRow =
+        nativeGridData(
+            probe.model.result.rows.rowAt(
+                probe.model.result.rows.indexOfKey(GridRowKey.Data(ViewKey.Number(key)))!!
+            )
+        )
+    private fun focus(key: Long, column: String) {
+        previous = probe.connection
+        target = probe.address(key, column)
+        originalName = row(key).name
+        originalAmount = row(key).amount
+        assertTrue(probe.handle.focusCell(target))
+    }
+    private fun ready(): Boolean =
+        probe.handle.focusedCell ==
+            Some(target) &&
+            probe.connection !=
+            None &&
+            probe.connection !=
+            previous &&
+            gridNativeDocument(probe.window!!, empty)
+    private fun editorReady(): Boolean =
+        (probe.text?.focused ?: false) &&
+            gridNativeDocument(probe.window!!, probe.text!!.text.state)
+    private fun sameConnection() {
+        assertEquals(retained, probe.connection)
+        assertTrue(gridNativeDocument(probe.window!!, probe.text!!.text.state))
+    }
+    private fun text(active: ActiveApplication, phase: Int, value: String, kind: Int = 0) {
+        retained = probe.connection
+        probe.next(active, phase) { assertEquals(0, gridNativeText(probe.window!!, value, kind)) }
+    }
+    private fun typeNext(active: ActiveApplication, phase: Int): Boolean {
+        if (index == codes.size)
+            return false
+        val code = codes[index]
+        index += 1L
+        probe.next(active, phase) { assertEquals(0, gridImeKey(probe.window!!, code)) }
+        return true
+    }
+    private fun browseKey(active: ActiveApplication, phase: Int) {
+        probe.next(active, phase) {
+            assertTrue(sendSurfaceKey(probe.window!!, 0, true))
+            assertTrue(sendSurfaceKey(probe.window!!, 0, false))
+        }
+    }
+    fun advance(active: ActiveApplication) {
+        val handle = probe.handle
+        val window = probe.window!!
+        when (probe.phase) {
+            case 82 -> {
+                probe.multiline = false
+                probe.model.setQuery(GridQuery())
+                focus(4L, "name")
+                probe.phase = 83
+            }
+            case 83 -> if (ready()) {
+                created = probe.created
+                text(active, 84, "")
+            }
+            case 84 -> {
+                assertEquals(created, probe.created)
+                assertEquals(None, handle.editingCell)
+                text(active, 85, unicode)
+            }
+            case 85 -> if (editorReady()) {
+                sameConnection()
+                assertEquals(unicode, probe.text!!.text.state.text)
+                assertEquals(created + 1, probe.created)
+                assertTrue(probe.text!!.text.state.undo())
+                assertEquals("", probe.text!!.text.state.text)
+                assertTrue(probe.text!!.text.state.redo())
+                text(active, 86, "Z")
+            }
+            case 86 -> if (editorReady()) {
+                assertEquals(unicode + "Z", probe.text!!.text.state.text)
+                assertEquals(originalName, row(4L).name)
+                assertEquals(GridEditAttempt.Committed, handle.commitEdit())
+                assertEquals(unicode + "Z", row(4L).name)
+                focus(5L, "amount")
+                probe.phase = 87
+            }
+            case 87 -> if (ready())
+                text(active, 88, "bad")
+            case 88 -> if (probe.number?.focused ?: false) {
+                assertEquals("bad", probe.number!!.text.state.text)
+                assertEquals(GridEditAttempt.Rejected, handle.commitEdit())
+                assertTrue(handle.editError != None)
+                assertEquals(originalAmount, row(5L).amount)
+                probe.number!!.text.state.replaceAll("220")
+                assertEquals(GridEditAttempt.Committed, handle.commitEdit())
+                assertEquals(220L, row(5L).amount)
+                probe.multiline = true
+                focus(6L, "name")
+                probe.phase = 89
+            }
+            case 89 -> if (ready())
+                text(active, 90, "a\n中")
+            case 90 -> if (editorReady()) {
+                assertTrue(probe.text!!.text.multiline)
+                assertEquals("a\n中", probe.text!!.text.state.text)
+                assertTrue(handle.cancelEdit())
+                assertEquals(originalName, row(6L).name)
+                probe.multiline = false
+                focus(7L, "name")
+                probe.phase = 91
+            }
+            case 91 -> if (ready()) {
+                retained = probe.connection
+                @Unsafe
+                {
+                    inputSource =
+                        Some(saveNativeInputSource() ?: fail(Some("cannot retain input source")))
+                }
+                probe.next(active, 92) { assertEquals(0, gridSelectPinyin(window)) }
+            }
+            case 92 -> {
+                assertTrue(gridPinyinSelected(window))
+                index = 0L
+                probe.next(active, 93) { assertEquals(0, gridImeKey(window, 45)) }
+            }
+            case 93 -> if (editorReady() && probe.text!!.composing) {
+                sameConnection()
+                if (typeNext(active, 93))
+                    return
+                assertEquals(GridEditAttempt.Composing, handle.commitEdit())
+                probe.next(active, 94) { assertEquals(0, gridImeKey(window, 53)) }
+            }
+            case 94 -> if (editorReady() && !probe.text!!.composing) {
+                assertEquals("", probe.text!!.text.state.text)
+                assertEquals(Some(target), handle.editingCell)
+                assertEquals(originalName, row(7L).name)
+                assertTrue(handle.cancelEdit())
+                focus(8L, "name")
+                probe.phase = 95
+            }
+            case 95 -> if (ready()) {
+                retained = probe.connection
+                index = 0L
+                assertTrue(gridPinyinSelected(window))
+                probe.next(active, 96) { assertEquals(0, gridImeKey(window, 45)) }
+            }
+            case 96 -> if (editorReady() && probe.text!!.composing) {
+                sameConnection()
+                if (typeNext(active, 96))
+                    return
+                probe.next(active, 97) { assertEquals(0, gridImeKey(window, 49)) }
+            }
+            case 97 -> if (editorReady() && !probe.text!!.composing) {
+                sameConnection()
+                committed = probe.text!!.text.state.text
+                var chinese = false
+                for (character in committed)
+                    if (character.code >= 13312 && character.code <= 40959)
+                        chinese = true
+                assertTrue(chinese, Some("system Pinyin did not commit Chinese text"))
+                probe.next(active, 98) { assertEquals(0, gridImeKey(window, 36)) }
+            }
+            case 98 -> if (handle.editingCell == None) {
+                assertEquals(committed, row(8L).name)
+                close()
+                created = probe.created
+                focus(9L, "id")
+                probe.phase = 99
+            }
+            case 99 -> if (handle.focusedCell == Some(target) && probe.connection == None) {
+                browseKey(active, 100)
+            }
+            case 100 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(created, probe.created)
+                probe.spanned.value = true
+                probe.phase = 101
+            }
+            case 101 -> {
+                focus(10L, "name")
+                probe.phase = 102
+            }
+            case 102 -> if (handle.focusedCell == Some(target) && probe.connection == None) {
+                browseKey(active, 103)
+            }
+            case 103 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(created, probe.created)
+                probe.spanned.value = false
+                probe.allowDirect = false
+                probe.phase = 104
+            }
+            case 104 -> {
+                focus(11L, "name")
+                probe.phase = 105
+            }
+            case 105 -> if (ready())
+                text(active, 106, "ignored")
+            case 106 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(created + 1, probe.created)
+                assertEquals(originalName, probe.text!!.text.state.text)
+                assertEquals(originalName, row(11L).name)
+                probe.allowDirect = true
+                focus(12L, "name")
+                probe.phase = 107
+            }
+            case 107 -> if (ready())
+                text(active, 108, "cancel", 1)
+            case 108 -> if (editorReady() && probe.text!!.composing) {
+                assertTrue(handle.cancelEdit())
+                assertFalse(probe.text!!.composing)
+                assertEquals("", probe.text!!.text.state.text)
+                assertEquals(originalName, row(12L).name)
+                focus(13L, "name")
+                probe.phase = 109
+            }
+            case 109 -> if (ready())
+                text(active, 110, "disable")
+            case 110 -> if (editorReady()) {
+                probe.enabled.value = false
+                probe.phase = 111
+            }
+            case 111 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(GridEditEndReason.Disabled, probe.ends[probe.ends.size - 1L].reason)
+                assertEquals(originalName, row(13L).name)
+                probe.enabled.value = true
+                probe.phase = 112
+            }
+            case 112 -> {
+                focus(14L, "name")
+                probe.phase = 113
+            }
+            case 113 -> if (ready())
+                text(active, 114, "close")
+            case 114 -> if (editorReady()) {
+                probe.show.value = false
+                probe.phase = 115
+            }
+            case 115 -> {
+                assertFalse(handle.isAttached)
+                assertFalse(probe.text!!.focus!!.isAttached)
+                assertEquals(originalName, row(14L).name)
+                assertEquals(GridEditEndReason.Detached, probe.ends[probe.ends.size - 1L].reason)
+                probe.finished = true
+                active.requestExit()
+            }
+            else -> {}
+        }
+    }
+}

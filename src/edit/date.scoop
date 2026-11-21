@@ -1,0 +1,123 @@
+package scoop.grid
+
+import scoop.datetime.LocalDate
+import scoop.text.trim
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.text.TextEditorState
+import scoop.window.LogicalKey
+import scoop.window.NamedKey
+
+public class GridDateEditor public constructor(
+    private val initial: LocalDate,
+    private val labels: GridEditorLabels = GridEditorLabels()
+): GridEditor<LocalDate> {
+    public val draft: DatePickerDraft = DatePickerDraft(TextEditorState(initial.toString()))
+    public val picker: DatePickerHandle = DatePickerHandle()
+    private val selected = state<LocalDate?>(Some(initial))
+    private val reference = FieldTarget()
+    private var ownsPopup = false
+    private val calendar =
+        calendarOptions {
+            rules = CalendarRules(required = true)
+            locale = labels.calendarLocale
+        }
+    public override val composing: Boolean get() = draft.editor.isComposing
+    public override val holdsFocus: Boolean get() = ownsPopup
+    public override fun candidate(): GridCandidate<LocalDate> =
+        when (LocalDate.parseOrNone(draft.editor.committedText.trim())) {
+            case Some(val value) -> GridCandidate.Value(value)
+            case None -> GridCandidate.Rejected(labels.invalidDate)
+        }
+    public override fun importText(text: String): String? {
+        if (composing)
+            return Some(labels.finishComposing)
+        draft.reset(text)
+        selected.value = LocalDate.parseOrNone(text.trim())
+        return None
+    }
+    public override fun cancelComposition() {
+        draft.editor.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        val editor = this
+        val selection =
+            binding(
+                { editor.selected.value },
+                {
+                    next -> if (!options.submitting) {
+                        editor.selected.value = next
+                        editor.draft.reset(next?.toString() ?: "")
+                        options.onEdited()
+                        options.onSubmit()
+                    }
+                }
+            )
+        val control =
+            datePicker(selection, initial) {
+                draft = Some(editor.draft)
+                handle = Some(editor.picker)
+                focus = FocusOptions(Some(options.focus))
+                labelTarget = Some(editor.reference)
+                fonts = Some(options.fonts)
+                theme = Some(options.theme)
+                readOnly = options.submitting
+                invalid = options.error != None
+                semantics = gridEditorSemantics(options)
+                placeholder = editor.labels.datePlaceholder
+                calendarButtonSemantics =
+                    ComponentSemantics(name = Some(editor.labels.calendarName))
+                calendar = editor.calendar
+                onOpenChange =
+                    {
+                        open -> if (open)
+                            editor.ownsPopup = true
+                    }
+                onClosed =
+                    {
+                        _ ->
+                        editor.ownsPopup = false
+                        options.onFocusSettled()
+                    }
+                parser =
+                    Some {
+                        text,
+                        _,
+                        _ -> when (LocalDate.parseOrNone(text.trim())) {
+                            case Some(val day) -> DatePickerParse.Date(day)
+                            case None -> DatePickerParse.Invalid(editor.labels.invalidDate)
+                        }
+                    }
+                format =
+                    Some {
+                        value,
+                        _ -> when (value) {
+                            case Single(val day) -> day?.toString() ?: ""
+                            else -> throw IllegalArgumentException(
+                                Some("grid date editor requires a single date")
+                            )
+                        }
+                    }
+            }
+        val guarded =
+            gridEditorInput(control) {
+                context,
+                key -> if (
+                    gridPlainKey(key) &&
+                        key.logicalKey ==
+                        LogicalKey.Named(NamedKey.Escape) &&
+                        !editor.composing &&
+                        !editor.picker.isOpen
+                ) {
+                    options.onCancel()
+                    context.consume()
+                }
+            }
+        return gridEditorField(guarded, options, reference)
+    }
+}
+
+public fun gridDateEditor(
+    value: LocalDate,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridDateEditor = GridDateEditor(value, labels)

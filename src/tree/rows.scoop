@@ -1,0 +1,120 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+private struct GridTreeEntry(val node: Long, val total: Boolean = false)
+
+internal class GridTreeRows<Row>(
+    private val tree: GridTreeComputed<Row>,
+    roots: Array<Long>,
+    private val expanded: GridExpandedRows,
+    private val totals: GridTotals
+): GridRowSource<Row> {
+    private val entries = ArrayList<GridTreeEntry>()
+    private val positions = HashMap<ViewKey, Long>()
+    init {
+        val pending = ArrayList<GridTreeEntry>()
+        for (at in 0L ..< roots.size)
+            pending.add(GridTreeEntry(roots[roots.size - at - 1L]))
+        while (pending.size > 0L) {
+            val entry = pending.removeAt(pending.size - 1L)
+            append(entry)
+            if (entry.total)
+                continue
+            val key = GridRowKey.Data(tree.topology.keys[entry.node])
+            val children = tree.order.children[entry.node]
+            if (children.size == 0L || !expanded.contains(key))
+                continue
+            if (totals.placement == GridTotalPlacement.Before)
+                append(GridTreeEntry(entry.node, true))
+            if (totals.placement == GridTotalPlacement.After)
+                pending.add(GridTreeEntry(entry.node, true))
+            for (at in 0L ..< children.size)
+                pending.add(GridTreeEntry(children[children.size - at - 1L]))
+        }
+    }
+    private fun append(entry: GridTreeEntry) {
+        val key = tree.topology.keys[entry.node]
+        val logical =
+            if (entry.total)
+                GridRowKey.Total(GridTotalKey.Tree(key))
+            else
+                GridRowKey.Data(key)
+        positions.put(logical.viewKey, entries.size)
+        entries.add(entry)
+    }
+    public override val count: Long get() = entries.size
+    private fun total(node: Long): GridTotalRow =
+        GridTotalRow(
+            GridTotalKey.Tree(tree.topology.keys[node]),
+            totals.label,
+            tree.aggregates.atGroup(node + 1L)
+        )
+    public override fun infoAt(index: Long): GridRowInfo {
+        val entry = entries[index]
+        return if (entry.total)
+            GridRowInfo.Total(total(entry.node))
+        else
+            GridRowInfo.Data(tree.topology.keys[entry.node])
+    }
+    public override fun keyAt(index: Long): ViewKey = rowKeyAt(index).viewKey
+    public override fun indexOfKey(key: ViewKey): Long? = positions[key]
+    public override fun rowAt(index: Long): GridRow<Row> {
+        val entry = entries[index]
+        return if (entry.total)
+            GridRow.Total(total(entry.node))
+        else
+            GridRow.Data(tree.topology.source.rowAt(entry.node), tree.topology.keys[entry.node])
+    }
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? {
+        val entry = entries[index]
+        return Some(
+            if (entry.total)
+                GridRowHierarchy(
+                    tree.topology.levels[entry.node] + 1L,
+                    Some(GridRowKey.Data(tree.topology.keys[entry.node]))
+                )
+            else
+                gridTreeHierarchy(tree, entry.node, expanded)
+        )
+    }
+}
+
+internal fun <Row> gridTreeHierarchy(
+    tree: GridTreeComputed<Row>,
+    node: Long,
+    expanded: GridExpandedRows
+): GridRowHierarchy {
+    val parent = tree.topology.parents[node]
+    return GridRowHierarchy(
+        tree.topology.levels[node],
+        if (parent < 0L)
+            None
+        else
+            Some(GridRowKey.Data(tree.topology.keys[parent])),
+        if (tree.order.children[node].size == 0L)
+            None
+        else
+            Some(expanded.contains(GridRowKey.Data(tree.topology.keys[node]))),
+        tree.matches.context(node)
+    )
+}
+
+internal class GridTreeDataRows<Row>(
+    source: TableSource<Row>,
+    private val tree: GridTreeComputed<Row>,
+    private val expanded: GridExpandedRows
+): GridRowSource<Row> {
+    private val data = GridDataRows(source)
+    public override val count: Long get() = data.count
+    public override fun keyAt(index: Long): ViewKey = data.keyAt(index)
+    public override fun rowAt(index: Long): GridRow<Row> = data.rowAt(index)
+    public override fun infoAt(index: Long): GridRowInfo = data.infoAt(index)
+    public override fun indexOfKey(key: ViewKey): Long? = data.indexOfKey(key)
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? {
+        val node = tree.topology.positions[data.infoAt(index).dataKey!!]!!
+        return Some(gridTreeHierarchy(tree, node, expanded))
+    }
+}

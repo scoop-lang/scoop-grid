@@ -1,0 +1,215 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+@Test
+private class GridPivotModelTest {
+    @Test
+    fun `pivot uses typed sparse combinations and exact aggregation without record rows`() {
+        val source = PivotSource(pivotRecords())
+        val model =
+            DataGridState(
+                source,
+                pivotColumns(source.reads),
+                pivotQuery(),
+                expandedRows = GridExpandedRows(true)
+            )
+        assertEquals(9L, model.columns.size)
+        assertEquals(6L, model.sourceColumns.size)
+        assertEquals(2L, model.result.rows.count)
+        assertEquals(9L, model.result.totalRows)
+        assertEquals(9L, source.reads.amounts)
+        val expected =
+            [
+                pivotId(Some(2L), 1L),
+                pivotId(Some(10L), 1L),
+                pivotId(Some(10L), 2L),
+                pivotId(None, 1L)
+            ]
+        for (at in 0L ..< expected.size)
+            assertEquals(expected[at], model.columns[1L + at * 2L].id)
+        assertEquals(
+            Some(GridAggregateDisplay.Value("9007199254740995")),
+            pivotValue(model, "North", pivotId(Some(10L), 1L))
+        )
+        assertEquals(
+            Some(GridAggregateDisplay.Value("af")),
+            pivotValue(model, "North", pivotId(Some(10L), 1L, "note", "join"))
+        )
+        assertEquals(
+            Some(GridAggregateDisplay.Missing),
+            pivotValue(model, "South", pivotId(None, 1L))
+        )
+        assertEquals(
+            Some(GridAggregateDisplay.Missing),
+            pivotValue(model, "North", pivotId(Some(2L), 1L))
+        )
+        assertEquals(
+            Some(GridAggregateDisplay.Value("9007199254741002")),
+            model.result.aggregates.total(pivotId(Some(10L), 1L))
+        )
+        assertEquals(0L, groupingDataKeys(model.result.rows).size)
+        assertEquals(None, model.result.rows.hierarchyAt(0L)!!.expanded)
+        assertFalse(model.setExpanded(GridRowKey.Group(pivotPath("North")), true))
+        assertFalse(model.columns[1L].sortable)
+        assertFalse(model.columns[1L].filterable)
+        when (model.columns[1L].editing) {
+            case None -> {};
+            case Some(_) -> fail()
+        }
+    }
+
+    @Test
+    fun `empty intersections differ from nonmissing counts and zero dimension results`() {
+        val source = PivotSource(pivotRecords())
+        val model = DataGridState(source, pivotColumns(source.reads), pivotQuery())
+        model.setAggregation(GridColumnId("amount"), Some(GridAggregateId("count")))
+        assertEquals(
+            Some(GridAggregateDisplay.Value("0")),
+            pivotValue(model, "North", pivotId(Some(2L), 1L, operation = "count"))
+        )
+        assertEquals(
+            Some(GridAggregateDisplay.Missing),
+            pivotValue(model, "South", pivotId(None, 1L, operation = "count"))
+        )
+        model.setQuery(model.query.withGrouping([]).withPivot(Some(GridPivot())))
+        assertEquals(1L, model.result.rows.count)
+        assertEquals(3L, model.columns.size)
+        val id =
+            GridColumnId(
+                GridColumnKey.Pivot(
+                    GridPivotColumnKey(
+                        [],
+                        GridAggregationSelection(GridColumnId("amount"), GridAggregateId("count"))
+                    )
+                )
+            )
+        assertEquals(Some(GridAggregateDisplay.Value("7")), model.result.aggregates.total(id))
+        model.replaceData(PivotSource([]))
+        assertEquals(1L, model.result.rows.count)
+        assertEquals(0L, model.result.totalRows)
+        assertEquals(Some(GridAggregateDisplay.Value("0")), model.result.aggregates.total(id))
+        assertEquals(GridRowKey.Total(GridTotalKey.AllFiltered), model.result.rows.rowKeyAt(0L))
+    }
+
+    @Test
+    fun `pivot identities separate labels types metric operations and source ids`() {
+        val source = PivotSource(pivotRecords())
+        val model = DataGridState(source, pivotColumns(source.reads, true), pivotQuery())
+        val identities = HashSet<GridColumnId>()
+        val native = HashSet<ViewKey>()
+        for (column in model.columns) {
+            assertTrue(identities.add(column.id))
+            assertTrue(native.add(column.id.viewKey))
+            val mimic = GridColumnId(column.id.value)
+            assertTrue(mimic != column.id)
+            assertTrue(native.add(mimic.viewKey))
+            assertFailsWith<IllegalArgumentException> {
+                GridGroupPart(column.id, GridLiteral.Text("same label"))
+            }
+        }
+        val id = GridColumnId("a:😄")
+        for (
+            value in [
+                GridLiteral.Empty,
+                GridLiteral.Text(""),
+                GridLiteral.Text("2"),
+                GridLiteral.Integer(2L),
+                GridLiteral.Number(2.0)
+            ]
+        ) {
+            val result =
+                GridColumnId(
+                    GridColumnKey.Pivot(
+                        GridPivotColumnKey(
+                            [GridGroupPart(id, value)],
+                            GridAggregationSelection(GridColumnId("m:2"), GridAggregateId("sum"))
+                        )
+                    )
+                )
+            assertTrue(native.add(result.viewKey))
+            assertEquals(result, GridColumnId(result.key))
+        }
+        assertTrue(pivotId(Some(2L), 1L) != pivotId(Some(2L), 1L, operation = "count"))
+        assertEquals(pivotId(Some(2L), 1L), model.columns[1L].id)
+    }
+
+    @Test
+    fun `pivot root pages subtotal expansion and group selection retain business membership`() {
+        val source = PivotSource(pivotRecords())
+        val model =
+            DataGridState(
+                source,
+                pivotColumns(source.reads),
+                pivotQuery(true)
+                .withPagination(GridPagination.Page(1L, 1L))
+                .withGroupTotals(GridTotals(GridTotalPlacement.After, "Sub"))
+                .withTotals(GridTotals(GridTotalPlacement.After, "All")),
+                rowSelection = GridRowSelectionMode.Multiple,
+                pinnedRows = GridPinnedRows([ViewKey.Number(0L)])
+            )
+        assertEquals(2L, model.result.pageCount)
+        assertEquals(4L, model.result.pageRows.count)
+        assertEquals(0L, model.result.topCount)
+        assertEquals(2L, model.result.rows.count)
+        val key = GridRowKey.Group(pivotPath("South"))
+        model.setExpanded(key, true)
+        assertEquals(5L, model.result.rows.count)
+        assertEquals(
+            GridRowKey.Total(GridTotalKey.Group(pivotPath("South"))),
+            model.result.rows.rowKeyAt(3L)
+        )
+        assertTrue(model.selectGroupRows(pivotPath("South"), true))
+        assertEquals(4L, model.selectedRowKeys.size)
+        assertEquals(CheckState.Checked, model.groupRowSelection(pivotPath("South")))
+        assertFalse(model.canExpand(GridRowKey.Group(pivotPath("South", Some("A")))))
+        source.reads.forbidden = true
+        val aggregate = model.result.aggregates
+        model.setExpanded(key, false)
+        model.setExpanded(key, true)
+        model.setPage(0L)
+        model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "Grand")))
+        model.pinRow(ViewKey.Number(8L), GridRowPin.Bottom)
+        assertTrue(aggregate === model.result.aggregates)
+        assertEquals(9L, source.reads.amounts)
+        source.reads.forbidden = false
+        model.setPivot(None)
+        assertEquals(1L, model.result.topCount)
+        assertEquals(1L, model.result.bottomCount)
+        assertEquals(4L, model.selectedRowKeys.size)
+    }
+
+    @Test
+    fun `pivot validation and failed callbacks preserve the complete prior snapshot`() {
+        val source = PivotSource(pivotRecords())
+        val model = DataGridState(source, pivotColumns(source.reads), pivotQuery())
+        val result = model.result
+        val columns = model.columns
+        val states = model.columnState
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(model.query.withAggregations([]))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setPivot(
+                Some(GridPivot([GridSort(GridColumnId("year")), GridSort(GridColumnId("year"))]))
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setPivot(Some(GridPivot([GridSort(GridColumnId("amount"))])))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setTreeData(Some(GridTreeData<PivotRecord>({ _ -> None })))
+        }
+        val next = PivotSource(pivotRecords())
+        source.reads.action = Some { throw IllegalArgumentException(Some("read failed")) }
+        assertFailsWith<IllegalArgumentException> { model.replaceData(next) }
+        source.reads.action = None
+        assertTrue(result === model.result)
+        assertTrue(columns === model.columns)
+        assertTrue(states === model.columnState)
+        assertEquals(9L, model.columns.size)
+    }
+}

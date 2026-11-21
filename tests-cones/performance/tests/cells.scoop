@@ -1,0 +1,76 @@
+package scoop.grid.tests.performance
+
+import scoop.collections.HashMap
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+
+internal class PerfCell(val address: GridCellAddress) {
+    var visible = false
+    var epoch = -1L
+}
+
+internal class PerfCells {
+    val live = HashMap<GridCellAddress, PerfCell>()
+    var factories = 0L
+    var measures = 0L
+    var mountedPeak = 0L
+    var actions = 0L
+    var epoch = 0L
+    fun view(row: Long, column: Long, content: View): View {
+        factories += 1L
+        val record = PerfCell(GridCellAddress(ViewKey.Number(row), GridColumnId(f"c${column}")))
+        return element({ scope -> PerfObservedCell(this, record, scope) }, [content])
+    }
+}
+
+private class PerfObservedCell(
+    private val cells: PerfCells,
+    private val record: PerfCell,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    public override fun onMount() {
+        assertFalse(cells.live.containsKey(record.address), Some("duplicate real cell"))
+        cells.live.put(record.address, record)
+        if (cells.live.size > cells.mountedPeak)
+            cells.mountedPeak = cells.live.size
+    }
+    public override fun onUnmount() {
+        cells.live.remove(record.address)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        cells.measures += 1L
+        val child = context.measureChild(0L, constraints)
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(child, Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val size = context.size
+        record.epoch = cells.epoch
+        context.draw {
+            paint -> record.visible =
+                when (paint.canvas.localClipBounds) {
+                    case Some(val clip) ->
+                    clip.width >
+                        0.0 &&
+                        clip.height >
+                        0.0 &&
+                        clip.x <
+                        size.width &&
+                        clip.y <
+                        size.height &&
+                        clip.x +
+                        clip.width >
+                        0.0 &&
+                        clip.y +
+                        clip.height >
+                        0.0
+                    case None -> false
+                }
+        }
+        context.children()
+    }
+}

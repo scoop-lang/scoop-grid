@@ -1,0 +1,224 @@
+package scoop.grid
+
+import scoop.datetime.LocalDate
+import scoop.text.*
+import scoop.ui.*
+import scoop.ui.component.DatePickerDraft
+import scoop.ui.component.FieldTarget
+import scoop.ui.text.TextEditorState
+
+public enum GridFilterOperator: Equals<GridFilterOperator> {
+    Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual, Between,
+    Contains, StartsWith, EndsWith, Missing, Present, In
+    public override operator fun equals(other: GridFilterOperator): Boolean =
+        when ((this, other)) {
+            case(Equal, Equal) -> true
+            case(NotEqual, NotEqual) -> true
+            case(Less, Less) -> true
+            case(LessOrEqual, LessOrEqual) -> true
+            case(Greater, Greater) -> true
+            case(GreaterOrEqual, GreaterOrEqual) -> true
+            case(Between, Between) -> true
+            case(Contains, Contains) -> true
+            case(StartsWith, StartsWith) -> true
+            case(EndsWith, EndsWith) -> true
+            case(Missing, Missing) -> true
+            case(Present, Present) -> true
+            case(In, In) -> true
+            else -> false
+        }
+}
+
+internal fun gridFilterLiteralText(literal: GridLiteral): String =
+    when (literal) {
+        case Text(val text) -> text
+        case Integer(val number) -> f"${number}"
+        case Number(val number) -> f"${number}"
+        case BooleanValue(val value) -> if (value)
+            "true"
+        else
+            "false"
+        case Date(val date) -> date.toString()
+        case Empty -> ""
+    }
+
+internal fun gridFilterDefault(kind: GridValueKind, date: LocalDate): GridLiteral =
+    when (kind) {
+        case Text -> GridLiteral.Text("")
+        case Integer -> GridLiteral.Integer(0L)
+        case Number -> GridLiteral.Number(0.0)
+        case BooleanValue -> GridLiteral.BooleanValue(true)
+        case Date -> GridLiteral.Date(date)
+    }
+
+internal class GridFilterScalar(initial: GridLiteral) {
+    private var original = initial
+    val text = TextEditorState(gridFilterLiteralText(initial))
+    val boolean = state(initial == GridLiteral.BooleanValue(true))
+    val date = state(LocalDate.parseOrNone(text.committedText.trim()))
+    val dateDraft = DatePickerDraft(text)
+    val composing: Boolean get() = text.isComposing
+
+    fun reset(value: GridLiteral) {
+        original = value
+        dateDraft.reset(gridFilterLiteralText(value))
+        boolean.value = value == GridLiteral.BooleanValue(true)
+        date.value = LocalDate.parseOrNone(text.committedText.trim())
+    }
+    fun setDate(value: LocalDate?) {
+        date.value = value
+        dateDraft.reset(value?.toString() ?: "")
+    }
+    fun value(kind: GridValueKind, labels: GridFilterLabels = GridFilterLabels()): GridLiteral =
+        when (kind) {
+            case Text -> GridLiteral.Text(text.committedText)
+            case Integer -> GridLiteral.Integer(
+                text.committedText.trim().toLongOrNone() ?:
+                    throw IllegalArgumentException(Some(labels.invalidInteger))
+            )
+            case Number -> {
+                val value =
+                    text.committedText.trim().toDoubleOrNone() ?:
+                        throw IllegalArgumentException(Some(labels.invalidNumber))
+                gridRequire(value.isFinite(), labels.nonfiniteNumber)
+                when (original) {
+                    case Integer(_) -> if (text.committedText == gridFilterLiteralText(original))
+                        original
+                    else
+                        GridLiteral.Number(value)
+                    else -> GridLiteral.Number(value)
+                }
+            }
+            case BooleanValue -> GridLiteral.BooleanValue(boolean.value)
+            case Date -> GridLiteral.Date(
+                LocalDate.parseOrNone(text.committedText.trim()) ?:
+                    throw IllegalArgumentException(Some(labels.invalidDate))
+            )
+        }
+}
+
+internal class GridFilterConditionDraft(
+    val key: ViewKey,
+    column: GridColumnId,
+    initial: GridCondition
+) {
+    val column = state(column)
+    val caseTarget = FieldTarget()
+    val operation = state(gridFilterOperator(initial))
+    val first = GridFilterScalar(gridFilterOperand(initial, false))
+    val second = GridFilterScalar(gridFilterOperand(initial, true))
+    val caseSensitive =
+        state(
+            when (initial) {
+                case Text(_, _, val sensitive) -> sensitive
+                else -> false
+            }
+        )
+    val values =
+        GridFilterSetDraft(
+            when (initial) {
+                case In(val items) -> items
+                else -> []
+            }
+        )
+    val composing: Boolean get() =
+        when (operation.value) {
+            case Missing -> false
+            case Present -> false
+            case In -> values.search.isComposing
+            case Between -> first.composing || second.composing
+            else -> first.composing
+        }
+
+    fun setColumn(
+        id: GridColumnId,
+        initial: GridLiteral,
+        operation: GridFilterOperator = GridFilterOperator.Equal
+    ) {
+        if (composing)
+            return
+        column.value = id
+        this.operation.value = operation
+        first.reset(initial)
+        second.reset(initial)
+        caseSensitive.value = false
+        values.reset()
+    }
+    fun condition(
+        kind: GridValueKind,
+        labels: GridFilterLabels = GridFilterLabels()
+    ): GridCondition =
+        when (operation.value) {
+            case Missing -> GridCondition.Missing(true)
+            case Present -> GridCondition.Missing(false)
+            case In -> GridCondition.In(values.selectedValues())
+            case Between -> GridCondition.Between(
+                first.value(kind, labels),
+                second.value(kind, labels)
+            )
+            case Contains -> GridCondition.Text(
+                GridTextMatch.Contains,
+                first.text.committedText,
+                caseSensitive.value
+            )
+            case StartsWith -> GridCondition.Text(
+                GridTextMatch.StartsWith,
+                first.text.committedText,
+                caseSensitive.value
+            )
+            case EndsWith -> GridCondition.Text(
+                GridTextMatch.EndsWith,
+                first.text.committedText,
+                caseSensitive.value
+            )
+            else -> GridCondition.Compare(
+                gridFilterComparison(operation.value),
+                first.value(kind, labels)
+            )
+        }
+}
+
+private fun gridFilterOperand(condition: GridCondition, second: Boolean): GridLiteral =
+    when (condition) {
+        case Compare(_, val literal) -> literal
+        case Between(val lower, val upper) -> if (second)
+            upper
+        else
+            lower
+        case Text(_, val text, _) -> GridLiteral.Text(text)
+        else -> GridLiteral.Text("")
+    }
+
+internal fun gridFilterOperator(condition: GridCondition): GridFilterOperator =
+    when (condition) {
+        case Missing(val missing) -> if (missing)
+            GridFilterOperator.Missing
+        else
+            GridFilterOperator.Present
+        case In(_) -> GridFilterOperator.In
+        case Between(_, _) -> GridFilterOperator.Between
+        case Text(val match, _, _) -> when (match) {
+            case Contains -> GridFilterOperator.Contains
+            case StartsWith -> GridFilterOperator.StartsWith
+            case EndsWith -> GridFilterOperator.EndsWith
+        }
+        case Compare(val comparison, _) -> when (comparison) {
+            case Equal -> GridFilterOperator.Equal
+            case NotEqual -> GridFilterOperator.NotEqual
+            case Less -> GridFilterOperator.Less
+            case LessOrEqual -> GridFilterOperator.LessOrEqual
+            case Greater -> GridFilterOperator.Greater
+            case GreaterOrEqual -> GridFilterOperator.GreaterOrEqual
+        }
+    }
+
+private fun gridFilterComparison(operation: GridFilterOperator): GridComparison =
+    when (operation) {
+        case Equal -> GridComparison.Equal
+        case NotEqual -> GridComparison.NotEqual
+        case Less -> GridComparison.Less
+        case LessOrEqual -> GridComparison.LessOrEqual
+        case Greater -> GridComparison.Greater
+        case GreaterOrEqual -> GridComparison.GreaterOrEqual
+        else -> throw IllegalArgumentException(Some("筛选方式不是比较条件"))
+    }

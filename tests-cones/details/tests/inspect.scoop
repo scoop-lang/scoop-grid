@@ -1,0 +1,199 @@
+package scoop.grid.tests.details
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.text.contains
+import scoop.ui.*
+
+internal fun DetailProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            table = find(root!!, "AXTable")
+            assertEquals(100000L, table!!.rowCount)
+            assertEquals(0L, reads.views)
+        }
+        case 1 -> retry = handle.focusedCell != Some(detailAddress())
+        case 2 -> assertTrue(model.isDetailExpanded(ViewKey.Number(0L)))
+        case 3 -> {
+            assertEquals(100001L, table!!.rowCount)
+            assertEquals(1L, live.size)
+            assertEquals(None, table!!.cell(1L, 0L)?.numericValue)
+            assertEquals(1L, ownRows(keep(table!!.row(1L)!!)))
+            bounds(named("detail-content-0"), Rect(24.0, 88.0, 576.0, 220.0))
+        }
+        case 4 -> {
+            assertEquals(100002L, table!!.rowCount)
+            assertEquals(1L, live.size)
+            assertEquals(0L, reads.distantViews)
+            val beforeViews = reads.views
+            assertEquals(None, table!!.cell(50002L, 0L)?.numericValue)
+            assertEquals(beforeViews, reads.views)
+        }
+        case 5 -> {
+            retry = !panel().textFocus.hasFocus
+            if (!retry) {
+                assertEquals(None, handle.focusedCell)
+                assertEquals(None, handle.pendingCell)
+                assertFalse(handle.isPending)
+            }
+        }
+        case 6 -> assertTrue(panel().text.text.contains("a"))
+        case 7 -> {
+            retry = !panel().choiceFocus.hasFocus
+            if (!retry)
+                selectNode = Some(named("detail-select-0"))
+        }
+        case 9 -> {
+            assertTrue(panel().popup.isOpen)
+            popup = Some(named("detail-popup-0"))
+        }
+        case 10 -> {
+            assertFalse(panel().popup.isOpen)
+            assertFalse(popup!!.flag(0))
+            retry = !panel().choiceFocus.hasFocus
+        }
+        case 11 -> retry = handle.focusedCell != Some(detailAddress())
+        case 12 -> retry = handle.focusedCell != Some(detailAddress(1L))
+        case 13 -> retry = handle.focusedCell != Some(detailAddress())
+        case 14 -> {
+            assertEquals(2L, model.result.topCount)
+            bounds(named("detail-content-0"), Rect(24.0, 88.0, 576.0, 220.0))
+        }
+        case 15 -> {
+            assertEquals(220.0, scroll.offset.x)
+            bounds(named("detail-content-0"), Rect(24.0, 88.0, 576.0, 220.0))
+        }
+        case 16 -> bounds(named("detail-content-0"), Rect(24.0, 88.0, 576.0, 268.0))
+        case 17 -> bounds(named("detail-content-0"), Rect(24.0, 88.0, 456.0, 220.0))
+        case 18 -> {
+            assertFalse(named("detail-input-0").flag(1))
+            assertFalse(handle.focusDetail(ViewKey.Number(0L)))
+            when (handle.setDetailExpanded(ViewKey.Number(0L), false)) {
+                case Rejected(_) -> {}
+                else -> fail(Some("disabled details were changed"))
+            }
+        }
+        case 19 -> assertTrue(named("detail-input-0").flag(1))
+        case 20 -> {
+            retry = !(live[50000L]?.textFocus?.hasFocus ?: false)
+            if (!retry) {
+                assertEquals(None, handle.focusedCell)
+                assertTrue(reads.views < 40L)
+                assertTrue(scroll.offset.y > 1000000.0)
+            }
+        }
+        case 21 -> {
+            retry = handle.focusedCell != Some(detailAddress(50000L))
+            if (!retry) {
+                assertFalse(retired!!.handle.isAttached)
+                assertTrue(retired!!.inputScope.isClosed)
+            }
+        }
+        case 22 -> retry = !(live[0L]?.textFocus?.hasFocus ?: false)
+        case 23 -> {
+            assertFalse(model.isDetailExpanded(ViewKey.Number(0L)))
+            assertFalse(retired!!.handle.isAttached)
+            assertFalse(retired!!.textFocus.hasFocus)
+            assertEquals(None, handle.focusedCell)
+            retry = !(gridInput?.activity?.hasFocus ?: false)
+        }
+        case 24 -> retry = !(options?.focus?.hasFocus ?: false)
+        case 25 -> {
+            assertTrue(handle.editError != None)
+            assertEquals(0L, model.result.detailCount)
+            retry = !(options?.focus?.hasFocus ?: false)
+        }
+        case 26 -> {
+            assertTrue(handle.isSubmitting)
+            assertEquals(0L, model.result.detailCount)
+        }
+        case 27 -> {
+            assertEquals(None, handle.editingCell)
+            assertEquals(0L, model.result.detailCount)
+        }
+        case _ if (phase == 28 || phase == 31 || phase == 35) -> {
+            assertTrue(panel().handle.isAttached)
+            if (phase == 35)
+                selectNode = Some(named("detail-select-0"))
+        }
+        case _ if (phase == 29 || phase == 32) -> {
+            retry = !(panel().options?.focus?.hasFocus ?: false)
+            assertEquals(None, handle.editingCell)
+            assertEquals(None, handle.focusedCell)
+        }
+        case _ if (phase == 30 || phase == 34) -> {
+            assertFalse(retired!!.handle.isAttached)
+            assertEquals(None, retired!!.handle.editingCell)
+            assertFalse(retired!!.options!!.focus.hasFocus)
+            retry = handle.focusedCell != Some(detailAddress())
+        }
+        case 33 -> {
+            assertTrue(panel().handle.isSubmitting)
+            assertFalse(handle.isSubmitting)
+        }
+        case _ if (phase == 37 || phase == 48 || phase == 55) -> {
+            assertTrue(panel().popup.isOpen)
+            popup = Some(named("detail-popup-0"))
+        }
+        case 38 -> {
+            assertFalse(retired!!.handle.isAttached)
+            assertFalse(retired!!.popup.isOpen)
+            assertFalse(popup!!.flag(0))
+            retry = handle.focusedCell != Some(detailAddress())
+        }
+        case 39 -> {
+            nativeRow = Some(keep(keep(table!!.cell(0L, 0L)!!).parent()!!))
+            assertTrue(nativeRow!!.flag(18))
+            assertFalse(nativeRow!!.flag(17))
+            assertTrue(named("grid-detail-expand-n0").flag(1))
+        }
+        case 41 -> {
+            assertTrue(model.isDetailExpanded(ViewKey.Number(0L)))
+            assertEquals(1L, model.result.detailCount)
+            assertTrue(named("grid-detail-expand-n0").flag(1))
+        }
+        case _ if (phase == 42 || phase == 46 || phase == 53) -> {
+            retry = !panel().textFocus.hasFocus
+            if (!retry && (phase == 46 || phase == 53))
+                selectNode = Some(named("detail-select-0"))
+        }
+        case 44 -> {
+            assertEquals(0L, model.result.detailCount)
+            retry = handle.focusedCell != Some(detailAddress())
+        }
+        case 45 -> assertTrue(named("grid-detail-expand-n0").flag(1))
+        case 49 -> {
+            assertFalse(retired!!.handle.isAttached)
+            assertFalse(retired!!.popup.isOpen)
+            assertFalse(popup!!.flag(0))
+            assertEquals(0L, live.size)
+            val row = keep(table!!.row(1L)!!)
+            assertEquals(1L, ownRows(row))
+            assertEquals(1L, row.count)
+            emptyNode = Some(keep(row.child(0L)))
+            assertTrue(emptyNode!!.text(2, Some("AXGroup")))
+            assertTrue(emptyNode!!.text(0, Some("Empty detail")))
+        }
+        case 50 -> {
+            retry = !emptyNode!!.flag(2)
+            if (!retry) {
+                assertEquals(None, handle.focusedCell)
+                assertFalse(handle.isPending)
+            }
+        }
+        case 51 -> retry = handle.focusedCell != Some(detailAddress(column = "name"))
+        case 52 -> assertTrue(panel().handle.isAttached)
+        case 56 -> {
+            assertFalse(handle.isAttached)
+            assertFalse(handle.isPending)
+            assertFalse(popup!!.flag(0))
+            assertEquals(0L, live.size)
+            assertEquals(reads.mounted, reads.unmounted)
+            assertTrue(reads.views < 100L)
+            assertTrue(reads.rows < 2000L)
+        }
+        else -> {}
+    }
+}

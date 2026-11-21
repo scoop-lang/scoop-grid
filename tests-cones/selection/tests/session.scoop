@@ -1,0 +1,280 @@
+package scoop.grid.tests.selection
+
+import scoop.collections.HashSet
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridSelectionWindowTest {
+    @Test
+    fun `selection preserves virtual rows and composes with native input and editing`() {
+        val probe = SelectionProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(0L, probe.live.size)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            reportSelectionFailure(error)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+private fun reportSelectionFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        reportSelectionFailure(error.primaryFailure)
+        reportSelectionFailure(error.cleanupFailure)
+    } else
+        if (error is AssertionFailure) {
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        } else
+            if (error is Exception) {
+                error.printStackTrace()
+            }
+}
+
+internal class SelectionProbe: Closeable {
+    var reads = 0L
+    var built = 0L
+    val live = HashSet<GridCellAddress>()
+    var queries = 0
+    val selected =
+        state(
+            DataGridState(
+                SelectionRows(this),
+                selectionColumns(this),
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        )
+    val model: DataGridState<Long> get() = selected.value
+    var previous: DataGridState<Long>? = None
+    var records = selectionRows()
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val outside = FocusHandle()
+    val enabled = state(true)
+    val checkboxes = state(true)
+    val labels = state(GridLabels())
+    var labelRows: GridRowSource<Long>? = None
+    var labelColumns: Array<GridColumnState>? = None
+    val direction = state(LayoutDirection.Ltr)
+    var editor: GridTextEditor<Long>? = None
+    var pending: GridCommit<Long>? = None
+    var pendingRows: TableRows<Long>? = None
+    var submissions = 0
+    var frame: ComponentScope? = None
+    var phase = 0
+    var waiting = false
+    var retry = false
+    var initialized = false
+    var finished = false
+    var application: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var view: Ptr<Unit>? = None
+    var calls: NativeCalls? = None
+    var root: NativeNode? = None
+    var far: NativeNode? = None
+    var header: NativeNode? = None
+    var checkbox: NativeNode? = None
+    var row: NativeNode? = None
+    var tableNode: NativeNode? = None
+    var before = 0L
+    var pointer = Point(0.0, 0.0)
+    private val held = ArrayList<NativeNode>()
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(30L)
+    val diagnostic: String get() =
+        f"selection phase=${phase}, waiting=${waiting}, retry=${retry}, selected=${
+            model.selectedRowKeys.size
+        }, reads=${reads}, built=${built}, focused=${handle.focusedCell != None}"
+    init {
+        model.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))
+        model.setColumnState(GridColumnState(GridColumnId("c2"), pin = GridPin.End))
+    }
+    fun small(mode: GridRowSelectionMode = GridRowSelectionMode.Multiple): DataGridState<Long> =
+        DataGridState(
+            records,
+            selectionColumns(this),
+            GridQuery(pagination = GridPagination.Page(0L, 5L)),
+            Some { _ -> queries += 1 },
+            pinnedRows = GridPinnedRows(bottom = [ViewKey.Number(11L)]),
+            rowSelection = mode,
+            selectable = Some { value -> value != 2L }
+        )
+    fun save(change: GridChange<Long, Long>, completion: GridCommit<Long>) {
+        submissions += 1
+        pending = Some(completion)
+        val before = records
+        pendingRows =
+            Some(
+                TableRows(
+                    Array<TableRecord<Long>>(before.count) {
+                        index -> TableRecord(
+                            before.keyAt(index),
+                            if (before.keyAt(index) == change.address.row.dataKey!!)
+                                change.value
+                            else
+                                before.rowAt(index)
+                        )
+                    }
+                )
+            )
+    }
+    fun event(host: UiHost, active: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                application = Some(active)
+                active.setControlFlow(ControlFlow.WaitUntil(timeout))
+                val native =
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid row selection"
+                            size = LogicalSize(640.0, 360.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> SelectionScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> {
+                                    view = Some(pointer)
+                                    root = Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                                }
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(active.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(Some(diagnostic))
+            else -> {}
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        held.add(node);
+        return node
+    }
+    fun findControl(index: Long): NativeNode? {
+        @Unsafe
+        {
+            return when (nativeSelectionControl(view!!, index)) {
+                case Some(val pointer) -> Some(NativeNode(pointer))
+                case None -> None
+            }
+        }
+    }
+    fun control(index: Long): NativeNode =
+        keep(findControl(index) ?: fail(Some(f"missing checkbox ${index} at ${phase}")))
+    fun at(index: Long): NativeNode {
+        @Unsafe
+        {
+            return keep(NativeNode(nativeSelectionRow(view!!, index)!!))
+        }
+    }
+    fun table(): NativeNode {
+        @Unsafe
+        {
+            return keep(NativeNode(nativeSelectionTable(view!!)!!))
+        }
+    }
+    fun nativeSelection(index: Long, selected: Boolean, count: Long) {
+        @Unsafe
+        {
+            assertTrue(
+                nativeSelectionCheck(view!!, index, selected, count),
+                Some(f"native selection at ${phase}")
+            )
+        }
+    }
+    fun prepareClick(index: Long) {
+        @Unsafe
+        {
+            pointer =
+                Point(
+                    nativeSelectionCoordinate(view!!, index, true),
+                    nativeSelectionCoordinate(view!!, index, false)
+                )
+        }
+        assertTrue(
+            pointer.x.isFinite() && pointer.y.isFinite(),
+            Some(f"checkbox position ${index} at ${phase}")
+        )
+    }
+    fun click(shift: Boolean = false) {
+        @Unsafe
+        {
+            assertTrue(nativeSelectionClick(view!!, pointer.x, pointer.y, shift))
+        }
+    }
+    fun keys(expected: Array<Long>) {
+        assertEquals(expected.size, model.selectedRowKeys.size)
+        for (key in expected)
+            assertTrue(model.isRowSelected(ViewKey.Number(key)))
+    }
+    fun shiftSpace() {
+        assertTrue(sendSurfaceKey(window!!, 49, true, shift = true))
+        assertTrue(sendSurfaceKey(window!!, 49, true, repeat = true, shift = true))
+        assertTrue(sendSurfaceKey(window!!, 49, false, shift = true))
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in held)
+            node.close()
+    }
+}
+
+@Extern(name = "scoop_grid_selection_row")
+private fun nativeSelectionRow(view: Ptr<Unit>, index: Long): Ptr<Unit>?
+
+@Extern(name = "scoop_grid_selection_table")
+private fun nativeSelectionTable(view: Ptr<Unit>): Ptr<Unit>?
+
+@Extern(name = "scoop_grid_selection_control")
+private fun nativeSelectionControl(view: Ptr<Unit>, index: Long): Ptr<Unit>?
+
+@Extern(name = "scoop_grid_selection_check")
+private fun nativeSelectionCheck(
+    view: Ptr<Unit>,
+    index: Long,
+    selected: Boolean,
+    count: Long
+): Boolean
+
+@Extern(name = "scoop_grid_selection_click")
+private fun nativeSelectionClick(view: Ptr<Unit>, x: Double, y: Double, shift: Boolean): Boolean
+
+@Extern(name = "scoop_grid_selection_coordinate")
+private fun nativeSelectionCoordinate(view: Ptr<Unit>, index: Long, horizontal: Boolean): Double

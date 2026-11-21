@@ -1,0 +1,176 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private fun headerLeaf(index: Long): GridHeaderNode =
+    GridHeaderNode.Column(GridColumnId(f"c${index}"))
+
+private fun headerGroup(id: String, children: Array<GridHeaderNode>): GridHeaderNode =
+    GridHeaderNode.Group(GridColumnGroupId(id), id, children)
+
+private fun headerTree(): Array<GridHeaderNode> =
+    [
+        headerLeaf(0L),
+        headerGroup(
+            "a",
+            [headerLeaf(1L), headerGroup("b", [headerLeaf(2L), headerLeaf(3L)]), headerLeaf(4L)]
+        ),
+        headerGroup("c", [headerLeaf(5L), headerLeaf(6L)]),
+        headerLeaf(7L)
+    ]
+
+private fun headerColumns(count: Long = 8L): Array<GridColumn<Long>> =
+    Array<GridColumn<Long>>(count) {
+        at -> gridColumn<Long, Long>(
+            GridColumnId(f"c${at}"),
+            f"Column ${at}",
+            { _ -> fail(Some("header changes must not read row values")) },
+            gridLongValues()
+        )
+    }
+
+private fun headerModel(): DataGridState<Long> =
+    DataGridState(
+        TableRows([TableRecord(ViewKey.Number(0L), 1L)]),
+        headerColumns(),
+        headers = Some(headerTree())
+    )
+
+private fun checkHeaders(model: DataGridState<Long>, ids: Array<Long>) {
+    assertEquals(ids.size, model.columnState.size)
+    for (at in 0L ..< ids.size)
+        assertEquals(GridColumnId(f"c${ids[at]}"), model.columnState[at].id)
+}
+
+@Test
+private class GridHeaderTreeTest {
+    @Test
+    fun `header definitions cover every leaf exactly once and keep group identities separate`() {
+        val rows = TableRows<Long>([])
+        val columns = headerColumns(2L)
+        for (
+            nodes in [
+                [headerLeaf(0L)],
+                [headerLeaf(0L), headerLeaf(0L)],
+                [headerLeaf(0L), headerLeaf(9L)],
+                [headerGroup("g", []), headerLeaf(0L), headerLeaf(1L)],
+                [headerGroup("g", [headerLeaf(0L)]), headerGroup("g", [headerLeaf(1L)])]
+            ]
+        )
+            assertFailsWith<IllegalArgumentException> {
+                DataGridState(rows, columns, headers = Some(nodes))
+            }
+        assertFailsWith<IllegalArgumentException> { GridColumnGroupId("") }
+        val model =
+            DataGridState(
+                rows,
+                columns,
+                headers = Some([headerGroup("c0", [headerLeaf(1L)]), headerLeaf(0L)])
+            )
+        checkHeaders(model, [1L, 0L])
+        assertTrue(
+            model.headerTree.get(GridHeaderKey.Group(GridColumnGroupId("c0"))).key !=
+                model.headerTree.get(GridHeaderKey.Column(GridColumnId("c0"))).key
+        )
+    }
+
+    @Test
+    fun `leaf and block moves preserve membership hidden pins and query identity`() {
+        val model = headerModel()
+        val result = model.result
+        model.setColumnState(GridColumnState(GridColumnId("c3"), false, Some(160.0), GridPin.End))
+        val hidden = model.columnState[3L]
+        model.moveColumn(GridColumnId("c1"), 4L)
+        checkHeaders(model, [0L, 2L, 3L, 4L, 1L, 5L, 6L, 7L])
+        model.moveColumn(GridColumnId("c2"), 2L)
+        checkHeaders(model, [0L, 3L, 2L, 4L, 1L, 5L, 6L, 7L])
+        val before = model.columnState
+        assertFailsWith<IllegalArgumentException> { model.moveColumn(GridColumnId("c2"), 4L) }
+        assertFailsWith<IllegalArgumentException> { model.moveColumn(GridColumnId("c1"), 0L) }
+        assertFailsWith<IllegalArgumentException> {
+            model.moveColumnGroup(GridColumnGroupId("b"), 0L)
+        }
+        assertTrue(before === model.columnState)
+        model.moveColumnGroup(GridColumnGroupId("b"), 3L)
+        checkHeaders(model, [0L, 4L, 1L, 3L, 2L, 5L, 6L, 7L])
+        model.moveColumnGroup(GridColumnGroupId("a"), 4L)
+        checkHeaders(model, [0L, 5L, 6L, 7L, 4L, 1L, 3L, 2L])
+        assertTrue(hidden === model.columnState[6L])
+        assertTrue(result === model.result)
+        val moved = model.columnState
+        model.moveColumnGroup(GridColumnGroupId("a"), 4L)
+        assertTrue(moved === model.columnState)
+        assertFailsWith<IllegalArgumentException> {
+            model.setColumnStates(
+                [
+                    moved[0L],
+                    moved[1L],
+                    moved[2L],
+                    moved[4L],
+                    moved[3L],
+                    moved[5L],
+                    moved[6L],
+                    moved[7L]
+                ]
+            )
+        }
+        assertTrue(moved === model.columnState)
+    }
+
+    @Test
+    fun `definition replacement prunes empty groups and explicit trees atomically regroup columns`() {
+        val model = headerModel()
+        model.setColumnState(GridColumnState(GridColumnId("c1"), false, Some(170.0), GridPin.Start))
+        model.moveColumnGroup(GridColumnGroupId("c"), 1L)
+        val all = headerColumns(9L)
+        val next = [all[0L], all[1L], all[4L], all[5L], all[6L], all[8L]]
+        model.replaceColumns(next)
+        checkHeaders(model, [0L, 5L, 6L, 1L, 4L, 8L])
+        when (model.headerTree.find(GridHeaderKey.Group(GridColumnGroupId("b")))) {
+            case None -> {}
+            case Some(_) -> fail(Some("an empty group must be removed"))
+        }
+        val previous = model.columnState
+        val definitions = model.columns
+        val tree = model.headers
+        val result = model.result
+        assertFailsWith<IllegalArgumentException> {
+            model.replaceColumns(next, Some([headerLeaf(0L)]))
+        }
+        assertTrue(previous === model.columnState)
+        assertTrue(definitions === model.columns)
+        assertTrue(tree === model.headers)
+        assertTrue(result === model.result)
+        model.replaceColumns(
+            next,
+            Some(
+                [
+                    headerGroup("new", [headerLeaf(8L), headerLeaf(1L), headerLeaf(5L)]),
+                    headerLeaf(0L),
+                    headerGroup("a", [headerLeaf(4L), headerLeaf(6L)])
+                ]
+            )
+        )
+        checkHeaders(model, [8L, 1L, 5L, 0L, 4L, 6L])
+        assertFalse(model.columnState[1L].visible)
+        assertEquals(Some(170.0), model.columnState[1L].width)
+        assertEquals(GridPin.Start, model.columnState[1L].pin)
+    }
+
+    @Test
+    fun `panel sibling movement treats nested groups as complete units`() {
+        val model = headerModel()
+        val tree = model.headerTree
+        val a = GridHeaderKey.Group(GridColumnGroupId("a"))
+        val b = GridHeaderKey.Group(GridColumnGroupId("b"))
+        assertEquals(Some(3L), tree.adjacentIndex(model.columnState, a, true))
+        assertEquals(Some(3L), tree.adjacentIndex(model.columnState, b, true))
+        assertEquals(
+            Some(3L),
+            tree.adjacentIndex(model.columnState, GridHeaderKey.Column(GridColumnId("c1")), true)
+        )
+        assertEquals(None, tree.moveIndex(model.columnState, b, a, true))
+    }
+}

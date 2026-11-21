@@ -1,0 +1,289 @@
+package scoop.grid
+
+import scoop.collections.Set
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.window.accessibility.*
+import scoop.ui.component.row as filterRow
+import scoop.ui.component.column as filterColumn
+import scoop.ui.component.button as filterButton
+import scoop.ui.component.input as filterInput
+import scoop.ui.component.virtualList as filterList
+import scoop.ui.component.checkbox as filterCheckbox
+import scoop.ui.component.fieldLabel as filterFieldLabel
+
+internal fun <Row> gridFilterSetView(
+    node: GridFilterConditionDraft,
+    ui: GridFilterUi<Row>,
+    title: String
+): View {
+    val values = node.values
+    val density = ui.appearance.density
+    val list = values.list
+    val loadText =
+        when (list) {
+            case Some(_) -> ui.labels.reloadCandidates
+            case None -> ui.labels.loadCandidates
+        }
+    val fresh =
+        when (list) {
+            case Some(val current) -> ui.input.state.filterValuesCurrent(
+                node.column.value,
+                current.snapshot
+            )
+            case None -> false
+        }
+    return filterColumn {
+        add(
+            filterRow {
+                add(
+                    filterButton(
+                        loadText,
+                        {
+                            if (ui.active() && !values.search.isComposing) {
+                                try {
+                                    values.load(
+                                        ui.input.state.filterValues(node.column.value),
+                                        ui.labels
+                                    )
+                                } catch (error: IllegalArgumentException) {
+                                    ui.failed(error.message ?: ui.labels.loadFailed)
+                                }
+                            }
+                        }
+                    ) {
+                        enabled = ui.enabled && !values.search.isComposing
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        variant = ButtonVariant.Outline
+                        semantics = gridFilterControl(node.key, "load", ui.labels.loadName(title))
+                    }
+                )
+                add(
+                    filterButton(
+                        ui.labels.selectShown,
+                        {
+                            if (ui.active() && fresh)
+                                values.selectShown()
+                        }
+                    ) {
+                        enabled = ui.enabled && fresh
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        variant = ButtonVariant.Outline
+                        semantics =
+                            gridFilterControl(
+                                node.key,
+                                "select-all",
+                                ui.labels.selectShownName(title)
+                            )
+                    }
+                )
+                add(
+                    filterButton(
+                        ui.labels.clearSelection,
+                        {
+                            if (ui.active())
+                                values.clearSelection()
+                        }
+                    ) {
+                        enabled = ui.enabled && values.selected.size > 0L
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        variant = ButtonVariant.Outline
+                        semantics =
+                            gridFilterControl(
+                                node.key,
+                                "select-none",
+                                ui.labels.clearSelectionName(title)
+                            )
+                    }
+                )
+                spacing = 6.0 * density
+            }
+        )
+        add(
+            filterRow {
+                item(
+                    filterInput(values.search) {
+                        enabled = ui.enabled
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        placeholder = ui.labels.searchPlaceholder
+                        semantics =
+                            gridFilterControl(node.key, "search", ui.labels.searchName(title))
+                        onSubmit =
+                            {
+                                _ -> if (ui.active() && fresh)
+                                    values.applySearch(ui.labels)
+                            }
+                    }
+                ) { grow = 1.0 }
+                add(
+                    filterButton(
+                        ui.labels.search,
+                        {
+                            if (ui.active() && fresh)
+                                values.applySearch(ui.labels)
+                        }
+                    ) {
+                        enabled = ui.enabled && fresh && !values.search.isComposing
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        semantics =
+                            gridFilterControl(
+                                node.key,
+                                "search-apply",
+                                ui.labels.searchApplyName(title)
+                            )
+                    }
+                )
+                spacing = 6.0 * density
+            }
+        )
+        when (list) {
+            case None -> add(ui.message(ui.labels.unloadedStatus(values.selected.size)))
+            case Some(val current) -> if (!fresh)
+                add(ui.message(ui.labels.staleCandidates))
+            else {
+                add(ui.message(ui.labels.loadedStatus(values.selected.size, current.indices.size)))
+                if (current.indices.size == 0L)
+                    add(ui.message(ui.labels.emptyCandidates))
+                val source = GridFilterChoiceSource(node, ui, current, values.selected)
+                add(
+                    filterList(source, ItemExtent.Fixed(36.0 * density)) {
+                        key = current.key
+                        height = Some(ui.input.candidatesHeight * density)
+                        enabled = ui.enabled
+                        theme = ui.input.theme
+                        navigation = ItemNavigation.Roving()
+                        itemSemantics = Some(source.semantics())
+                        collectionSemantics =
+                            gridFilterControl(node.key, "values", ui.labels.candidatesName(title))
+                    }
+                )
+            }
+        }
+        spacing = 6.0 * density
+        alignment = CrossAlignment.Stretch
+    }
+}
+
+private class GridFilterChoiceSource<Row>(
+    val node: GridFilterConditionDraft,
+    val ui: GridFilterUi<Row>,
+    val list: GridFilterChoiceList,
+    private val selected: Set<GridLiteral>
+): ItemSource {
+    public override val count: Long get() = list.indices.size
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(list.indices[index])
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> list.indexOf(value)
+            else -> None
+        }
+    public override fun build(index: Long): View =
+        component(
+            GridFilterChoiceProps(this, list.indices[index]),
+            { props, scope -> GridFilterChoiceCell(props, scope) }
+        )
+    fun choose(candidate: Long, checked: Boolean): SemanticActionResult {
+        val current = node.values.list ?: return SemanticActionResult.Unavailable
+        if (
+            !ui.active() ||
+                current !==
+                list ||
+                !ui.input.state.filterValuesCurrent(node.column.value, list.snapshot)
+        )
+            return SemanticActionResult.Unavailable
+        if (!ui.enabled)
+            return SemanticActionResult.Rejected
+        if (list.indexOf(candidate) == None)
+            return SemanticActionResult.Unavailable
+        node.values.setSelected(list.snapshot.values[candidate].key, checked)
+        return SemanticActionResult.Completed
+    }
+    fun semantics(): ItemSemantics {
+        val selection = ArrayList<SemanticItemKey>()
+        for (key in selected) {
+            val index = list.snapshot.indexOf(key) ?: continue
+            if (list.indexOf(index) != None)
+                selection.add(SemanticItemKey.Number(index))
+        }
+        return ItemSemantics(
+            this,
+            {
+                index ->
+                val candidate = list.indices[index]
+                val value = list.snapshot.values[candidate]
+                Some(
+                    SemanticItemProperties(
+                        name = Some(gridFilterValueLabel(value, ui.labels)),
+                        value = Some(gridFilterLiteralText(value.key)),
+                        automationId = Some(gridFilterControlId(node.key, f"item-${candidate}")),
+                        enabled = ui.enabled,
+                        selected = Some(value.key in selected),
+                        focusable = true
+                    )
+                )
+            },
+            search = SemanticItemSearch(name = true, automationId = true),
+            selection = Some(SemanticCollectionSelection(selection.toArray(), multiple = true)),
+            setSelected =
+                Some {
+                    key,
+                    checked -> when (key) {
+                        case Number(val candidate) -> choose(candidate, checked)
+                        else -> SemanticActionResult.Unavailable
+                    }
+                }
+        )
+    }
+}
+
+private class GridFilterChoiceProps<Row>(val source: GridFilterChoiceSource<Row>, val index: Long)
+
+private class GridFilterChoiceCell<Row>(
+    private val props: Props<GridFilterChoiceProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private val target = FieldTarget()
+    public override fun render(): View {
+        val input = props.value
+        val source = input.source
+        val entry = source.list.snapshot.values[input.index]
+        val ui = source.ui
+        val caption = gridFilterValueLabel(entry, ui.labels)
+        val reference = target
+        return filterRow {
+            add(
+                filterCheckbox(
+                    binding(
+                        { entry.key in source.node.values.selected },
+                        {
+                            value ->
+                            source.choose(input.index, value);
+                            Unit
+                        }
+                    )
+                ) {
+                    enabled = ui.enabled
+                    theme = ui.input.theme
+                    labelTarget = Some(reference)
+                    semantics =
+                        gridFilterControl(source.node.key, f"choice-${input.index}", caption).copy {
+                            description = Some(gridFilterLiteralText(entry.key))
+                        }
+                }
+            )
+            item(
+                filterFieldLabel(caption, reference) {
+                    fonts = ui.input.fonts
+                    theme = ui.input.theme
+                }
+            ) { grow = 1.0 }
+            spacing = 4.0 * ui.appearance.density
+            alignment = CrossAlignment.Center
+        }
+    }
+}

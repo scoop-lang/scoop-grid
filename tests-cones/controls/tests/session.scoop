@@ -1,0 +1,68 @@
+package scoop.grid.tests.controls
+
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+
+@Test
+private class GridControlWindowTest {
+    @Test
+    fun `typed editors preserve drafts popup focus and row column navigation`() {
+        val window = ControlWindowProbe()
+        context(ThemeSource(shadcnTheme())) {
+            UiHost { host, active, event -> window.event(host, active, event) }.use {
+                host -> Application().run(host)
+            }
+        }
+        assertTrue(window.probe.finished)
+        assertFalse(window.probe.handle.isAttached)
+        assertFalse(window.probe.outside.isAttached)
+    }
+}
+
+private class ControlWindowProbe {
+    val probe = ControlProbe()
+    private var requestedAfterPaint = false
+    fun event(host: UiHost, active: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                val window =
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid typed editors"
+                            size = LogicalSize(640.0, 360.0)
+                        }
+                    )
+                probe.start(window)
+                window.requestFocus()
+                host.attach(window, { scope -> ControlScene(probe, active, scope) })
+                active.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
+                )
+            }
+            case AboutToWait -> if (
+                (probe.frame?.isMounted ?: false) &&
+                    !requestedAfterPaint &&
+                    !probe.window!!.isFocused
+            ) {
+                requestedAfterPaint = true
+                probe.window!!.requestFocus()
+            }
+            case NewEvents(StartCause.Deadline) -> fail(
+                Some(
+                    f"control timeout phase=${probe.phase}, nativeFocus=${
+                        probe.window?.isFocused ?: false
+                    }, editing=${probe.handle.editingCell != None}, pending=${
+                        probe.handle.isPending
+                    }, ${probe.controls.diagnostic}"
+                )
+            )
+            case Window(_, WindowEvent.Focused(true)) -> probe.frame?.requestFrame()
+            else -> {}
+        }
+    }
+}

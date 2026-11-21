@@ -1,0 +1,24 @@
+package scoop.grid
+
+internal fun <Row> gridTreeExpansion(
+    value: GridExpandedRows,
+    topology: GridTreeTopology<Row>,
+    issues: ArrayList<GridRestoreIssue>? = None
+): GridExpandedRows {
+    val kept = ArrayList<GridRowKey>()
+    for (key in value.exceptions) {
+        val valid =
+            when (key) {
+                case Data(val business) -> topology.positions.containsKey(business)
+                else -> false
+            }
+        if (valid)
+            kept.add(key)
+        else
+            issues?.add(GridRestoreIssue(GridStatePart.Expansion(key), "展开节点已移除或不属于树数据"))
+    }
+    return if (kept.size == value.exceptions.size)
+        value
+    else
+        GridExpandedRows(value.defaultExpanded, kept.toArray())
+}

@@ -1,0 +1,37 @@
+package scoop.grid
+
+import scoop.ui.View
+import scoop.ui.component.*
+
+internal fun gridEditorField(
+    control: View,
+    options: GridEditorOptions,
+    reference: FieldTarget,
+    caption: String? = None
+): View =
+    field(control) {
+        target = Some(reference)
+        fonts = Some(options.fonts)
+        theme = Some(options.theme)
+        spacing = Some(2.0)
+        contentSpacing = Some(2.0)
+        invalid = options.error != None
+        when (caption) {
+            case Some(val text) -> {
+                label(text, reference)
+                orientation = FieldOrientation.Horizontal
+                controlPlacement = FieldControlPlacement.Start
+            }
+            case None -> {}
+        }
+    }
+
+internal fun gridEditorSemantics(options: GridEditorOptions): ComponentSemantics =
+    ComponentSemantics(
+        description =
+            if (options.submitting)
+                Some(options.savingText)
+            else
+                None,
+        error = options.error
+    )

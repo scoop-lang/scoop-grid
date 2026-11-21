@@ -1,0 +1,163 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+
+internal fun <Row> gridExternalFilter(
+    source: GridExternalSource<Row>,
+    id: GridColumnId
+): GridExternalFilter? {
+    for (filter in source.filters)
+        if (filter.column == id)
+            return Some(filter)
+    return None
+}
+
+internal fun gridAllowsFilter(
+    values: Array<GridFilterOperator>,
+    operation: GridFilterOperator
+): Boolean {
+    for (value in values)
+        if (value == operation)
+            return true
+    return false
+}
+
+internal fun <Row> gridCheckExternalQuery(
+    source: GridExternalSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery
+) {
+    val seen = HashSet<GridColumnId>()
+    for (filter in source.filters) {
+        gridRequire(seen.add(filter.column), "duplicate external filter column")
+        val definition = columns.find(filter.column) ?: continue
+        gridRequire(definition.filterable, "external filter column is not filterable")
+        for (operation in filter.operations) {
+            val kind = definition.valueKind
+            val allowed =
+                when (operation) {
+                    case Contains -> kind == Some(GridValueKind.Text)
+                    case StartsWith -> kind == Some(GridValueKind.Text)
+                    case EndsWith -> kind == Some(GridValueKind.Text)
+                    case Less -> ordered(kind)
+                    case LessOrEqual -> ordered(kind)
+                    case Greater -> ordered(kind)
+                    case GreaterOrEqual -> ordered(kind)
+                    case Between -> ordered(kind)
+                    case In -> when (filter.values) {
+                        case Some(_) -> true;
+                        case None -> false
+                    }
+                    else -> kind != None
+                }
+            gridRequire(
+                allowed,
+                "external filter operation requires a compatible value kind and complete candidates"
+            )
+        }
+        for (at in 0L ..< filter.operations.size)
+            for (before in 0L ..< at)
+                gridRequire(
+                    filter.operations[at] != filter.operations[before],
+                    "duplicate external filter operation"
+                )
+    }
+    seen.clear()
+    for (sort in query.sorting) {
+        gridRequire(seen.add(sort.column), "duplicate external sort column")
+        gridRequire(columns.get(sort.column).sortable, "external column is not sortable")
+    }
+    gridRequire(
+        query.quickFilter == "" || source.quickFilter,
+        "external quick filter is not declared"
+    )
+    checkFilter(source, columns, query.filter)
+    seen.clear()
+    for (id in query.grouping) {
+        gridRequire(seen.add(id), "duplicate external group column")
+        gridRequire(
+            when (columns.get(id).grouping) {
+                case Some(_) -> true;
+                case None -> false
+            },
+            "external column is not groupable"
+        )
+    }
+    seen.clear()
+    for (selection in query.aggregations) {
+        gridRequire(seen.add(selection.column), "duplicate external aggregate column")
+        gridRequire(
+            when (gridFindAggregation(columns.get(selection.column), selection.operation)) {
+                case Some(_) -> true;
+                case None -> false
+            },
+            "external aggregate is not declared"
+        )
+    }
+    gridCheckGroupSorting(query)
+    when (source.treeColumn) {
+        case Some(val id) -> {
+            columns.get(id)
+            gridRequire(
+                query.grouping.size == 0L && query.pivot == None,
+                "external tree and generated groups require separate modes"
+            )
+        }
+        case None -> {}
+    }
+    when (query.pivot) {
+        case Some(val pivot) -> {
+            gridRequire(query.aggregations.size > 0L, "external pivot requires aggregates")
+            seen.clear()
+            for (dimension in pivot.dimensions) {
+                gridRequire(seen.add(dimension.column), "duplicate external pivot dimension")
+                gridRequire(
+                    when (columns.get(dimension.column).pivoting) {
+                        case Some(_) -> true;
+                        case None -> false
+                    },
+                    "external pivot dimension is not declared"
+                )
+            }
+        }
+        case None -> {}
+    }
+}
+
+private fun ordered(kind: GridValueKind?): Boolean =
+    kind ==
+        Some(GridValueKind.Integer) ||
+        kind ==
+        Some(GridValueKind.Number) ||
+        kind ==
+        Some(GridValueKind.Date)
+
+private fun <Row> checkFilter(
+    source: GridExternalSource<Row>,
+    columns: GridColumns<Row>,
+    filter: GridFilter
+) {
+    when (filter) {
+        case All -> {}
+        case Column(val id, val condition) -> {
+            val config =
+                gridExternalFilter(source, id) ?:
+                    throw IllegalArgumentException(Some("external filter column is not declared"))
+            gridRequire(
+                gridAllowsFilter(config.operations, gridFilterOperator(condition)),
+                "external filter operation is not declared"
+            )
+            columns.get(id).predicate(condition)
+        }
+        case And(val children) -> {
+            gridRequire(children.size > 0L, "AND filter requires conditions")
+            for (child in children)
+                checkFilter(source, columns, child)
+        }
+        case Or(val children) -> {
+            gridRequire(children.size > 0L, "OR filter requires conditions")
+            for (child in children)
+                checkFilter(source, columns, child)
+        }
+    }
+}

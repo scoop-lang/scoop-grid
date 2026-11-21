@@ -1,0 +1,210 @@
+package scoop.grid.tests.filters
+
+import scoop.datetime.LocalDate
+import scoop.grid.*
+import scoop.test.*
+
+internal fun FilterProbe.accepted() {
+    if (finished || waiting || !(window?.isFocused ?: false))
+        return
+    waiting = true
+    retry = false
+    when (phase) {
+        case 1 -> calls!!.post(control!!, phase)
+        case 3 -> calls!!.post(firstChoice!!, phase)
+        case 5 -> calls!!.post(control!!, phase)
+        case 7 -> calls!!.post(apply!!, phase)
+        case 9 -> calls!!.post(field!!, phase, 1, "值 9999")
+        case 11 -> calls!!.post(control!!, phase)
+        case 13 -> calls!!.post(lastChoice!!, phase)
+        case 15 -> calls!!.post(apply!!, phase)
+        case 18 -> calls!!.post(control!!, phase)
+        case 20 -> calls!!.post(clear!!, phase)
+        case 22 -> calls!!.post(control!!, phase)
+        case 24 -> calls!!.post(field!!, phase, 2)
+        case 27 -> calls!!.post(apply!!, phase)
+        case 29 -> calls!!.post(control!!, phase)
+        case 31 -> calls!!.post(option!!, phase)
+        case 33 -> calls!!.post(control!!, phase)
+        case 35 -> calls!!.post(option!!, phase)
+        case 37 -> calls!!.post(field!!, phase, 1, "9007199254740993")
+        case 39 -> calls!!.post(upper!!, phase, 1, "9007199254740992")
+        case 41 -> calls!!.post(apply!!, phase)
+        case 43 -> calls!!.post(upper!!, phase, 1, "9007199254740994")
+        case 45 -> calls!!.post(apply!!, phase)
+        case 47 -> calls!!.post(control!!, phase)
+        case 49 -> calls!!.post(apply!!, phase)
+        case 51 -> calls!!.post(control!!, phase)
+        case 53 -> calls!!.post(option!!, phase)
+        case 55 -> calls!!.post(control!!, phase)
+        case 57 -> calls!!.post(field!!, phase, 1, "row alpha 1")
+        case 59 -> calls!!.post(control!!, phase)
+        case 61 -> calls!!.post(field!!, phase, 1, "row beta 1")
+        case 63 -> calls!!.post(apply!!, phase)
+        case 66 -> calls!!.post(field!!, phase)
+        case 68 -> calls!!.post(option!!, phase)
+        case 70 -> calls!!.post(apply!!, phase)
+        case 73 -> calls!!.post(upper!!, phase, 1, "2026-11-31")
+        case 75 -> calls!!.post(apply!!, phase)
+        case 77 -> calls!!.post(upper!!, phase, 1, "2026-11-03")
+        case 79 -> calls!!.post(apply!!, phase)
+        case 81 -> calls!!.post(control!!, phase)
+        case 85 -> calls!!.post(apply!!, phase)
+        case 88 -> calls!!.post(clear!!, phase)
+        case 90 -> calls!!.post(clear!!, phase)
+        case 92 -> calls!!.post(clear!!, phase)
+        case 94 -> calls!!.post(clear!!, phase)
+        case 98 -> calls!!.post(apply!!, phase)
+        case 99 -> calls!!.post(apply!!, phase, 2)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun filterAmountRange(): GridFilter =
+    GridFilter.Column(
+        GridColumnId("amount"),
+        GridCondition.Between(
+            GridLiteral.Integer(9007199254740993L),
+            GridLiteral.Integer(9007199254740994L)
+        )
+    )
+
+internal fun filterBoolean(value: Boolean): GridFilter =
+    GridFilter.Column(
+        GridColumnId("enabled"),
+        GridCondition.Compare(GridComparison.Equal, GridLiteral.BooleanValue(value))
+    )
+
+internal fun filterDates(first: Int, last: Int): GridFilter =
+    GridFilter.Column(
+        GridColumnId("date"),
+        GridCondition.Between(
+            GridLiteral.Date(LocalDate(2026, 11, first)),
+            GridLiteral.Date(LocalDate(2026, 11, last))
+        )
+    )
+
+internal fun FilterProbe.completed(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(
+        if (phase == 27 || phase == 92 || phase == 98)
+            0
+        else
+            1,
+        result,
+        Some(f"action at ${phase}")
+    )
+    waiting = false
+    if (retry) {
+        frame!!.requestFrame();
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 3 -> localized.value = true
+        case 9 -> localized.value = false
+        case 7 -> expect(
+            GridFilter.Column(
+                GridColumnId("tag"),
+                GridCondition.In([GridLiteral.Integer(0L), GridLiteral.Integer(1L)])
+            )
+        )
+        case 15 -> expect(
+            GridFilter.Column(
+                GridColumnId("tag"),
+                GridCondition.In(
+                    [GridLiteral.Integer(0L), GridLiteral.Integer(1L), GridLiteral.Integer(9999L)]
+                )
+            )
+        )
+        case 17 -> {
+            rows = FilterRows(1);
+            model.replaceData(rows)
+        }
+        case 20 -> expect(GridFilter.All)
+        case 26 -> {
+            localized.value = true
+            assertTrue(view!!.preedit())
+        }
+        case 28 -> {
+            localized.value = false
+            key(53, "\u001b")
+        }
+        case 33 -> localized.value = true
+        case 35 -> localized.value = false
+        case 45 -> expect(filterAmountRange())
+        case 63 -> expect(
+            GridFilter.And(
+                [
+                    filterAmountRange(),
+                    GridFilter.Or(
+                        [
+                            GridFilter.Column(
+                                GridColumnId("name"),
+                                GridCondition.Compare(
+                                    GridComparison.Equal,
+                                    GridLiteral.Text("row alpha 1")
+                                )
+                            ),
+                            GridFilter.Column(
+                                GridColumnId("name"),
+                                GridCondition.Compare(
+                                    GridComparison.Equal,
+                                    GridLiteral.Text("row beta 1")
+                                )
+                            )
+                        ]
+                    )
+                ]
+            )
+        )
+        case 65 -> {
+            expect(filterBoolean(true));
+            model.setQuery(expected)
+        }
+        case 70 -> expect(filterBoolean(false))
+        case 72 -> {
+            expect(filterDates(1, 2));
+            model.setQuery(expected)
+        }
+        case 75 -> localized.value = true
+        case 77 -> localized.value = false
+        case 79 -> expect(filterDates(1, 3))
+        case 83 -> key(124, "\uf703")
+        case 84 -> key(36, "\r")
+        case 85 -> expect(filterDates(2, 3))
+        case 87 -> {
+            assertTrue(handle.beginEdit(address));
+            editor!!.state.replaceAll("bad")
+        }
+        case 90 -> editor!!.state.replaceAll("9007199254741025")
+        case 93 -> {
+            val next = pendingRows!!;
+            assertTrue(pending!!.accept(next));
+            rows = next
+        }
+        case 94 -> expect(GridFilter.All)
+        case 96 -> {
+            expected =
+                GridQuery(
+                    filter =
+                        GridFilter.Column(
+                            GridColumnId("name"),
+                            GridCondition.Text(GridTextMatch.StartsWith, "row alpha", false)
+                        )
+                )
+            selected.value =
+                DataGridState(rows, filterColumns(this), expected, Some { _ -> queryEvents += 1 })
+        }
+        case 97 -> enabled.value = false
+        case 99 -> enabled.value = true
+        case 101 -> {
+            finished = true
+            ui!!.close()
+            active!!.requestExit()
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}

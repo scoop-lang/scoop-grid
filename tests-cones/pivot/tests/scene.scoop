@@ -1,0 +1,85 @@
+package scoop.grid.tests.pivot
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.test.*
+import scoop.ui.*
+
+internal class PivotScene(private val probe: PivotProbe, scope: ComponentScope): Component(scope) {
+    public override fun render(): View {
+        val probe = this.probe
+        return element(
+            PivotLayoutProps(probe, probe.model.result, probe.enabled.value),
+            { props, scope -> PivotLayout(props, scope) },
+            [
+                gridColumnsPanel(probe.model, probe.handle) {
+                    height = 80.0;
+                    enabled = probe.enabled.value
+                },
+                dataGrid(probe.model) {
+                    width = Some(760.0)
+                    height = 590.0
+                    rowHeight = 44.0
+                    rowSizing =
+                        if (probe.phase >= 37)
+                            GridRowSizing.Content([GridColumnId("amount")])
+                        else
+                            GridRowSizing.Explicit {
+                                row ->
+                                assertEquals(None, probe.model.pivot)
+                                assertTrue(row.index >= 0L)
+                                44.0
+                            }
+                    handle = Some(probe.handle)
+                    enabled = probe.enabled.value
+                },
+                gridPager(probe.model) {
+                    handle = Some(probe.handle);
+                    enabled = probe.enabled.value
+                }
+            ]
+        )
+    }
+}
+
+private class PivotLayoutProps(
+    val probe: PivotProbe,
+    val result: GridResult<PivotWindowRow>,
+    val enabled: Boolean
+)
+
+private class PivotLayout(
+    private val props: Props<PivotLayoutProps>,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    init {
+        props.value.probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(340.0, 900.0)))
+        context.placeChild(0L, Point(0.0, 0.0))
+        context.measureChild(1L, Constraints.tight(Size(760.0, 590.0)))
+        context.placeChild(1L, Point(360.0, 0.0))
+        context.measureChild(2L, Constraints.tight(Size(760.0, 100.0)))
+        context.placeChild(2L, Point(360.0, 620.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(1160.0, 920.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val input = props.value
+        context.children()
+        context.onFrameComplete {
+            frame -> if (
+                frame.submission ==
+                    FrameSubmission.Accepted &&
+                    input.result ===
+                    input.probe.model.result &&
+                    input.enabled ==
+                    input.probe.enabled.value
+            )
+                input.probe.accepted()
+        }
+    }
+}

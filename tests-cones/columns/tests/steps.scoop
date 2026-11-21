@@ -1,0 +1,200 @@
+package scoop.grid.tests.columns
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+
+internal fun ColumnsProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    assertEquals(columnQuery(), model.query)
+    assertEquals(0, queryEvents)
+    if (phase >= 127) {
+        inspectReorder()
+        return
+    }
+    if (phase >= 76) {
+        inspectResize()
+        return
+    }
+    if (phase < 61)
+        assertTrue(originalResult === model.result, Some(f"query result replaced at ${phase}"))
+    when (phase) {
+        case 0 -> {
+            fit = Some(identified("grid-columns-fit"))
+            collection = Some(identified("grid-columns-list"))
+            assertEquals(300L, collection!!.count)
+            assertTrue(collection!!.roleCount("AXCheckBox") <= 16L)
+            last = Some(keep(collection!!.child(299L)))
+            assertEquals(0L, last!!.count)
+            assertTrue(keep(collection!!.child(1L)).text(0, Some("Amount · 排序 1↑")))
+            assertTrue(keep(collection!!.child(2L)).text(0, Some("Column 2 · 筛选中")))
+            control = Some(identified("grid-columns-c1-choose"))
+            grid = Some(named("Data grid"))
+            cell = Some(keep(grid!!.cell(0L, 1L)!!))
+        }
+        case 2 -> {
+            controls("c1")
+            value("")
+            control = Some(identified("grid-columns-c1-next"))
+            visible = Some(identified("grid-columns-c1-visible"))
+        }
+        case 4 -> {
+            value("150");
+            assertEquals(None, entry("c1").width)
+        }
+        case 6 -> {
+            value("150.0")
+            assertEquals(Some(150.0), entry("c1").width)
+            assertTrue(cell!!.same(keep(grid!!.cell(0L, 1L)!!)))
+        }
+        case 8 -> {
+            assertEquals("c1", model.columnState[2L].id.value)
+            assertTrue(cell!!.same(keep(grid!!.cell(0L, 2L)!!)))
+        }
+        case 10 -> option = Some(menu("冻结在开头"))
+        case 12 -> {
+            assertEquals(GridPin.Start, entry("c1").pin)
+            assertTrue(cell!!.same(keep(grid!!.cell(0L, 1L)!!)))
+        }
+        case 14 -> value("300")
+        case 16 -> {
+            assertEquals(Some(150.0), entry("c1").width)
+            value("300")
+            caption("冻结列占用过宽；请先缩小或解除其他冻结列")
+            assertTrue(field!!.same(identified("grid-columns-c1-width")))
+        }
+        case 18 -> value("80")
+        case 20 -> {
+            value("80.0");
+            assertEquals(Some(80.0), entry("c1").width)
+        }
+        case 22 -> {
+            assertFalse(entry("c1").visible)
+            assertFalse(cell!!.flag(0))
+            assertEquals(299L, grid!!.trait(6))
+            assertTrue(keep(collection!!.child(1L)).text(0, Some("Amount · 排序 1↑")))
+        }
+        case 24 -> {
+            assertTrue(entry("c1").visible)
+            assertEquals(300L, grid!!.trait(6))
+            assertFalse(cell!!.same(keep(grid!!.cell(0L, 1L)!!)))
+        }
+        case 26 -> value("")
+        case 28 -> retry = !field!!.flag(4)
+        case 29 -> {
+            if (!field!!.text(0, Some("Width of Amount"))) {
+                retry = true
+                return
+            }
+            assertTrue(field!!.flag(4))
+            assertTrue(field!!.same(identified("grid-columns-c1-width")))
+            assertTrue(model.columnState === localizedColumns!!)
+            assertTrue(fit!!.text(0, Some("Fit visible columns")))
+            assertTrue(collection!!.text(0, Some("Columns")))
+            assertTrue(identified("grid-columns-c1-item").text(0, Some("Amount | order=1:up")))
+            assertTrue(pin!!.text(1, Some("Start")))
+            value("中😀");
+            assertFalse(fit!!.flag(1));
+            assertFalse(pin!!.flag(1));
+            assertFalse(visible!!.flag(1))
+        }
+        case 31 -> {
+            if (!field!!.text(0, Some("Amount 列宽"))) {
+                retry = true
+                return
+            }
+            assertTrue(field!!.flag(4))
+            assertTrue(model.columnState === localizedColumns!!)
+            value("")
+        }
+        case 33 -> {
+            assertEquals(None, entry("c1").width);
+            value("")
+        }
+        case 35 -> {
+            for (entry in model.columnState)
+                assertEquals(Some(50.0), entry.width)
+            value("50.0")
+        }
+        case 37 -> {
+            controls("c299")
+            value("50.0")
+            caption("设置：Column 299")
+            assertEquals(1L, collection!!.trait(4))
+            assertTrue(last!!.flag(0))
+        }
+        case 39 -> value("70")
+        case 41 -> {
+            value("70.0");
+            assertEquals(Some(70.0), entry("c299").width)
+        }
+        case 42 -> {
+            assertEquals(GridPin.End, entry("c299").pin);
+            assertEquals(Some(70.0), entry("c299").width)
+        }
+        case 44 -> option = Some(menu("Unpinned"))
+        case 46 -> {
+            assertEquals(GridPin.None, entry("c299").pin)
+            control = Some(identified("grid-columns-c1-item"))
+        }
+        case 48 -> {
+            controls("c1");
+            value("50.0")
+        }
+        case 50 -> value("NaN")
+        case 52 -> {
+            value("NaN");
+            assertEquals(Some(50.0), entry("c1").width);
+            caption("Problem:Width must be finite and nonnegative")
+        }
+        case 54 -> {
+            value("");
+            assertEquals(None, entry("c1").width);
+            visible = Some(identified("grid-columns-c0-visible"))
+        }
+        case 55 -> retry = handle.focusedCell != Some(address) || handle.isPending
+        case 57 -> {
+            assertTrue(entry("c0").visible)
+            assertEquals(Some(address), handle.editingCell)
+            assertTrue(handle.editError != None)
+            assertEquals(0, submissions)
+        }
+        case 59 -> {
+            assertTrue(handle.isSubmitting)
+            assertEquals(1, submissions)
+            assertEquals(None, entry("c1").width)
+            assertFalse(fit!!.flag(1))
+            assertFalse(visible!!.flag(1))
+        }
+        case 61 -> {
+            assertEquals(None, handle.editingCell)
+            assertEquals(123L, rows.rowAt(0L))
+            assertEquals(None, entry("c1").width)
+        }
+        case 63 -> assertEquals(Some(50.0), entry("c1").width)
+        case 64 -> {
+            controls("c1")
+            value("")
+            assertEquals(None, entry("c1").width)
+            assertEquals(Some(50.0), original.columnState[2L].width)
+        }
+        case 65 -> {
+            assertFalse(fit!!.flag(1));
+            assertFalse(field!!.flag(1))
+        }
+        case 68 -> retry = !fit!!.flag(4)
+        case 69 -> {
+            assertEquals(0L, grid!!.trait(6))
+            assertEquals(300L, collection!!.count)
+            visible = Some(identified("grid-columns-c0-visible"))
+            assertTrue(visible!!.flag(1))
+        }
+        case 71 -> caption("没有可见列")
+        case 73 -> {
+            assertTrue(entry("c0").visible);
+            assertEquals(1L, grid!!.trait(6))
+        }
+        case 75 -> assertEquals(Some(300.0), entry("c0").width)
+        else -> {}
+    }
+}

@@ -1,0 +1,42 @@
+package scoop.grid
+
+import scoop.ui.*
+
+public enum GridColumnFitResult {
+    Pending, Applied(Double), Rejected(String), Cancelled
+}
+
+/** One explicit content measurement, completed only by an accepted grid frame. */
+public class GridColumnFit internal constructor(
+    initial: GridColumnFitResult = GridColumnFitResult.Pending,
+    private var onComplete: (() -> Unit)? = None
+): Closeable {
+    private val outcome = state(initial)
+    public val result: GridColumnFitResult get() = outcome.value
+    public val isPending: Boolean get() =
+        when (result) {
+            case Pending -> true
+            else -> false
+        }
+    public fun cancel(): Boolean = complete(GridColumnFitResult.Cancelled)
+    public override fun close() {
+        cancel()
+    }
+    internal fun complete(value: GridColumnFitResult): Boolean {
+        outcome.checkMutation()
+        if (!isPending)
+            return false
+        val notify = onComplete
+        onComplete = None
+        outcome.value = value
+        notify?.invoke()
+        return true
+    }
+}
+
+internal fun gridRejectedColumnFit(message: String): GridColumnFit =
+    GridColumnFit(GridColumnFitResult.Rejected(message))
+
+internal class GridColumnProbe(val fit: GridColumnFit, val column: Long, val rows: Array<Long>)
+
+internal class GridColumnMeasured(val fit: GridColumnFit, val width: Double)

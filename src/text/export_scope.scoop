@@ -1,0 +1,186 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+public enum GridExportScope {
+    CurrentPage, SelectedRows, AllFiltered, LoadedRows
+}
+
+public enum GridExportData {
+    Records, Displayed
+}
+
+public class GridCsvOptions public constructor(
+    public val scope: GridExportScope = GridExportScope.CurrentPage,
+    public val includeHeaders: Boolean = true,
+    public val includeHiddenColumns: Boolean = false,
+    public val includePinnedRows: Boolean = true,
+    public val columns: Array<GridColumnId>? = None,
+    public val data: GridExportData = GridExportData.Records,
+    public val includeTotals: Boolean = true,
+    public val includeGroups: Boolean = true
+)
+
+internal fun <Row> gridExportCsv(
+    snapshot: GridComputed<Row>,
+    states: Array<GridColumnState>,
+    sourceStates: Array<GridColumnState>,
+    selection: GridSelectedRows,
+    options: GridCsvOptions
+): String {
+    val records = options.data == GridExportData.Records
+    gridRequire(
+        records || !snapshot.pivotMode || options.scope != GridExportScope.SelectedRows,
+        "selected business rows require record export in pivot mode"
+    )
+    val definitions =
+        if (records)
+            snapshot.columns
+        else
+            snapshot.displayColumns
+    val columns = ArrayList<GridColumn<Row>>()
+    val ordered =
+        gridOrderedColumnStates(
+            if (records)
+                sourceStates
+            else
+                states
+        )
+    when (options.columns) {
+        case Some(val ids) -> {
+            val lookup = HashMap<GridColumnId, GridColumnState>()
+            for (entry in ordered)
+                lookup.put(entry.id, entry)
+            val seen = HashSet<GridColumnId>()
+            for (id in ids) {
+                gridRequire(seen.add(id), "duplicate export column")
+                val entry =
+                    lookup[id] ?:
+                        throw IllegalArgumentException(Some(f"unknown export column: ${id.value}"))
+                if (entry.visible || options.includeHiddenColumns)
+                    columns.add(definitions.get(id))
+            }
+        }
+        case None -> for (entry in ordered)
+            if (entry.visible || options.includeHiddenColumns)
+                columns.add(definitions.get(entry.id))
+    }
+    return gridCsv(
+        gridExportRows(snapshot, selection, options),
+        columns.toArray(),
+        options.includeHeaders
+    )
+}
+
+private fun <Row> gridExportRows(
+    snapshot: GridComputed<Row>,
+    selection: GridSelectedRows,
+    options: GridCsvOptions
+): GridRowSource<Row> {
+    when (snapshot.external) {
+        case Some(_) -> return gridExternalExportRows(snapshot, selection, options)
+        case None -> {}
+    }
+    if (options.scope == GridExportScope.SelectedRows) {
+        if (options.includePinnedRows)
+            return GridDataRows(GridPickedRows(snapshot.source, selection.keys))
+        val pinned = HashSet<ViewKey>()
+        for (keys in [snapshot.pins.top, snapshot.pins.bottom])
+            for (key in keys)
+                pinned.add(key)
+        val keys = ArrayList<ViewKey>()
+        for (key in selection.keys)
+            if (!pinned.contains(key))
+                keys.add(key)
+        return GridDataRows(GridPickedRows(snapshot.source, keys.toArray()))
+    }
+    val displayed = options.data == GridExportData.Displayed
+    val totals =
+        if (displayed && options.includeTotals)
+            snapshot.query.totals
+        else
+            GridTotals()
+    val groups =
+        if (displayed)
+            snapshot.groups
+        else
+            None
+    val currentPage = options.scope == GridExportScope.CurrentPage
+    val tree =
+        if (displayed)
+            snapshot.tree
+        else
+            None
+    val query =
+        snapshot.query.withPagination(
+            if (currentPage)
+                snapshot.query.pagination
+            else
+                GridPagination.Disabled
+        ).withTotals(totals).withGroupTotals(
+            if (options.includeTotals)
+                snapshot.query.groupTotals
+            else
+                GridTotals()
+        ).withTreeTotals(
+            if (options.includeTotals)
+                snapshot.query.treeTotals
+            else
+                GridTotals()
+        )
+    when (snapshot.pivot) {
+        case Some(val pivot) -> if (displayed) {
+            val(result, _) =
+                gridPresentPivot(
+                    pivot,
+                    query,
+                    snapshot.expanded,
+                    includeGroups = options.includeGroups
+                )
+            return result.rows
+        }
+        case None -> {}
+    }
+    val result =
+        when (tree) {
+            case Some(val value) -> {
+                val(result, _) = gridPresentTree(value, query, snapshot.expanded, snapshot.pins)
+                result
+            }
+            case None -> when (groups) {
+                case Some(val value) -> {
+                    val(result, _) =
+                        gridPresentGroups(
+                            value,
+                            query,
+                            snapshot.expanded,
+                            snapshot.pins,
+                            options.includeGroups
+                        )
+                    result
+                }
+                case None -> gridPinResult(
+                    if (currentPage)
+                        snapshot.result.pageRows
+                    else
+                        snapshot.result.ordered,
+                    snapshot.result.ordered,
+                    snapshot.result.totalRows,
+                    if (currentPage)
+                        snapshot.result.pageCount
+                    else
+                        1L,
+                    snapshot.pins,
+                    snapshot.result.aggregates,
+                    totals
+                )
+            }
+        }
+    return if (options.includePinnedRows)
+        result.rows
+    else
+        GridSliceRows(result.rows, result.topCount, result.bodyCount)
+}

@@ -1,0 +1,111 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.surface.InputScope
+import scoop.ui.*
+
+/** Watches real mounted subtrees before reconciliation retires their focus and resources. */
+internal class GridDetailActions<Row>(private val session: GridSession<Row>) {
+    private var model: DataGridState<Row>? = None
+    private var observation: Closeable? = None
+    private val mounted = HashMap<ViewKey, InputScope>()
+    fun update(value: DataGridState<Row>) {
+        when (model) {
+            case Some(val old) -> if (old === value)
+                return
+            case None -> {}
+        }
+        observation?.close()
+        model = Some(value)
+        observation = Some(value.observe { reconcile() })
+    }
+    fun register(parent: ViewKey, input: InputScope) {
+        mounted.put(parent, input)
+    }
+    fun remove(parent: ViewKey, input: InputScope) {
+        when (mounted[parent]) {
+            case Some(val old) -> if (old === input)
+                mounted.remove(parent)
+            case None -> {}
+        }
+    }
+    private fun reconcile() {
+        val current = model ?: return
+        for ((parent, input) in mounted)
+            if (
+                input.activity.hasFocus &&
+                    current.result.rows.indexOfKey(GridRowKey.Detail(parent)) ==
+                    None
+            ) {
+                restore(parent)
+                return
+            }
+    }
+    fun restore(parent: ViewKey): Boolean {
+        val current = model ?: return false
+        if (!session.active || !session.enabled || !session.inputEnabled)
+            return false
+        session.cancel()
+        if (current.result.rows.indexOfKey(GridRowKey.Data(parent)) != None) {
+            val preferred = current.details?.column ?: None
+            when (preferred) {
+                case Some(val id) -> if (current.visibleColumn(id))
+                    return session.requestCell(GridCellAddress(parent, id))
+                case None -> {}
+            }
+            for (column in current.columnState)
+                if (column.visible)
+                    return session.requestCell(GridCellAddress(parent, column.id))
+        }
+        return session.entry?.requestFocus() ?: false
+    }
+    private fun available(current: DataGridState<Row>, key: ViewKey): Boolean =
+        session.active &&
+            session.enabled &&
+            session.inputEnabled &&
+            session.usesModel(current) &&
+            key !=
+            ViewKey.Position &&
+            current.source.indexOfKey(key) !=
+            None &&
+            when (current.details) {
+                case Some(_) -> true;
+                case None -> false
+            }
+    fun expand(key: ViewKey, value: Boolean): GridRowActionResult {
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        if (!available(current, key))
+            return GridRowActionResult.Rejected("当前记录没有可操作的详情")
+        when (session.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return GridRowActionResult.Rejected("请先完成当前单元格的编辑或保存")
+        }
+        if (!available(current, key) || !current.setDetailExpanded(key, value))
+            return GridRowActionResult.Rejected("记录或详情已更新，请重试")
+        return GridRowActionResult.Applied
+    }
+    fun focus(key: ViewKey): Boolean {
+        val current = model ?: return false
+        if (!available(current, key))
+            return false
+        val row = GridRowKey.Detail(key)
+        if (current.result.rows.indexOfKey(row) == None)
+            return false
+        when (session.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return false
+        }
+        if (!available(current, key) || current.result.rows.indexOfKey(row) == None)
+            return false
+        session.cancel()
+        return session.bodyFocus?.requestFocus(row.viewKey) ?: false
+    }
+    fun close() {
+        observation?.close()
+        observation = None
+        model = None
+        mounted.clear()
+    }
+}

@@ -1,0 +1,267 @@
+package scoop.grid.tests.spans
+
+import scoop.collections.*
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.ViewProbe
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridSpanWindowTest {
+    @Test
+    fun `column spans keep one anchor through navigation sizing editing and native requests`() {
+        val probe = SpanProbe()
+        try {
+            context(probe.theme) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertEquals(0L, probe.live.size)
+            assertTrue(probe.created < 5000L, Some(f"created ${probe.created}"))
+            assertTrue(probe.reads.count < 30000L, Some(f"read ${probe.reads.count}"))
+        } catch (error: Throwable) {
+            println(
+                f"spans phase=${probe.phase}, retry=${probe.retry}, created=${
+                    probe.created
+                }, reads=${probe.reads.count}, x=${probe.scroll.offset.x}, y=${
+                    probe.scroll.offset.y
+                }"
+            )
+            if (error is Exception)
+                error.printStackTrace()
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+internal class SpanProbe: Closeable {
+    val reads = SpanReads()
+    var rows = SpanRows(reads)
+    val theme = ThemeSource(shadcnTheme())
+    val model = DataGridState(rows, spanColumns(this))
+    val handle = DataGridHandle()
+    val outside = FocusHandle()
+    val scroll = ScrollState()
+    val width = state(500.0)
+    val mode = state<GridRowSizing<SpanRow>>(GridRowSizing.Fixed)
+    val rules = state<((SpanRow) -> Array<GridColumnSpan>)?>(Some(::spanRanges))
+    val direction = state(LayoutDirection.Ltr)
+    val enabled = state(true)
+    val live = HashSet<GridCellAddress>()
+    val widthSamples = HashSet<GridCellAddress>()
+    val heightSamples = HashMap<GridCellAddress, Double>()
+    val ends = ArrayList<GridEditEndReason>()
+    var created = 0L
+    var beforeCreated = 0L
+    var previousY = 0.0
+    var editor: GridTextEditor<String>? = None
+    var pending: GridCommit<SpanRow>? = None
+    var fit: GridColumnFit? = None
+    var submissions = 0
+    var frame: ComponentScope? = None
+    var active: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var view: ViewProbe? = None
+    var calls: NativeCalls? = None
+    var root: NativeNode? = None
+    var table: NativeNode? = None
+    var retained: NativeNode? = None
+    var covered: NativeNode? = None
+    var offscreen: NativeNode? = None
+    var phase = 0
+    var waiting = false
+    var retry = false
+    var revealed = false
+    var finished = false
+    private val held = ArrayList<NativeNode>()
+    init {
+        model.setColumnStates(
+            Array<GridColumnState>(30L) {
+                column -> GridColumnState(
+                    spanId(column),
+                    width =
+                        if (column == 0L || column == 29L)
+                            Some(60.0)
+                        else
+                            None,
+                    pin =
+                        if (column == 0L)
+                            GridPin.Start
+                        else
+                            if (column == 29L)
+                                GridPin.End
+                            else
+                                GridPin.None
+                )
+            }
+        )
+    }
+    fun replace(total: Long = 12L, merged: Boolean = true, removed: Long? = None) {
+        rows = SpanRows(reads, total, merged, removed)
+        model.replaceData(rows)
+    }
+    fun change(
+        column: Long,
+        width: Double? = None,
+        visible: Boolean = true,
+        pin: GridPin = GridPin.None
+    ) {
+        model.setColumnState(
+            GridColumnState(spanId(column), visible = visible, width = width, pin = pin)
+        )
+    }
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                active = Some(application)
+                application.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(30L))
+                )
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid column spans"
+                            size = LogicalSize(800.0, 440.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> SpanScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> {
+                                    root = Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                                    view = Some(ViewProbe(pointer))
+                                }
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(
+                            application.proxy(),
+                            { tag -> inspect(tag) },
+                            { tag, result -> completed(tag, result) }
+                        )
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(
+                Some(f"span timeout at ${phase}, focused=${window?.isFocused ?: false}")
+            )
+            else -> {}
+        }
+    }
+    fun accepted() {
+        if (finished || waiting || !(window?.isFocused ?: false))
+            return
+        waiting = true
+        retry = false
+        when (phase) {
+            case 12 -> calls!!.post(offscreen!!, phase, 19)
+            case 14 -> calls!!.post(offscreen!!, phase, 19, selectionStart = 1L)
+            case 15 -> calls!!.post(offscreen!!, phase, 19, selectionStart = 1L)
+            case 16 -> calls!!.post(offscreen!!, phase, 2)
+            case 43 -> calls!!.post(retained!!, phase, 2)
+            else -> calls!!.post(root!!, phase, 20)
+        }
+    }
+    fun completed(tag: Int, result: Int) {
+        assertEquals(phase, tag)
+        waiting = false
+        if (phase == 15) {
+            if (result == 0) {
+                frame!!.requestFrame();
+                return
+            }
+            assertTrue(revealed, Some("merged cell did not reach its full reveal geometry"))
+        }
+        assertEquals(
+            if (phase == 14)
+                0
+            else
+                1,
+            result,
+            Some(f"span native action ${phase}")
+        )
+        if (retry) {
+            frame!!.requestFrame();
+            return
+        }
+        phase += 1
+        advance()
+        if (!finished && !waiting)
+            frame!!.requestFrame()
+    }
+    fun focus(row: Long, column: Long) {
+        assertTrue(handle.focusCell(spanAddress(row, column)))
+    }
+    fun focused(row: Long, column: Long): Boolean {
+        retry = handle.isPending || handle.focusedCell != Some(spanAddress(row, column))
+        return !retry
+    }
+    fun keep(node: NativeNode): NativeNode {
+        held.add(node);
+        return node
+    }
+    fun columnIndex(column: Long): Long {
+        var index = 0L
+        for (pin in [GridPin.Start, GridPin.None, GridPin.End]) {
+            for (state in model.columnState)
+                if (state.visible && state.pin == pin) {
+                    if (state.id == spanId(column))
+                        return index
+                    index += 1L
+                }
+        }
+        return fail(Some("missing test column"))
+    }
+    fun cell(row: Long, column: Long): NativeNode =
+        keep(
+            table!!.cell(model.result.rows.indexOfKey(ViewKey.Number(row))!!, columnIndex(column))!!
+        )
+    fun spanning(row: Long, anchor: Long, count: Long) {
+        assertTrue(
+            cell(row, anchor).cellSpan(
+                model.result.rows.indexOfKey(ViewKey.Number(row))!!,
+                columnIndex(anchor),
+                columns = count
+            )
+        )
+    }
+    fun findTable(node: NativeNode): NativeNode? {
+        if (node.text(2, Some("AXTable")))
+            return Some(node)
+        for (index in 0L ..< node.count)
+            when (val found = findTable(keep(node.child(index)))) {
+                case Some(_) -> return found
+                case None -> {}
+            }
+        return None
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in held)
+            node.close()
+        view?.close()
+        ui?.close()
+    }
+}

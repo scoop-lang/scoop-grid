@@ -1,0 +1,79 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.math.BigDecimal
+import scoop.ui.ViewKey
+
+@Test
+private class GridPivotTextTest {
+    @Test
+    fun `pivot copy find and statistics read the same logical values`() {
+        val source = PivotSource(pivotRecords())
+        val model = DataGridState(source, pivotColumns(source.reads), pivotQuery())
+        val id = pivotId(Some(10L), 1L)
+        val north = GridCellAddress(GridRowKey.Group(pivotPath("North")), id)
+        val south = GridCellAddress(GridRowKey.Group(pivotPath("South")), id)
+        assertTrue(model.setCellRange(Some(GridCellRange(north, south))))
+        source.reads.forbidden = true
+        assertEquals(Some("9007199254740995\n7"), model.copyText())
+        assertEquals(Some(north), model.findCell("9007199254740995")?.address)
+        assertEquals(BigDecimal(9007199254741002L), model.rangeStatistics()!!.sum)
+        assertEquals(9L, source.reads.amounts)
+    }
+
+    @Test
+    fun `pivot csv separates result fields from original records and selected records`() {
+        val source = PivotSource(pivotRecords())
+        val model =
+            DataGridState(
+                source,
+                pivotColumns(source.reads),
+                pivotQuery(),
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        val id = pivotId(Some(10L), 1L)
+        val result =
+            model.exportCsv(
+                GridCsvOptions(
+                    data = GridExportData.Displayed,
+                    columns = Some([id]),
+                    includeHeaders = false
+                )
+            )
+        assertEquals("9007199254740995\r\n7\r\n", result)
+        model.setSelectedRows([ViewKey.Number(0L), ViewKey.Number(1L)])
+        val selected =
+            model.exportCsv(
+                GridCsvOptions(
+                    scope = GridExportScope.SelectedRows,
+                    columns = Some([GridColumnId("amount")]),
+                    includeHeaders = false
+                )
+            )
+        assertEquals("9007199254740993\r\n7\r\n", selected)
+        assertFailsWith<IllegalArgumentException> {
+            model.exportCsv(
+                GridCsvOptions(
+                    scope = GridExportScope.SelectedRows,
+                    data = GridExportData.Displayed
+                )
+            )
+        }
+        model.setPagination(GridPagination.Page(1L, 1L))
+        val page =
+            model.exportCsv(
+                GridCsvOptions(columns = Some([GridColumnId("note")]), includeHeaders = false)
+            )
+        assertEquals("b\r\ne\r\nh\r\ni\r\n", page)
+        val all =
+            model.exportCsv(
+                GridCsvOptions(
+                    data = GridExportData.Displayed,
+                    scope = GridExportScope.AllFiltered,
+                    columns = Some([id]),
+                    includeHeaders = false
+                )
+            )
+        assertEquals(result, all)
+    }
+}

@@ -1,0 +1,608 @@
+package scoop.grid.examples.basic
+
+import scoop.collections.HashMap
+import scoop.collections.contains
+import scoop.graphics.Paint
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.ui.style.material.materialTheme
+import scoop.ui.style.fluent.fluentTheme
+import scoop.ui.style.macos.macosTheme
+import scoop.window.*
+import scoop.ui.component.button as gridPinButton
+import scoop.ui.component.tabs as gridToolsTabs
+import scoop.ui.component.column as gridSlotColumn
+
+private class SampleRow(val id: Long, val name: String, val amount: Long)
+
+private fun sampleColumnSpans(row: SampleRow): Array<GridColumnSpan> =
+    if (row.id % 7L == 1L)
+        [GridColumnSpan([GridColumnId("name"), GridColumnId("amount")])]
+    else
+        []
+
+/** Only edited rows are stored; each source snapshot owns its private map. */
+private class SampleRows(private val changes: HashMap<Long, SampleRow> = HashMap()): TableSource<
+    SampleRow
+> {
+    public override val count: Long get() = 100000L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun rowAt(index: Long): SampleRow =
+        changes[index] ?:
+            SampleRow(
+                index + 1L,
+                if (index % 7L == 0L)
+                    f"记录 ${index + 1L}：本条包含跨区域协作的详细说明，名称可随列宽自动换行。"
+                else
+                    f"记录 ${index + 1L}",
+                (index + 1L) * 10L
+            )
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+    fun replacing(row: SampleRow): SampleRows {
+        val next = HashMap<Long, SampleRow>()
+        for ((key, value) in changes)
+            next.put(key, value)
+        next.put(row.id - 1L, row)
+        return SampleRows(next)
+    }
+}
+
+private class GridExample(scope: ComponentScope): Component(scope) {
+    private var rows = SampleRows()
+    private val model =
+        DataGridState(
+            rows,
+            columns(),
+            query =
+                GridQuery(
+                    totals = GridTotals(GridTotalPlacement.Before, "全部筛选结果"),
+                    aggregations =
+                        [GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum"))]
+                ),
+            headers = Some(headers()),
+            pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(99999L)]),
+            rowSelection = GridRowSelectionMode.Multiple
+        )
+    private val handle = DataGridHandle()
+    private val lastEdit = state("名称与金额可编辑")
+    private val tool = state<String?>(Some("filters"))
+    private val mergeDescriptions = state(true)
+    private val savedView = state<GridViewState?>(None)
+    private val themeIndex = state(0)
+    private val dark = state(false)
+    private fun changeTheme(source: ThemeSource, next: Boolean) {
+        if (next)
+            themeIndex.value = (themeIndex.value + 1) % 4
+        else
+            dark.value = !dark.value
+        val mode =
+            if (dark.value)
+                ThemeMode.Dark
+            else
+                ThemeMode.Light
+        source.current.value =
+            when (themeIndex.value) {
+                case 1 -> materialTheme(mode)
+                case 2 -> fluentTheme(mode)
+                case 3 -> macosTheme(mode)
+                else -> shadcnTheme(mode)
+            }
+    }
+    private fun saveView() {
+        savedView.value = handle.saveViewState()
+        lastEdit.value = "已保存当前列、查询、选择和阅读位置"
+    }
+    private fun restoreView() {
+        val saved = savedView.value ?: return
+        when (handle.restoreViewState(saved)) {
+            case Restored(val report) -> lastEdit.value =
+                if (report.issues.size == 0L)
+                    "已恢复视图"
+                else
+                    f"已恢复视图，${report.issues.size} 项状态已调整"
+            case Rejected(val message) -> lastEdit.value = message
+        }
+    }
+    private fun copyCsv(selected: Boolean) {
+        when (handle.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> {
+                lastEdit.value = "请先完成当前单元格的编辑或保存";
+                return
+            }
+        }
+        try {
+            val text =
+                model.exportCsv(
+                    GridCsvOptions(
+                        if (selected)
+                            GridExportScope.SelectedRows
+                        else
+                            GridExportScope.CurrentPage
+                    )
+                )
+            scope.nativeWindow.clipboard.writeText(text)
+            lastEdit.value =
+                if (selected)
+                    "已复制所选记录 CSV"
+                else
+                    "已复制当前页 CSV（含固定行）"
+        } catch (error: Exception) {
+            lastEdit.value = error.message ?: "无法生成 CSV"
+        }
+    }
+    private fun toggleGrouping() {
+        when (handle.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> {
+                lastEdit.value = "请先完成当前单元格的编辑或保存";
+                return
+            }
+        }
+        val grouped = model.query.grouping.size > 0L
+        model.setQuery(
+            model.query.withGrouping(
+                if (grouped)
+                    []
+                else
+                    [GridColumnId("region")]
+            )
+            .withGroupTotals(GridTotals(GridTotalPlacement.After, "小计"))
+        )
+        lastEdit.value =
+            if (grouped)
+                "已恢复平面记录"
+            else
+                "按区域分组；展开按钮查看成员，复选框选择组内记录"
+    }
+    private fun toggleSpans() {
+        when (handle.commitEdit()) {
+            case NoEdit -> mergeDescriptions.value = !mergeDescriptions.value
+            case Committed -> mergeDescriptions.value = !mergeDescriptions.value
+            else -> lastEdit.value = "请先完成当前单元格的编辑或保存"
+        }
+    }
+    private fun toggleFixed(key: ViewKey, placement: GridRowPin) {
+        val pinned =
+            when (placement) {
+                case Top -> model.pinnedRows.top.contains(key)
+                case Bottom -> model.pinnedRows.bottom.contains(key)
+                case None -> false
+            }
+        when (
+            handle.pinRow(
+                key,
+                if (pinned)
+                    GridRowPin.None
+                else
+                    placement
+            )
+        ) {
+            case Applied -> lastEdit.value =
+                if (pinned)
+                    "已解除固定"
+                else
+                    "已固定记录"
+            case Rejected(val message) -> lastEdit.value = message
+        }
+    }
+    private fun save(row: SampleRow, completion: GridCommit<SampleRow>) {
+        val next = rows.replacing(row)
+        if (completion.accept(next))
+            rows = next
+    }
+    private fun headers(): Array<GridHeaderNode> =
+        [
+            GridHeaderNode.Column(GridColumnId("metric-0")),
+            GridHeaderNode.Group(
+                GridColumnGroupId("details"),
+                "基本信息",
+                [
+                    GridHeaderNode.Column(GridColumnId("name")),
+                    GridHeaderNode.Column(GridColumnId("amount")),
+                    GridHeaderNode.Column(GridColumnId("region"))
+                ]
+            ),
+            GridHeaderNode.Group(
+                GridColumnGroupId("metrics"),
+                "指标",
+                [
+                    GridHeaderNode.Group(
+                        GridColumnGroupId("first-metrics"),
+                        "指标 4–20",
+                        Array<GridHeaderNode>(17L) {
+                            index -> GridHeaderNode.Column(GridColumnId(f"metric-${index + 4L}"))
+                        }
+                    ),
+                    GridHeaderNode.Group(
+                        GridColumnGroupId("last-metrics"),
+                        "指标 21–39",
+                        Array<GridHeaderNode>(19L) {
+                            index -> GridHeaderNode.Column(GridColumnId(f"metric-${index + 21L}"))
+                        }
+                    )
+                ]
+            )
+        ]
+    private fun columns(): Array<GridColumn<SampleRow>> {
+        val example = this
+        return Array<GridColumn<SampleRow>>(40L) {
+            column -> if (column == 1L)
+                gridColumn<SampleRow, String>(
+                    GridColumnId("name"),
+                    "名称",
+                    { row -> row.name },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(200.0)),
+                    edit =
+                        Some(
+                            gridEdit<SampleRow, String>(
+                                { value -> gridTextEditor(value) },
+                                {
+                                    change,
+                                    completion -> example.save(
+                                        SampleRow(change.row.id, change.value, change.row.amount),
+                                        completion
+                                    )
+                                },
+                                validate =
+                                    {
+                                        _,
+                                        value -> if (value == "")
+                                            Some("名称不能为空")
+                                        else
+                                            None
+                                    }
+                            )
+                        )
+                )
+            else
+                if (column == 2L)
+                    gridColumn<SampleRow, Long>(
+                        GridColumnId("amount"),
+                        "金额",
+                        { row -> row.amount },
+                        gridLongValues(),
+                        TableColumnSize(GridTrack.Fixed(180.0)),
+                        edit =
+                            Some(
+                                gridEdit<SampleRow, Long>(
+                                    { value -> gridLongEditor(value) },
+                                    {
+                                        change,
+                                        completion -> example.save(
+                                            SampleRow(change.row.id, change.row.name, change.value),
+                                            completion
+                                        )
+                                    },
+                                    validate =
+                                        {
+                                            _,
+                                            value -> if (value < 0L)
+                                                Some("金额不能为负数")
+                                            else
+                                                None
+                                        }
+                                )
+                            ),
+                        aggregations =
+                            [
+                                gridCountAggregation<Long>(),
+                                gridSumLongAggregation(),
+                                gridMinAggregation(gridLongValues()),
+                                gridMaxAggregation(gridLongValues()),
+                                gridAverageLongAggregation()
+                            ]
+                    )
+                else
+                    gridColumn<SampleRow, Long>(
+                        GridColumnId(
+                            if (column == 3L)
+                                "region"
+                            else
+                                f"metric-${column}"
+                        ),
+                        if (column == 0L)
+                            "序号"
+                        else
+                            if (column == 3L)
+                                "区域"
+                            else
+                                f"指标 ${column}",
+                        {
+                            row -> if (column == 0L)
+                                row.id
+                            else
+                                if (column == 3L)
+                                    (row.id - 1L) % 4L + 1L
+                                else
+                                    row.id * (column + 1L)
+                        },
+                        gridLongValues(),
+                        TableColumnSize(
+                            GridTrack.Fixed(
+                                if (column == 3L)
+                                    200.0
+                                else
+                                    112.0
+                            )
+                        ),
+                        groupable = column == 3L
+                    )
+        }
+    }
+    init {
+        model.setColumnState(GridColumnState(GridColumnId("metric-0"), pin = GridPin.Start))
+        model.setColumnState(GridColumnState(GridColumnId("metric-39"), pin = GridPin.End))
+    }
+    public override fun render(): View {
+        val example = this
+        val model = this.model
+        val handle = this.handle
+        val lastEdit = this.lastEdit
+        val selectedTool = tool
+        val firstFixed = model.pinnedRows.top.contains(ViewKey.Number(0L))
+        val lastFixed = model.pinnedRows.bottom.contains(ViewKey.Number(99999L))
+        val mergeDescriptions = this.mergeDescriptions.value
+        val canRestore =
+            when (savedView.value) {
+                case Some(_) -> true
+                case None -> false
+            }
+        val source = currentThemeSource()
+        val theme = source.read(scope)
+        val themeName =
+            when (themeIndex.value) {
+                case 1 -> "Material"
+                case 2 -> "Fluent"
+                case 3 -> "macOS"
+                else -> "Shadcn"
+            }
+        val modeName =
+            if (dark.value)
+                "深色"
+            else
+                "浅色"
+        val table =
+            column {
+                label("Enter / F2 编辑，Enter 保存，Tab 换格，Escape 取消；支持系统中文输入法")
+                label("拖动选择矩形，Shift＋方向键或点击扩展，Command / Ctrl＋C 复制，Escape 清除")
+                row {
+                    item(gridFind(handle)) {
+                        basis = FlexBasis.Fixed(0.0)
+                        grow = 1.0
+                    }
+                    item(gridPinButton(themeName, { example.changeTheme(source, true) })) {
+                        shrink = 0.0
+                    }
+                    item(gridPinButton(modeName, { example.changeTheme(source, false) })) {
+                        shrink = 0.0
+                    }
+                    spacing = 8.0
+                }
+                row {
+                    add(
+                        gridPinButton(
+                            if (firstFixed)
+                                "取消首条固定"
+                            else
+                                "固定首条到顶部",
+                            onClick = { example.toggleFixed(ViewKey.Number(0L), GridRowPin.Top) }
+                        )
+                    )
+                    add(
+                        gridPinButton(
+                            if (lastFixed)
+                                "取消末条固定"
+                            else
+                                "固定末条到底部",
+                            onClick =
+                                { example.toggleFixed(ViewKey.Number(99999L), GridRowPin.Bottom) }
+                        )
+                    )
+                    add(
+                        gridPinButton(
+                            if (mergeDescriptions)
+                                "关闭跨列说明"
+                            else
+                                "启用跨列说明",
+                            onClick = { example.toggleSpans() }
+                        )
+                    )
+                    spacing = 8.0
+                    add(gridPinButton("保存视图", { example.saveView() }))
+                    add(gridPinButton("恢复视图", { example.restoreView() }) { enabled = canRestore })
+                }
+                label(
+                    if (mergeDescriptions)
+                        "长说明合并名称与金额显示，该格只读；其余记录仍可编辑"
+                    else
+                        "已关闭跨列说明，名称与金额分别显示并可编辑"
+                )
+                add(
+                    dataGrid(model) {
+                        height = 500.0
+                        toolbar = Some(gridQuickFilter(model) { this.handle = Some(handle) })
+                        footer =
+                            Some(
+                                gridSlotColumn {
+                                    add(gridPager(model) { this.handle = Some(handle) })
+                                    add(gridStatusBar(model))
+                                    add(gridAggregationSummary(model))
+                                    spacing = 4.0
+                                }
+                            )
+                        empty =
+                            Some(
+                                gridSlotColumn {
+                                    label("没有匹配的记录")
+                                    button(
+                                        "清除筛选",
+                                        {
+                                            model.setQuery(
+                                                model.query.withFilter(
+                                                    GridFilter.All
+                                                ).withQuickFilter("")
+                                            )
+                                        }
+                                    )
+                                    spacing = 8.0
+                                    alignment = CrossAlignment.Center
+                                }
+                            )
+                        rowHeight = 48.0
+                        rowSizing = GridRowSizing.Content([GridColumnId("name")])
+                        columnSpans =
+                            if (mergeDescriptions)
+                                Some(::sampleColumnSpans)
+                            else
+                                None
+                        this.handle = Some(handle)
+                        onEditEnd =
+                            {
+                                event -> lastEdit.value =
+                                    when (event.reason) {
+                                        case Accepted -> "已保存"
+                                        case Unchanged -> "内容未变"
+                                        case Cancelled -> "已取消编辑"
+                                        else -> "编辑已结束"
+                                    }
+                            }
+                        onPasteResult =
+                            {
+                                _,
+                                result -> lastEdit.value =
+                                    when (result) {
+                                        case Committed -> "已粘贴"
+                                        case Pending -> "正在保存粘贴的内容…"
+                                        case Rejected(val message) -> message
+                                    }
+                            }
+                        onCopyResult =
+                            {
+                                result -> lastEdit.value =
+                                    when (result) {
+                                        case Copied -> "已复制单元格"
+                                        case Rejected(val message) -> message
+                                        case Unavailable(val error) -> error.message ?: "所需范围未加载"
+                                    }
+                            }
+                    }
+                )
+                row {
+                    alignment = CrossAlignment.Center
+                    spacing = 8.0
+                    add(
+                        gridPinButton(
+                            "清空选择",
+                            onClick =
+                                {
+                                    when (handle.clearRowSelection()) {
+                                        case Applied -> lastEdit.value = "已清空行选择"
+                                        case Rejected(val message) -> lastEdit.value = message
+                                    }
+                                }
+                        ) { enabled = model.selectedRowKeys.size > 0L }
+                    )
+                    add(
+                        gridPinButton(
+                            "复制选区",
+                            onClick =
+                                {
+                                    handle.copyCells();
+                                    Unit
+                                }
+                        ) { enabled = model.cellRange != None }
+                    )
+                    add(
+                        gridPinButton(
+                            "清除选区",
+                            onClick =
+                                {
+                                    if (handle.clearCellRange())
+                                        lastEdit.value = "已清除单元格选区"
+                                }
+                        ) { enabled = model.cellRange != None }
+                    )
+                    add(
+                        gridPinButton(
+                            if (model.query.grouping.size > 0L)
+                                "取消分组"
+                            else
+                                "按区域分组",
+                            { example.toggleGrouping() }
+                        )
+                    )
+                    add(gridPinButton("复制本页 CSV", { example.copyCsv(false) }))
+                    add(
+                        gridPinButton("复制已选 CSV", { example.copyCsv(true) }) {
+                            enabled = model.selectedRowKeys.size > 0L
+                        }
+                    )
+                }
+                label(handle.editError ?: lastEdit.value)
+            }
+        val content =
+            row {
+                item(table) { grow = 1.0 }
+                frame(
+                    gridToolsTabs(selectedTool.binding()) {
+                        item(
+                            Choice(ViewKey.Text("filters"), "filters", "筛选"),
+                            gridFilterPanel(model) {
+                                this.handle = Some(handle)
+                                height = 460.0
+                            }
+                        )
+                        item(
+                            Choice(ViewKey.Text("columns"), "columns", "列"),
+                            gridColumnsPanel(model, handle) { height = 300.0 }
+                        )
+                        retention = ContentRetention.KeepMounted
+                    }
+                ) { width = Some(420.0) }
+                spacing = 16.0
+                padding = Insets.all(12.0)
+                alignment = CrossAlignment.Start
+            }
+        return styled(content) {
+            style { background = Some(Paint(theme.tokens.palette.background.background)) }
+        }
+    }
+}
+
+fun main() {
+    context(ThemeSource(shadcnTheme())) {
+        val application =
+            Application(applicationOptions { lastWindowPolicy = LastWindowPolicy.Exit })
+        UiHost(onRootError = { _, error -> throw error }) {
+            host,
+            active,
+            event -> when (event) {
+                case Resumed -> host.attach(
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid — 100,000 rows × 40 columns"
+                            size = LogicalSize(1360.0, 760.0)
+                        }
+                    ),
+                    { scope -> GridExample(scope) }
+                )
+                case Window(_, WindowEvent.CloseRequested) -> active.requestExit()
+                else -> {}
+            }
+        }.use { host -> application.run(host) }
+    }
+}

@@ -1,0 +1,252 @@
+package scoop.grid
+
+import scoop.math.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class StatisticsRows(public override val count: Long, val offset: Long = 0L): TableSource<
+    Long
+> {
+    var reads = 0L
+    var onRead: (() -> Unit)? = None
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long {
+        reads += 1L
+        val action = onRead
+        onRead = None
+        action?.invoke()
+        return index + offset
+    }
+}
+
+private fun statisticsCell(row: Long, column: String = "integer"): GridCellAddress =
+    GridCellAddress(ViewKey.Number(row), GridColumnId(column))
+
+private fun statisticsRange(
+    first: Long,
+    last: Long,
+    column: String = "integer",
+    endColumn: String = "integer"
+): GridCellRange = GridCellRange(statisticsCell(first, column), statisticsCell(last, endColumn))
+
+@Test
+private class GridStatisticsTest {
+    @Test
+    fun `integer totals and extrema remain exact beyond double precision and signed long sums`() {
+        val rows = StatisticsRows(2L)
+        val model =
+            DataGridState(
+                rows,
+                [
+                    gridColumn<Long, Long>(
+                        GridColumnId("integer"),
+                        "Integer",
+                        { _ -> Long.MAX_VALUE },
+                        gridLongValues(),
+                        cell = Some { _ -> fail(Some("statistics created a view")) }
+                    )
+                ]
+            )
+        assertEquals(None, model.rangeStatistics()?.count)
+        assertEquals(0L, rows.reads)
+        model.setCellRange(Some(statisticsRange(0L, 1L)))
+        val result = model.rangeStatistics()!!
+        assertEquals(BigInteger(2L), result.count)
+        assertEquals(BigDecimal.parse("18446744073709551614"), result.sum)
+        assertEquals(Some(BigDecimal(Long.MAX_VALUE)), result.minimum)
+        assertEquals(result.minimum, result.maximum)
+        assertEquals(result.minimum, result.average)
+        assertEquals(2L, result.rowCount)
+        assertEquals(1L, result.columnCount)
+        assertEquals(2L, rows.reads)
+    }
+
+    @Test
+    fun `mixed decimal and integer values use numeric data and never formatted labels`() {
+        val rows = StatisticsRows(2L)
+        val native = gridLongValues()
+        val values =
+            GridValues<Long>(
+                native.kind,
+                { _ -> throw IllegalStateException(Some("statistics formatted a value")) },
+                native.compare,
+                native.literal,
+                native.encode,
+                number = native.number
+            )
+        val model =
+            DataGridState(
+                rows,
+                [
+                    gridColumn<Long, Long>(
+                        GridColumnId("integer"),
+                        "Integer",
+                        {
+                            row -> if (row == 0L)
+                                9007199254740993L
+                            else
+                                -9007199254740992L
+                        },
+                        values
+                    ),
+                    gridColumn<Long, Double>(
+                        GridColumnId("decimal"),
+                        "Decimal",
+                        {
+                            row -> if (row == 0L)
+                                0.1
+                            else
+                                0.2
+                        },
+                        gridDoubleValues()
+                    )
+                ]
+            )
+        model.setCellRange(Some(statisticsRange(0L, 1L, endColumn = "decimal")))
+        val result = model.rangeStatistics()!!
+        assertEquals(BigInteger(4L), result.count)
+        assertEquals(BigDecimal.parse("1.3"), result.sum)
+        assertEquals(Some(BigDecimal.parse("0.325")), result.average)
+        assertEquals(Some(BigDecimal(-9007199254740992L)), result.minimum)
+        assertEquals(Some(BigDecimal(9007199254740993L)), result.maximum)
+        assertEquals(2L, rows.reads)
+    }
+
+    @Test
+    fun `missing text and action cells do not count and empty numeric sets have no extrema`() {
+        val rows = StatisticsRows(3L)
+        val model =
+            DataGridState(
+                rows,
+                [
+                    gridColumn<Long, Long?>(
+                        GridColumnId("integer"),
+                        "Integer",
+                        {
+                            row -> if (row == 1L)
+                                None
+                            else
+                                Some(row)
+                        },
+                        nullableGridValues(gridLongValues())
+                    ),
+                    gridColumn<Long, String>(
+                        GridColumnId("text"),
+                        "Text",
+                        { _ -> "123" },
+                        gridTextValues()
+                    ),
+                    gridActionColumn<Long>(
+                        GridColumnId("action"),
+                        "Action",
+                        { _ -> fail(Some("statistics created an action")) }
+                    )
+                ]
+            )
+        model.setCellRange(Some(statisticsRange(0L, 2L, endColumn = "action")))
+        val result = model.rangeStatistics()!!
+        assertEquals(BigInteger(2L), result.count)
+        assertEquals(BigDecimal(2L), result.sum)
+        assertEquals(Some(BigDecimal.ZERO), result.minimum)
+        assertEquals(Some(BigDecimal.ONE), result.average)
+        model.setCellRange(Some(statisticsRange(1L, 1L, endColumn = "action")))
+        val empty = model.rangeStatistics()!!
+        assertEquals(BigInteger.ZERO, empty.count)
+        assertEquals(BigDecimal.ZERO, empty.sum)
+        assertEquals(None, empty.minimum)
+        assertEquals(None, empty.maximum)
+        assertEquals(None, empty.average)
+        assertEquals(4L, rows.reads)
+    }
+
+    @Test
+    fun `statistics reads only the requested huge-source window and keeps its captured result`() {
+        val rows = StatisticsRows(100000000L)
+        val model =
+            DataGridState(
+                rows,
+                [
+                    gridColumn<Long, Long>(
+                        GridColumnId("integer"),
+                        "Integer",
+                        { row -> row },
+                        gridLongValues()
+                    )
+                ],
+                pinnedRows = GridPinnedRows([ViewKey.Number(99999999L)])
+            )
+        model.setCellRange(Some(statisticsRange(49999999L, 50000001L)))
+        val result = model.rangeStatistics()!!
+        assertEquals(BigDecimal(150000000L), result.sum)
+        assertEquals(3L, rows.reads)
+        val small = StatisticsRows(3L)
+        model.replaceData(small)
+        model.setCellRange(Some(statisticsRange(0L, 2L)))
+        small.onRead = Some { model.replaceData(StatisticsRows(3L, 100L)) }
+        val captured = model.rangeStatistics()!!
+        assertEquals(BigDecimal(3L), captured.sum)
+        assertEquals(3L, small.reads)
+        assertEquals(BigDecimal(303L), model.rangeStatistics()!!.sum)
+    }
+
+    @Test
+    fun `nonfinite or failed numeric input does not become a successful zero and averages round explicitly`() {
+        val rows = StatisticsRows(3L)
+        val model =
+            DataGridState(
+                rows,
+                [
+                    gridColumn<Long, Double>(
+                        GridColumnId("integer"),
+                        "Number",
+                        {
+                            row -> if (row == 0L)
+                                1.0
+                            else
+                                0.0
+                        },
+                        gridDoubleValues()
+                    )
+                ]
+            )
+        model.setCellRange(Some(statisticsRange(0L, 2L)))
+        assertEquals(
+            Some(BigDecimal.parse("0.3333333333333333333333333333333333")),
+            model.rangeStatistics()!!.average
+        )
+        model.replaceColumns(
+            [
+                gridColumn<Long, Double>(
+                    GridColumnId("integer"),
+                    "Number",
+                    { _ -> Double.NaN },
+                    gridDoubleValues()
+                )
+            ]
+        )
+        val range = model.cellRange
+        assertFailsWith<IllegalArgumentException> { model.rangeStatistics() }
+        assertEquals(range, model.cellRange)
+        model.replaceColumns(
+            [
+                gridColumn<Long, Long>(
+                    GridColumnId("integer"),
+                    "Integer",
+                    { _ -> throw IllegalStateException(Some("numeric read failed")) },
+                    gridLongValues()
+                )
+            ]
+        )
+        assertFailsWith<IllegalStateException> { model.rangeStatistics() }
+        assertEquals(range, model.cellRange)
+    }
+}

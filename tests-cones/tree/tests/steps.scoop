@@ -1,0 +1,244 @@
+package scoop.grid.tests.tree
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.ui.*
+
+internal fun TreeProbe.accepted() {
+    if (finished || waiting || !(window?.isFocused ?: false))
+        return
+    waiting = true
+    retry = false
+    when (phase) {
+        case 1 -> calls!!.post(farRow!!, phase, 14)
+        case 3 -> calls!!.post(farRow!!, phase, 15)
+        case 5 -> calls!!.post(button!!, phase)
+        case 7 -> calls!!.post(childRow!!, phase, 14)
+        case 9 -> calls!!.post(checkbox!!, phase)
+        case 15 -> calls!!.post(nodeRow!!, phase, 14)
+        case 19 -> calls!!.post(nodeRow!!, phase, 15)
+        case 32 -> calls!!.post(nodeRow!!, phase, 16)
+        case 34 -> calls!!.post(nodeRow!!, phase, 15)
+        case 38 -> calls!!.post(nodeRow!!, phase, 15)
+        case 41 -> calls!!.post(button!!, phase)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun TreeProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    if (phase >= 28) {
+        inspectContext()
+        return
+    }
+    when (phase) {
+        case 0 -> {
+            table = find(root!!, "AXTable")
+            assertEquals(251L, table!!.rowCount)
+            nodeCell = Some(keep(table!!.cell(0L, 0L)!!))
+            nodeRow = Some(keep(nodeCell!!.parent()!!))
+            farRow = Some(keep(keep(table!!.cell(200L, 0L)!!).parent()!!))
+            assertEquals(0L, nodeRow!!.hierarchyLevel)
+            assertTrue(nodeRow!!.flag(18))
+            assertFalse(nodeRow!!.flag(17))
+            assertTrue(nodeRow!!.flag(20))
+            assertFalse(farRow!!.flag(2))
+            assertFalse(built.contains(800L))
+            assertTrue(nodeCell!!.text(1, Some("Node 0")))
+            assertTrue(keep(table!!.cell(0L, 1L)!!).text(1, Some("1")))
+            aggregate = Some(model.result.aggregates)
+            button = Some(named("grid-tree-expand-n0"))
+            assertTrue(button!!.flag(1))
+            assertTrue(
+                when (root!!.find("grid-columns-name-grouping")) {
+                    case None -> true
+                    case Some(_) -> false
+                }
+            )
+        }
+        case 2 -> {
+            assertTrue(model.isExpanded(far))
+            assertEquals(253L, table!!.rowCount)
+            assertTrue(farRow!!.flag(17))
+            assertFalse(farRow!!.flag(2))
+            assertTrue(aggregate!! === model.result.aggregates)
+            assertFalse(built.contains(800L))
+            assertFalse(built.contains(801L))
+            assertFalse(built.contains(803L))
+        }
+        case 4 -> {
+            assertFalse(model.isExpanded(far))
+            assertEquals(251L, table!!.rowCount)
+            assertTrue(nodeCell!!.same(keep(table!!.cell(0L, 0L)!!)))
+        }
+        case 6 -> {
+            assertTrue(model.isExpanded(node))
+            assertEquals(253L, table!!.rowCount)
+            assertTrue(nodeRow!!.flag(17))
+            childCell = Some(keep(table!!.cell(1L, 0L)!!))
+            childRow = Some(keep(childCell!!.parent()!!))
+            assertEquals(1L, childRow!!.hierarchyLevel)
+            assertTrue(childRow!!.flag(18))
+            assertFalse(childRow!!.flag(17))
+            assertTrue(childRow!!.flag(20))
+        }
+        case 8 -> {
+            assertEquals(254L, table!!.rowCount)
+            leafRow = Some(keep(keep(table!!.cell(2L, 0L)!!).parent()!!))
+            assertEquals(2L, leafRow!!.hierarchyLevel)
+            assertFalse(leafRow!!.flag(18))
+            assertTrue(leafRow!!.flag(20))
+            checkbox = Some(named("grid-row-selection-2"))
+        }
+        case 10 -> {
+            assertEquals(1L, model.selectedRowKeys.size)
+            assertEquals(ViewKey.Number(2L), model.selectedRowKeys[0L])
+            assertEquals(1L, table!!.selectedCount)
+            assertFalse(nodeRow!!.flag(21))
+        }
+        case 11 -> retry = !focused
+        case 12 -> {
+            assertTrue(handle.editError != None)
+            assertEquals(Some(address), handle.editingCell)
+            assertTrue(model.isExpanded(node))
+            assertEquals("bad", editor!!.state.text)
+            retry = !focused
+        }
+        case 13 -> retry =
+            handle.focusedCell != Some(GridCellAddress(ViewKey.Number(2L), GridColumnId("amount")))
+        case 14 -> {
+            assertFalse(model.isExpanded(node))
+            assertEquals(251L, table!!.rowCount)
+            assertFalse(childRow!!.flag(0))
+            assertFalse(leafRow!!.flag(0))
+            assertEquals(1L, model.selectedRowKeys.size)
+            assertEquals(0L, table!!.selectedCount)
+            retry = handle.focusedCell != Some(nodeAmount)
+        }
+        case 16 -> {
+            assertTrue(model.isExpanded(node))
+            assertEquals(254L, table!!.rowCount)
+            assertFalse(leafRow!!.flag(0))
+        }
+        case 17 -> retry = !focused
+        case 18 -> {
+            assertTrue(handle.isSubmitting)
+            assertTrue(model.isExpanded(node))
+            assertFalse(button!!.flag(1))
+            assertEquals(1, submissions)
+        }
+        case 20 -> {
+            assertTrue(handle.isSubmitting)
+            assertTrue(model.isExpanded(node))
+        }
+        case 21 -> {
+            assertFalse(handle.isSubmitting)
+            assertTrue(model.isExpanded(node))
+            assertTrue(nodeCell!!.same(keep(table!!.cell(0L, 0L)!!)))
+            assertTrue(keep(table!!.cell(0L, 1L)!!).text(1, Some("1")))
+            assertEquals(
+                Some(GridAggregateDisplay.Value("30")),
+                model.treeAggregations(ViewKey.Number(0L))!!.total(GridColumnId("amount"))
+            )
+            assertEquals(
+                Some(GridAggregateDisplay.Value("500520")),
+                model.result.aggregates.total(GridColumnId("amount"))
+            )
+        }
+        case 22 -> retry = handle.focusedCell != Some(nodeAddress)
+        case 23 -> {
+            assertEquals(Some(nodeAddress), handle.editingCell)
+            assertEquals("Node 0", nameEditor!!.state.text)
+            retry = !focused
+        }
+        case 24 -> retry = handle.focusedCell != Some(nodeAddress) || !nodeCell!!.flag(4)
+        case 25 -> {
+            assertFalse(model.isExpanded(node))
+            assertEquals(251L, table!!.rowCount)
+            assertEquals(None, handle.editingCell)
+        }
+        case 26 -> {
+            assertTrue(model.isExpanded(node))
+            assertEquals(254L, table!!.rowCount)
+        }
+        case 27 -> {
+            retry = handle.focusedCell != Some(nodeAmount)
+            assertTrue(model.isExpanded(node))
+        }
+        else -> {}
+    }
+}
+
+internal fun TreeProbe.completed(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(1, result, Some(f"native tree action at ${phase}"))
+    waiting = false
+    if (retry) {
+        frame!!.requestFrame()
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 11 -> assertTrue(handle.beginEdit(address))
+        case 12 -> {
+            editor!!.state.replaceAll("bad")
+            rejected(handle.setExpanded(node, false))
+        }
+        case 13 -> {
+            assertTrue(handle.cancelEdit())
+            assertTrue(
+                handle.focusCell(GridCellAddress(ViewKey.Number(2L), GridColumnId("amount")))
+            )
+        }
+        case 14 -> applied(handle.setExpanded(node, false))
+        case 17 -> assertTrue(handle.beginEdit(address))
+        case 18 -> {
+            editor!!.state.replaceAll("22")
+            rejected(handle.setExpanded(node, false))
+        }
+        case 21 -> assertTrue(pending!!.accept(TreeWindowSource(22L)))
+        case 22 -> assertTrue(handle.focusCell(nodeAddress))
+        case 23 -> key(120)
+        case 24 -> {
+            assertTrue(handle.cancelEdit())
+            assertTrue(handle.focusCell(nodeAddress))
+        }
+        case 25 -> alt(123)
+        case 26 -> alt(124)
+        case 27 -> key(124)
+        case 28 -> model.setPagination(GridPagination.Page(0L, 1L))
+        case 29 -> model.pinRow(ViewKey.Number(999L), GridRowPin.Bottom)
+        case 30 -> model.setQuery(
+            model.query.withTreeTotals(GridTotals(GridTotalPlacement.After, "Subtree"))
+        )
+        case 31 -> model.setQuery(
+            model.query.withFilter(
+                GridFilter.Column(
+                    GridColumnId("name"),
+                    GridCondition.Compare(GridComparison.Equal, GridLiteral.Text("Node 2"))
+                )
+            )
+        )
+        case 35 -> model.setQuery(model.query.withFilter(GridFilter.All))
+        case 36 -> applied(handle.setExpanded(node, true))
+        case 37 -> enabled.value = false
+        case 39 -> enabled.value = true
+        case 40 -> model.setColumnState(GridColumnState(GridColumnId("name"), visible = false))
+        case 42 -> model.setColumnState(GridColumnState(GridColumnId("name"), pin = GridPin.Start))
+        case 43 -> model.replaceData(TreeWindowSource(22L, true))
+        case 44 -> {
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+            return
+        }
+        case 45 -> {
+            finished = true
+            application!!.requestExit()
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}

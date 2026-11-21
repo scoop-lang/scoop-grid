@@ -1,0 +1,80 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+/** Parent references are derived from the same immutable records as the grid columns. */
+public class GridTreeData<Row> public constructor(
+    public val parentKey: (Row) -> ViewKey?,
+    public val column: GridColumnId? = None
+)
+
+internal class GridTreeTopology<Row>(
+    val source: TableSource<Row>,
+    val definition: GridTreeData<Row>
+) {
+    val keys = Array<ViewKey>(source.count) { index -> source.keyAt(index) }
+    val positions = HashMap<ViewKey, Long>()
+    val parents = MutableArray<Long>(source.count) { _ -> -1L }
+    val children = Array<ArrayList<Long>>(source.count) { _ -> ArrayList<Long>() }
+    val levels = MutableArray<Long>(source.count) { _ -> 0L }
+    val roots = ArrayList<Long>()
+    val preorder = ArrayList<Long>()
+    init {
+        for (index in 0L ..< keys.size) {
+            val key = keys[index]
+            gridRequire(key != ViewKey.Position, "tree rows require explicit keys")
+            gridRequire(!positions.containsKey(key), "duplicate tree row key")
+            positions.put(key, index)
+        }
+        for (index in 0L ..< keys.size)
+            when (val parent = definition.parentKey(source.rowAt(index))) {
+                case None -> roots.add(index)
+                case Some(val key) -> {
+                    val at =
+                        positions[key] ?:
+                            throw IllegalArgumentException(Some("tree parent key is absent"))
+                    parents[index] = at
+                    children[at].add(index)
+                }
+            }
+        val pending = ArrayList<Long>()
+        for (at in 0L ..< roots.size)
+            pending.add(roots[roots.size - at - 1L])
+        while (pending.size > 0L) {
+            val node = pending.removeAt(pending.size - 1L)
+            preorder.add(node)
+            val nested = children[node]
+            for (at in 0L ..< nested.size) {
+                val child = nested[nested.size - at - 1L]
+                levels[child] = levels[node] + 1L
+                pending.add(child)
+            }
+        }
+        gridRequire(preorder.size == source.count, "tree contains a parent cycle")
+    }
+}
+
+internal class GridTreeMatches<Row>(
+    val topology: GridTreeTopology<Row>,
+    val filtered: TableSource<Row>
+) {
+    val matches = MutableArray<Boolean>(topology.source.count) { _ -> false }
+    val counts = MutableArray<Long>(topology.source.count) { _ -> 0L }
+    init {
+        for (index in 0L ..< filtered.count) {
+            val node = topology.positions[filtered.keyAt(index)]!!
+            matches[node] = true
+            counts[node] = 1L
+        }
+        for (at in 0L ..< topology.preorder.size) {
+            val node = topology.preorder[topology.preorder.size - at - 1L]
+            val parent = topology.parents[node]
+            if (parent >= 0L)
+                counts[parent] += counts[node]
+        }
+    }
+    fun retained(node: Long): Boolean = counts[node] > 0L
+    fun context(node: Long): Boolean = retained(node) && !matches[node]
+}

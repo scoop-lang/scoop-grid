@@ -1,0 +1,158 @@
+package scoop.grid
+
+import scoop.ui.*
+import scoop.ui.style.*
+
+public class DataGrid<Row> public constructor(
+    private val props: Props<DataGridProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private val ownScroll = ScrollState()
+    private val session = GridSession<Row>()
+    private var ambient: ThemeSource? = None
+    private var plan: GridColumnsPlan<Row>? = None
+    private var rowPolicy: GridRowPolicy<Row>? = None
+    private var fontRevision = -1L
+    public override fun onMount() {
+        when (props.value.theme) {
+            case None -> ambient = Some(currentThemeSource());
+            case Some(_) -> {}
+        }
+    }
+    public override fun render(): View {
+        val input = props.value
+        val source = input.theme ?: (ambient ?: currentThemeSource())
+        val theme = source.read(scope)
+        val fonts = input.fonts ?: scope.defaultFonts
+        val columns = input.state.columns
+        val states = input.state.columnState
+        val headers = input.state.headerTree
+        val direction = scope.layoutDirection
+        val reuse =
+            when (plan) {
+                case Some(val old) -> old.definitions ===
+                    columns &&
+                    old.states ===
+                    states &&
+                    old.headers.tree ===
+                    headers &&
+                    old.appearance.theme ===
+                    theme &&
+                    old.appearance.fonts ===
+                    fonts &&
+                    old.appearance.direction ==
+                    direction &&
+                    fontRevision ==
+                    fonts.revision
+                case None -> false
+            }
+        if (!reuse) {
+            plan =
+                Some(
+                    GridColumnsPlan(
+                        columns,
+                        states,
+                        GridAppearance(theme, fonts, direction),
+                        Some(headers)
+                    )
+                )
+            fontRevision = fonts.revision
+        }
+        val layout = plan!!
+        val sizing = gridResultRowSizing(input.state, input.rowSizing)
+        val policy =
+            when (val previous = rowPolicy) {
+                case Some(val old) -> if (
+                    old.columns === layout && gridSameRowSizing(old.mode, sizing)
+                )
+                    old
+                else
+                    GridRowPolicy(sizing, layout)
+                case None -> GridRowPolicy(sizing, layout)
+            }
+        rowPolicy = Some(policy)
+        val result = input.state.result
+        val selection =
+            if (input.state.rowSelection == GridRowSelectionMode.Disabled)
+                None
+            else
+                Some(
+                    GridSelectionView(
+                        input.state,
+                        session,
+                        input.enabled,
+                        input.selectionCheckboxes,
+                        source,
+                        layout.appearance,
+                        input.labels
+                    )
+                )
+        val rows =
+            GridRows(
+                result.rows,
+                layout,
+                session,
+                policy,
+                input.enabled,
+                result.topCount,
+                result.bottomCount,
+                input.columnSpans,
+                selection,
+                input.state.cellRangeBounds,
+                input.labels,
+                when (input.error) {
+                    case Some(_) -> false
+                    case None -> when (input.loading) {
+                        case Some(_) -> true
+                        case None -> false
+                    }
+                },
+                input.state.details,
+                result.detailCount > 0L || input.state.isExternal
+            )
+        val header =
+            GridHeaderCells(
+                layout,
+                input.state,
+                session,
+                input.multiSortModifier,
+                input.enabled,
+                source,
+                selection,
+                input.labels
+            )
+        val previousCell: GridCellAddress? =
+            when (session.requested) {
+                case Some(val address) -> Some(address)
+                case None -> session.focused
+            }
+        val viewport =
+            element(
+                GridRootProps(
+                    input,
+                    layout,
+                    rows,
+                    input.scroll ?: ownScroll,
+                    session,
+                    source,
+                    previousCell
+                ),
+                { props, scope -> GridRoot(props, scope) },
+                [
+                    lazyElement(header, { scope -> GridHeader(scope) }),
+                    lazyElement(
+                        rows,
+                        GridBodyProps(rows, session),
+                        { props, scope -> GridBody(props, scope) }
+                    )
+                ]
+            )
+        return gridFrame(
+            input,
+            viewport,
+            layout.appearance.density,
+            input.headerHeight * layout.headers.levels.toDouble() * layout.appearance.density,
+            rows.count == 0L
+        )
+    }
+}

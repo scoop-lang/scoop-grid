@@ -1,0 +1,81 @@
+package scoop.grid.tests.filters
+
+import scoop.datetime.LocalDate
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+import scoop.ui.component.CalendarLocale
+
+internal class FilterScene(private val probe: FilterProbe, scope: ComponentScope): Component(
+    scope
+) {
+    private val calendarLocale =
+        CalendarLocale(previousMonth = "Earlier month", nextMonth = "Later month")
+    public override fun render(): View {
+        val probe = this.probe
+        val calendarLocale = this.calendarLocale
+        return element(
+            { mount -> FilterLayout(probe, mount) },
+            [
+                gridFilterPanel(probe.model) {
+                    handle = Some(probe.handle)
+                    enabled = probe.enabled.value
+                    height = 560.0
+                    candidatesHeight = 160.0
+                    referenceDate = Some(LocalDate(2026, 11, 20))
+                    labels = GridFilterLabels(calendarLocale = calendarLocale)
+                    if (probe.localized.value)
+                        labels =
+                            GridFilterLabels(
+                                apply = "Apply",
+                                applyName = "Apply conditions",
+                                name = "Conditions",
+                                conditionTitle = { path, title -> f"Rule ${path} ${title}" },
+                                valueName = { title -> f"${title} value" },
+                                columnName = { title -> f"${title} column" },
+                                operatorName = { title -> f"${title} operator" },
+                                between = "Within range",
+                                candidatesName = { title -> f"${title} candidates" },
+                                loadedStatus =
+                                    { selected, shown -> f"chosen:${selected}; shown:${shown}" },
+                                invalidDate = "Use an ISO date",
+                                error = { text -> f"Problem:${text}" },
+                                calendarLocale = calendarLocale
+                            )
+                },
+                dataGrid(probe.model) {
+                    handle = Some(probe.handle)
+                    height = 360.0
+                    width = Some(540.0)
+                    rowHeight = 32.0
+                    headerHeight = 32.0
+                }
+            ]
+        )
+    }
+}
+
+private class FilterLayout(private val probe: FilterProbe, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    init {
+        probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(620.0, 700.0)))
+        context.placeChild(0L, Point(12.0, 12.0))
+        context.measureChild(1L, Constraints.tight(Size(540.0, 360.0)))
+        context.placeChild(1L, Point(648.0, 12.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(1200.0, 760.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted)
+                probe.accepted()
+        }
+    }
+}

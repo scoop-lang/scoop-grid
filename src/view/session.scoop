@@ -1,0 +1,777 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.math.max
+import scoop.math.min
+import scoop.platform.time.MonotonicInstant
+import scoop.surface.*
+import scoop.ui.*
+import scoop.ui.component.TableSource
+import scoop.ui.style.ThemeSource
+import scoop.window.KeyEvent
+import scoop.window.ElementState
+import scoop.window.MouseButton
+import scoop.window.LogicalKey
+import scoop.window.NamedKey
+import scoop.window.clipboard
+import scoop.window.WindowException
+
+internal class GridCellFocus(
+    val handle: FocusHandle,
+    val target: FocusTarget,
+    val scope: ComponentScope
+)
+
+internal class GridSession<Row>: GridMount {
+    var viewport: ScrollViewport? = None
+    var bodyFocus: LazyFocus? = None
+    var tableSemantics: SemanticsHandle? = None
+    var theme: ThemeSource? = None
+    var entry: FocusHandle? = None
+    val editing = GridEditCoordinator<Row>(this)
+    private val hierarchyActions = GridHierarchyActions<Row>(this)
+    val detailActions = GridDetailActions<Row>(this)
+    val externalDriver = GridExternalDriver<Row>(this)
+    val columnActions = GridColumnActions<Row>(this)
+    val columnReorder = GridColumnReorder<Row>(this)
+    val rangeDrag = GridRangeDrag<Row>(this)
+    val columnSizing = GridColumnSizing<Row>(this)
+    val headerSemantics = GridHeaderSemantics()
+    val rowHeights = GridRowMeasurements<Row>()
+    val viewState = GridViewStateController<Row>(this)
+    private var owner: ComponentScope? = None
+    private var model: DataGridState<Row>? = None
+    val currentModel: DataGridState<Row>? get() = model
+    public override val searchesLoadedRows: Boolean get() = model?.isExternal ?: false
+    public override val pendingPosition: GridPositionTarget? get() = externalDriver.pending
+    public override fun focusPosition(
+        position: GridExternalPosition,
+        column: GridColumnId
+    ): Boolean = externalDriver.focus(position, column)
+    val hasGridFocus: Boolean get() = active && (owner?.input?.activity?.hasFocus ?: false)
+    private val rows: GridRowSource<Row>? get() = model?.result?.rows
+    private var columns: GridColumnsPlan<Row>? = None
+    private var spanColumns: GridSpanColumns? = None
+    private var columnSpans: ((Row) -> Array<GridColumnSpan>)? = None
+    private var reference: DataGridHandle? = None
+    var enabled = true
+    var touchCellSelection = false
+    private val menuOptions = state<GridMenuOptions?>(None)
+    val contextMenus: GridMenuOptions? get() = menuOptions.value
+    private var intent: GridCellAddress? = None
+    private var recent: GridColumnId? = None
+    private val cells = HashMap<GridCellAddress, GridCellFocus>()
+    private var pageRows = 1L
+    private var onPasteResult: (GridCellAddress, GridPasteResult) -> Unit = { _, _ -> Unit }
+    private var onCopyResult: (GridCopyResult) -> Unit = { _ -> Unit }
+    public override val cellRange: GridCellRange? get() = model?.cellRange ?: None
+    public override fun saveViewState(
+        includePosition: Boolean,
+        includeFocus: Boolean
+    ): GridViewState? = viewState.save(includePosition, includeFocus)
+    public override fun restoreViewState(
+        value: GridViewState,
+        restoreFocus: Boolean
+    ): GridRestoreResult = viewState.restore(value, restoreFocus)
+    public override fun setCellRange(value: GridCellRange?): Boolean {
+        if (!active || !enabled || !inputEnabled || editingCell != None)
+            return false
+        return model?.setCellRange(value) ?: false
+    }
+    fun selectCell(address: GridCellAddress, extend: Boolean, before: GridCellAddress?) {
+        val current = model ?: return
+        val target = anchor(address) ?: return
+        val origin =
+            if (extend)
+                current.cellRange?.anchor ?: (before ?: target)
+            else
+                target
+        editing.leave {
+            if (active && enabled && inputEnabled && usesModel(current) && valid(target)) {
+                if (current.setCellRange(Some(GridCellRange(origin, target))))
+                    requestCell(target)
+            }
+        }
+    }
+    public override fun copyCells(
+        fallback: GridCellAddress?,
+        includeHeaders: Boolean
+    ): GridCopyResult {
+        val result = copyToClipboard(fallback, includeHeaders)
+        onCopyResult(result)
+        return result
+    }
+    private fun copyToClipboard(
+        fallback: GridCellAddress?,
+        includeHeaders: Boolean
+    ): GridCopyResult {
+        if (!active || !enabled || !inputEnabled)
+            return GridCopyResult.Rejected("网格未挂载或已禁用")
+        if (editingCell != None)
+            return GridCopyResult.Rejected("请先完成当前单元格编辑")
+        val current = model ?: return GridCopyResult.Rejected("网格未挂载")
+        val scope = owner ?: return GridCopyResult.Rejected("网格未挂载")
+        return try {
+            val address =
+                when (fallback) {
+                    case Some(_) -> fallback
+                    case None -> focused
+                }
+            val text =
+                current.copyText(address, includeHeaders) ?:
+                    return GridCopyResult.Rejected("没有可复制的单元格")
+            if (!active || !enabled || !inputEnabled)
+                return GridCopyResult.Rejected("网格已关闭或禁用")
+            scope.nativeWindow.clipboard.writeText(text)
+            GridCopyResult.Copied
+        } catch (error: GridDataUnavailableException) {
+            GridCopyResult.Unavailable(error)
+        } catch (error: Exception) {
+            GridCopyResult.Rejected(error.message ?: "无法复制单元格")
+        }
+    }
+    fun usesModel(value: DataGridState<Row>): Boolean =
+        when (model) {
+            case Some(val current) -> current === value
+            case None -> false
+        }
+    public override fun findCell(
+        text: String,
+        after: GridCellAddress?,
+        backwards: Boolean,
+        matchCase: Boolean,
+        wrap: Boolean
+    ): GridFindResult {
+        if (!active || !enabled || !inputEnabled)
+            return GridFindResult.Rejected("网格未挂载或已禁用")
+        val current = model ?: return GridFindResult.Rejected("网格未挂载")
+        if (text == "")
+            return GridFindResult.NotFound
+        when (commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return GridFindResult.Rejected("请先完成当前单元格的编辑或保存")
+        }
+        if (!active || !enabled || !inputEnabled || !usesModel(current))
+            return GridFindResult.Rejected("网格已更新，请重新查找")
+        val rows = current.result
+        val definitions = current.columns
+        val states = current.columnState
+        return try {
+            val found = current.findCell(text, after, backwards, matchCase, wrap)
+            if (
+                !active ||
+                    !enabled ||
+                    !inputEnabled ||
+                    !usesModel(current) ||
+                    current.result !==
+                    rows ||
+                    current.columns !==
+                    definitions ||
+                    current.columnState !==
+                    states
+            )
+                return GridFindResult.Rejected("查找期间结果已更新，请重试")
+            when (found) {
+                case Some(val match) -> {
+                    if (!requestCell(match.address))
+                        return GridFindResult.Rejected("无法定位匹配单元格")
+                    current.clearCellRange()
+                    GridFindResult.Found(match)
+                }
+                case None -> GridFindResult.NotFound
+            }
+        } catch (error: Exception) {
+            GridFindResult.Rejected(error.message ?: "无法读取查找内容")
+        }
+    }
+    val rowSelectionEnabled: Boolean get() =
+        when (model) {
+            case Some(val value) -> value.rowSelection != GridRowSelectionMode.Disabled
+            case None -> false
+        }
+    fun isRowSelected(key: GridRowKey): Boolean =
+        when (key.dataKey) {
+            case Some(val value) -> model?.isRowSelected(value) ?: false
+            case None -> false
+        }
+    fun setRowSelected(key: GridRowKey, value: Boolean, extend: Boolean): GridRowActionResult =
+        when (key.dataKey) {
+            case Some(val row) -> setRowSelected(row, value, extend)
+            case None -> GridRowActionResult.Rejected("当前结果行不可选择")
+        }
+    fun pinRow(key: GridRowKey, pin: GridRowPin): GridRowActionResult =
+        when (key.dataKey) {
+            case Some(val row) -> pinRow(row, pin)
+            case None -> GridRowActionResult.Rejected("当前结果行不可固定")
+        }
+    public override fun setRowSelected(
+        key: ViewKey,
+        value: Boolean,
+        extend: Boolean
+    ): GridRowActionResult {
+        if (!enabled || !inputEnabled)
+            return GridRowActionResult.Rejected("网格未启用")
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        return if (current.setRowSelected(key, value, extend))
+            GridRowActionResult.Applied
+        else
+            GridRowActionResult.Rejected("当前记录不可选择")
+    }
+    public override fun setExpanded(key: GridRowKey, value: Boolean): GridRowActionResult =
+        hierarchyActions.expand(key, value)
+    public override fun setDetailExpanded(key: ViewKey, value: Boolean): GridRowActionResult =
+        detailActions.expand(key, value)
+    public override fun focusDetail(key: ViewKey): Boolean = detailActions.focus(key)
+    public override fun selectGroupRows(path: GridGroupPath, value: Boolean): GridRowActionResult {
+        if (!enabled || !inputEnabled)
+            return GridRowActionResult.Rejected("网格未启用")
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        return if (current.selectGroupRows(path, value))
+            GridRowActionResult.Applied
+        else
+            GridRowActionResult.Rejected("当前组不能批量选择")
+    }
+    public override fun selectPageRows(value: Boolean): GridRowActionResult {
+        if (!enabled || !inputEnabled)
+            return GridRowActionResult.Rejected("网格未启用")
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        return if (current.selectPageRows(value))
+            GridRowActionResult.Applied
+        else
+            GridRowActionResult.Rejected("当前网格未启用多行选择")
+    }
+    public override fun clearRowSelection(): GridRowActionResult {
+        if (!enabled || !inputEnabled)
+            return GridRowActionResult.Rejected("网格未启用")
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        if (current.rowSelection == GridRowSelectionMode.Disabled)
+            return GridRowActionResult.Rejected("当前网格未启用行选择")
+        current.clearRowSelection()
+        return GridRowActionResult.Applied
+    }
+    fun accept(
+        plan: GridMeasurePlan,
+        input: GridRootProps<Row>,
+        time: MonotonicInstant?,
+        measured: GridColumnMeasured?,
+        reading: GridRowReading<Row>
+    ) {
+        if (active) {
+            val offset = max(0.0, plan.scroll.snapshot.offset.y)
+            pageRows =
+                max(
+                    1L,
+                    min(
+                        plan.bands.bodyEnd,
+                        plan.rows.index.indexAt(
+                            min(
+                                plan.bands.bottomStart,
+                                plan.bands.topExtent + offset + plan.bodyHeight
+                            )
+                        )
+                    ) -
+                        max(
+                            plan.bands.topCount,
+                            plan.rows.index.indexAt(plan.bands.topExtent + offset)
+                        )
+                )
+            rowHeights.accept(reading)
+            columnActions.accept(plan, input)
+            columnReorder.accept(plan, input, time)
+            rangeDrag.accept(plan, input, time)
+            columnSizing.accept(plan, input, measured)
+            when (viewState.accept(input, plan, reading)) {
+                case Some(val address) -> requestCell(address)
+                case None -> {}
+            }
+            externalDriver.accept(plan, input)
+        }
+    }
+    fun requestFrame() {
+        if (active)
+            owner?.requestFrame()
+    }
+    fun requestLayout() {
+        if (active)
+            owner?.requestLayout()
+    }
+    public override val columnStates: Array<GridColumnState>? get() = columnActions.states
+    public override fun setColumnState(value: GridColumnState): GridColumnActionResult =
+        columnActions.change(value)
+    public override fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult =
+        columnActions.move(id, index)
+    public override fun moveColumnGroup(
+        id: GridColumnGroupId,
+        index: Long
+    ): GridColumnActionResult = columnActions.moveGroup(id, index)
+    public override fun fitColumns(): GridColumnActionResult = columnActions.fit()
+    public override fun fitColumnToContent(id: GridColumnId): GridColumnFit = columnSizing.begin(id)
+    public override fun pinRow(key: ViewKey, pin: GridRowPin): GridRowActionResult {
+        val current = model ?: return GridRowActionResult.Rejected("网格未挂载")
+        if (!active || !enabled)
+            return GridRowActionResult.Rejected("网格未挂载或已禁用")
+        if (key == ViewKey.Position || current.source.indexOfKey(key) == None)
+            return GridRowActionResult.Rejected("记录已移除")
+        val before = current.pinnedRows
+        val next = before.moved(key, pin)
+        if (before.same(next))
+            return GridRowActionResult.Applied
+        when (commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> return GridRowActionResult.Rejected("请先完成当前单元格的编辑或保存，再固定行")
+        }
+        val latest = model ?: return GridRowActionResult.Rejected("网格已关闭")
+        if (
+            !active ||
+                !enabled ||
+                latest !==
+                current ||
+                current.pinnedRows !==
+                before ||
+                current.source.indexOfKey(key) ==
+                None
+        )
+            return GridRowActionResult.Rejected("记录或固定配置已更新，请重试")
+        current.setPinnedRows(next)
+        return GridRowActionResult.Applied
+    }
+    fun navigate(address: GridCellAddress, key: KeyEvent): Boolean {
+        if (!active || !enabled)
+            return false
+        val source = rows ?: return false
+        val plan = columns ?: return false
+        val extending =
+            key.modifiers.shift &&
+                key.logicalKey !=
+                LogicalKey.Named(NamedKey.Tab) &&
+                editingCell ==
+                None
+        val command = gridNavigation(key, plan.appearance.direction, extending) ?: return false
+        val row = source.indexOfKey(address.row) ?: return false
+        val column = plan.indexOf(address.column) ?: return false
+        val range = span(address) ?: return false
+        val start =
+            when (command) {
+                case Column(val step) -> if (step > 0L)
+                    range.end - 1L
+                else
+                    range.column
+                case Tab(val reverse) -> if (reverse)
+                    range.column
+                else
+                    range.end - 1L
+                else -> range.column
+            }
+        val next =
+            gridNextResultCell(
+                GridCellIndex(row, start),
+                source,
+                plan.columns.size,
+                pageRows,
+                command
+            )
+        when (next) {
+            case None -> {
+                when (editing.current) {
+                    case None -> {
+                        model?.clearCellRange()
+                        return false
+                    }
+                    case Some(_) -> when (command) {
+                        case Tab(val reverse) -> {
+                            editing.submit(
+                                Some {
+                                    model?.clearCellRange()
+                                    owner?.moveFocus(reverse);
+                                    Unit
+                                }
+                            )
+                            return true
+                        }
+                        else -> return false
+                    }
+                }
+            }
+            case Some(_) -> {}
+        }
+        val target = next!!
+        when (source.rowKeyAt(target.row)) {
+            case Unloaded(val position) -> {
+                externalDriver.focus(
+                    position,
+                    plan.columns[target.column].id,
+                    if (extending)
+                        Some((model?.cellRange ?: None)?.anchor ?: address)
+                    else
+                        None
+                )
+                return true
+            }
+            else -> {}
+        }
+        if (extending) {
+            val current = model ?: return false
+            val end = GridCellAddress(source.rowKeyAt(target.row), plan.columns[target.column].id)
+            if (
+                current.setCellRange(Some(GridCellRange(current.cellRange?.anchor ?: address, end)))
+            )
+                requestCell(end)
+            return true
+        }
+        if (target.row != row || target.column != column) {
+            val address =
+                GridCellAddress(source.rowKeyAt(target.row), plan.columns[target.column].id)
+            editing.leave {
+                model?.clearCellRange()
+                restore(address, target.row)
+            }
+        } else
+            if (editingCell == None)
+                model?.clearCellRange()
+        return true
+    }
+    public override val active: Boolean get() = owner?.isMounted ?: false
+    val inputEnabled: Boolean get() {
+        val scope = owner ?: return false
+        return scope.isMounted && scope.input.isEnabledInHierarchy
+    }
+    public override val pending: Boolean get() =
+        pendingPosition != None || requested != None || (bodyFocus?.isPending ?: false)
+    val preparing: GridCellAddress? get() {
+        val focus = bodyFocus ?: return None
+        val row = focus.pendingItem ?: return None
+        val address = intent ?: return None
+        return if (address.row.viewKey == row)
+            Some(address)
+        else
+            None
+    }
+    public override val requested: GridCellAddress? get() {
+        if (!active)
+            return None
+        for ((address, cell) in cells)
+            if (cell.handle.isPending)
+                return Some(address)
+        return if (bodyFocus?.isPending ?: false)
+            intent
+        else
+            None
+    }
+    public override val focused: GridCellAddress? get() {
+        for ((address, cell) in cells)
+            if (cell.scope.input.activity.hasFocus)
+                return Some(address)
+        return None
+    }
+    fun mount(scope: ComponentScope, value: ScrollViewport) {
+        owner = Some(scope)
+        viewport = Some(value)
+    }
+    fun windowHasFocus(): Boolean {
+        var input = owner?.input ?: return false
+        while (true) {
+            val parent = input.parent ?: return input.activity.hasFocus
+            input = parent
+        }
+    }
+    fun capture(context: RoutedEventContext, event: InputEvent) {
+        val edit = editing.current ?: return
+        val press =
+            when (event) {
+                case Pointer(
+                    InputPointerEvent.Button(_, MouseButton.Left, ElementState.Pressed, _)
+                ) -> true
+                case Contact(InputContactEvent.Began(_)) -> true
+                else -> false
+            }
+        if (!press)
+            return
+        val cell = cells[edit.address] ?: return
+        var target: InputScope? = Some(context.target)
+        while (true) {
+            val current = target ?: break
+            if (current === cell.scope.input)
+                return
+            target = current.parent
+        }
+        if (editing.beforePress())
+            context.consume()
+    }
+    fun update(input: GridRootProps<Row>) {
+        val sameModel =
+            when (model) {
+                case Some(val value) -> value === input.input.state
+                case None -> false
+            }
+        headerSemantics.update(input.columns.headers)
+        columnActions.update(input)
+        model = Some(input.input.state)
+        if (!sameModel)
+            viewState.close()
+        columns = Some(input.columns)
+        spanColumns = Some(input.columns.spans)
+        columnSpans = input.input.columnSpans
+        theme = Some(input.theme)
+        enabled = input.input.enabled
+        touchCellSelection = input.input.touchCellSelection
+        val menus = input.input.contextMenus
+        val sameMenus =
+            when ((menuOptions.value, menus)) {
+                case(Some(val old), Some(val next)) -> old === next
+                case(None, None) -> true
+                else -> false
+            }
+        if (!sameMenus)
+            menuOptions.value = menus
+        onPasteResult = input.input.onPasteResult
+        onCopyResult = input.input.onCopyResult
+        editing.update(input.input)
+        detailActions.update(input.input.state)
+        externalDriver.update(input.input.state, owner!!)
+        if (!enabled)
+            externalDriver.cancel()
+        columnReorder.update(input)
+        rangeDrag.update(input)
+        columnSizing.update(input)
+        val sameHandle =
+            when ((reference, input.input.handle)) {
+                case(Some(val old), Some(val next)) -> old === next
+                case(None, None) -> true
+                else -> false
+            }
+        if (!sameHandle) {
+            reference?.unbind(this)
+            reference = input.input.handle
+            reference?.bind(this)
+        }
+        when (requested) {
+            case Some(val address) -> if (!valid(address))
+                cancel()
+            case None -> {}
+        }
+        if (sameModel && enabled) {
+            // Child reconciliation can retire a covered cell before this update runs.
+            when (input.previousCell) {
+                case Some(val address) -> when (anchor(address)) {
+                    case Some(val target) -> if (target != address) {
+                        cancel()
+                        requestCell(target)
+                    }
+                    case None -> {}
+                }
+                case None -> {}
+            }
+        }
+    }
+    fun unmount() {
+        viewState.close()
+        rowHeights.close()
+        columnSizing.close()
+        columnReorder.close()
+        rangeDrag.close()
+        columnActions.close()
+        detailActions.close()
+        editing.close()
+        externalDriver.close()
+        reference?.unbind(this)
+        reference = None
+        owner = None
+        viewport = None
+        bodyFocus = None
+        tableSemantics = None
+        intent = None
+        model = None
+        spanColumns = None
+        columnSpans = None
+        theme = None
+        entry = None
+    }
+    private fun valid(address: GridCellAddress): Boolean {
+        if (!address.row.hasCells)
+            return false
+        val source = rows ?: return false
+        val plan = currentSpanColumns() ?: return false
+        return enabled &&
+            source.indexOfKey(address.row) !=
+            None &&
+            plan.indexOf(address.column) !=
+            None &&
+            (model?.visibleColumn(address.column) ?: false)
+    }
+    private fun currentSpanColumns(): GridSpanColumns? {
+        val states = model?.columnState ?: return None
+        when (spanColumns) {
+            case Some(val old) -> if (old.states === states)
+                return Some(old)
+            case None -> {}
+        }
+        val next = GridSpanColumns(states)
+        spanColumns = Some(next)
+        return Some(next)
+    }
+    private fun span(address: GridCellAddress): GridCellSpan? {
+        if (!address.row.hasCells)
+            return None
+        val source = rows ?: return None
+        val row = source.indexOfKey(address.row) ?: return None
+        val columns = currentSpanColumns() ?: return None
+        val at = columns.indexOf(address.column) ?: return None
+        return Some(
+            when (columnSpans) {
+                case Some(val resolve) -> when (source.rowAt(row)) {
+                    case Data(val value, _) -> columns.resolve(resolve(value)).span(at)
+                    case Group(_) -> GridCellSpan(at)
+                    case Total(_) -> GridCellSpan(at)
+                    case Detail(_, _) -> return None
+                    case Unloaded(_) -> return None
+                }
+                case None -> GridCellSpan(at)
+            }
+        )
+    }
+    private fun anchor(address: GridCellAddress): GridCellAddress? {
+        val range = span(address) ?: return None
+        return Some(GridCellAddress(address.row, currentSpanColumns()!!.idAt(range.column)))
+    }
+    fun independent(row: Row, id: GridColumnId): Boolean {
+        val columns = currentSpanColumns() ?: return false
+        val at = columns.indexOf(id) ?: return false
+        return when (columnSpans) {
+            case Some(val resolve) -> columns.resolve(resolve(row)).span(at).count == 1L
+            case None -> true
+        }
+    }
+    public override fun focus(address: GridCellAddress): Boolean {
+        if (!active || !valid(address))
+            return false
+        val target = anchor(address) ?: return false
+        when (editing.cell(target)) {
+            case Some(val edit) -> return requestCell(target, Some(edit.focus))
+            case None -> {}
+        }
+        return editing.leave { requestCell(target) }
+    }
+    fun requestCell(address: GridCellAddress, editor: FocusHandle? = None): Boolean {
+        if (!active || !valid(address))
+            return false
+        externalDriver.cancel()
+        viewState.cancelRequest()
+        val target = anchor(address) ?: return false
+        val focus = bodyFocus ?: return false
+        intent = Some(target)
+        val select: () -> FocusHandle? =
+            {
+                when (editor) {
+                    case Some(val handle) -> Some(handle)
+                    case None -> cells[target]?.handle
+                }
+            }
+        val accepted = focus.requestFocus(target.row.viewKey, select)
+        if (!accepted)
+            intent = None
+        return accepted
+    }
+    fun restore(address: GridCellAddress, index: Long) {
+        if (!active || !enabled)
+            return
+        val source = rows ?: return
+        val plan = columns ?: return
+        if (source.count == 0L || plan.columns.size == 0L) {
+            entry?.requestFocus()
+            return
+        }
+        val candidate = source.indexOfKey(address.row) ?: min(index, source.count - 1L)
+        val at =
+            gridCellRow(source, candidate, true) ?:
+                (gridCellRow(source, candidate, false) ?: return)
+        when (source.rowKeyAt(at)) {
+            case Unloaded(val position) -> {
+                if (model?.visibleColumn(address.column) ?: false)
+                    externalDriver.focus(position, address.column)
+                else
+                    for (column in plan.columns)
+                        if (model?.visibleColumn(column.id) ?: false) {
+                            externalDriver.focus(position, column.id)
+                            break
+                        }
+                return
+            }
+            else -> {}
+        }
+        if (model?.visibleColumn(address.column) ?: false) {
+            requestCell(GridCellAddress(source.rowKeyAt(at), address.column))
+            return
+        }
+        for (column in plan.columns)
+            if (model?.visibleColumn(column.id) ?: false) {
+                requestCell(GridCellAddress(source.rowKeyAt(at), column.id))
+                return
+            }
+        entry?.requestFocus()
+    }
+    public override val editingCell: GridCellAddress? get() = editing.current?.address
+    public override val editError: String? get() = editing.current?.error ?: None
+    public override val submitting: Boolean get() = editing.current?.submitting ?: false
+    public override fun beginEdit(address: GridCellAddress): Boolean = editing.begin(address)
+    public override fun commitEdit(): GridEditAttempt = editing.submit()
+    public override fun cancelEdit(): Boolean = editing.cancel()
+    public override fun pasteCell(address: GridCellAddress, text: String): GridPasteResult {
+        val result = editing.paste(address, text)
+        onPasteResult(address, result)
+        return result
+    }
+    fun pasteClipboard(address: GridCellAddress) {
+        val scope = owner ?: return
+        val text =
+            try {
+                scope.nativeWindow.clipboard.readText()
+            } catch (error: WindowException) {
+                onPasteResult(address, GridPasteResult.Rejected("无法读取剪贴板"))
+                return
+            }
+        val result =
+            when (text) {
+                case Some(val value) -> editing.paste(address, value)
+                case None -> GridPasteResult.Rejected("剪贴板中没有可粘贴的文本")
+            }
+        onPasteResult(address, result)
+    }
+    public override fun cancel() {
+        externalDriver.cancel()
+        viewState.cancelRequest()
+        bodyFocus?.cancelRequest()
+        for ((_, cell) in cells)
+            if (cell.handle.isPending)
+                cell.handle.clearFocus()
+        intent = None
+    }
+    fun register(address: GridCellAddress, cell: GridCellFocus) {
+        gridRequire(!cells.containsKey(address), "duplicate mounted grid cell")
+        cells.put(address, cell)
+        updateOrder(address, cell)
+    }
+    fun remove(address: GridCellAddress) {
+        cells.remove(address)
+    }
+    fun remember(address: GridCellAddress) {
+        viewState.remember(address)
+        if (recent == Some(address.column))
+            return
+        recent = Some(address.column)
+        for ((key, cell) in cells)
+            updateOrder(key, cell)
+    }
+    private fun updateOrder(address: GridCellAddress, cell: GridCellFocus) {
+        cell.target.options =
+            FocusOptions(
+                Some(cell.handle),
+                order =
+                    if (recent == Some(address.column))
+                        -1
+                    else
+                        0
+            )
+    }
+}

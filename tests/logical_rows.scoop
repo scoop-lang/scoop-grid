@@ -1,0 +1,281 @@
+package scoop.grid
+
+import scoop.math.BigDecimal
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal fun <Row> testGridData(row: GridRow<Row>): Row =
+    when (row) {
+        case Data(val value, _) -> value
+        else -> fail(Some("expected a business record"))
+    }
+
+private fun logicalRecords(values: Array<Long>): TableRows<Long> =
+    TableRows(
+        Array<TableRecord<Long>>(values.size) { at -> TableRecord(ViewKey.Number(at), values[at]) }
+    )
+
+private class LogicalReads {
+    var values = 0L
+}
+
+private fun logicalColumns(reads: LogicalReads): Array<GridColumn<Long>> =
+    [
+        gridColumn<Long, Long>(
+            GridColumnId("amount"),
+            "Amount",
+            {
+                value ->
+                reads.values += 1L
+                value
+            },
+            gridLongValues(),
+            aggregations = [gridSumLongAggregation(), gridCountAggregation<Long>()]
+        ),
+        gridColumn<Long, String>(
+            GridColumnId("name"),
+            "Name",
+            { value -> f"r${value}" },
+            gridTextValues()
+        )
+    ]
+
+private fun logicalQuery(placement: GridTotalPlacement = GridTotalPlacement.After): GridQuery =
+    GridQuery(
+        aggregations = [GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum"))],
+        totals = GridTotals(placement, "All records")
+    )
+
+private class LogicalHuge(public override val count: Long): TableSource<Long> {
+    public override fun keyAt(index: Long): ViewKey {
+        assertTrue(index >= 0L && index < count)
+        return ViewKey.Number(index)
+    }
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long = fail(Some("metadata read a business record"))
+}
+
+@Test
+private class GridLogicalRowsTest {
+    @Test
+    fun `business text identities cannot collide with totals or each other`() {
+        val keys: Array<ViewKey> =
+            [
+                ViewKey.Text("t:all"),
+                ViewKey.Text("dt:all"),
+                ViewKey.Text(""),
+                ViewKey.Text("d:😀\n"),
+                ViewKey.Number(0L)
+            ]
+        val rows =
+            TableRows(Array<TableRecord<Long>>(keys.size) { at -> TableRecord(keys[at], at) })
+        val model = DataGridState(rows, logicalColumns(LogicalReads()), logicalQuery())
+        val result = model.result.rows
+        assertEquals(6L, result.count)
+        for (at in 0L ..< keys.size) {
+            val key = GridRowKey.Data(keys[at])
+            assertEquals(key, result.rowKeyAt(at))
+            assertEquals(Some(at), result.indexOfKey(key))
+            assertEquals(Some(at), result.indexOfKey(result.keyAt(at)))
+            assertEquals(at, testGridData(result.rowAt(at)))
+            assertEquals(
+                GridCellAddress(key, GridColumnId("amount")),
+                GridCellAddress(keys[at], GridColumnId("amount"))
+            )
+            for (other in at + 1L ..< result.count)
+                assertTrue(result.keyAt(at) != result.keyAt(other))
+        }
+        assertEquals(GridRowKey.Total(GridTotalKey.AllFiltered), result.rowKeyAt(5L))
+        assertEquals(None, result.infoAt(5L).dataKey)
+        assertEquals(None, result.indexOfKey(ViewKey.Text("not-encoded")))
+    }
+
+    @Test
+    fun `total placement preserves pages and reuses the entire filtered aggregate`() {
+        val reads = LogicalReads()
+        val model =
+            DataGridState(
+                logicalRecords([1L, 2L, 3L, 4L]),
+                logicalColumns(reads),
+                logicalQuery().withPagination(GridPagination.Page(1L, 2L))
+            )
+        val aggregates = model.result.aggregates
+        val before = reads.values
+        assertEquals(2L, model.result.pageCount)
+        assertEquals(4L, model.result.totalRows)
+        assertEquals(3L, model.result.rows.count)
+        assertEquals(2L, model.result.pageRows.count)
+        model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "Global")))
+        assertEquals(GridPagination.Page(1L, 2L), model.query.pagination)
+        assertEquals(GridRowKey.Total(GridTotalKey.AllFiltered), model.result.rows.rowKeyAt(0L))
+        model.setPage(0L)
+        model.pinRow(ViewKey.Number(3L), GridRowPin.Bottom)
+        assertTrue(aggregates === model.result.aggregates)
+        assertEquals(before, reads.values)
+        assertEquals(
+            Some("10"),
+            model.result.rows.rowAt(0L).text(model.column(GridColumnId("amount")))
+        )
+        assertEquals(4L, model.result.rows.count)
+        assertEquals(1L, model.result.bottomCount)
+        model.setQuery(model.query.withTotals(GridTotals()))
+        assertEquals(3L, model.result.rows.count)
+        assertTrue(aggregates === model.result.aggregates)
+        assertEquals(before, reads.values)
+    }
+
+    @Test
+    fun `pinned records and selection leave the total as a distinct readonly result`() {
+        val model =
+            DataGridState(
+                logicalRecords([1L, 2L, 3L, 4L]),
+                logicalColumns(LogicalReads()),
+                logicalQuery().withPagination(GridPagination.Page(0L, 2L)),
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        model.setPinnedRows(GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(3L)]))
+        val rows = model.result.rows
+        assertEquals(4L, rows.count)
+        assertEquals(1L, model.result.topCount)
+        assertEquals(2L, model.result.bodyCount)
+        assertEquals(GridRowKey.Total(GridTotalKey.AllFiltered), rows.rowKeyAt(2L))
+        assertTrue(model.selectRowRange(ViewKey.Number(0L), ViewKey.Number(3L)))
+        assertEquals(3L, model.selectedRowKeys.size)
+        assertTrue(model.isRowSelected(ViewKey.Number(0L)))
+        assertTrue(model.isRowSelected(ViewKey.Number(1L)))
+        assertTrue(model.isRowSelected(ViewKey.Number(3L)))
+        model.clearRowSelection()
+        assertTrue(model.selectPageRows(true))
+        assertEquals(2L, model.selectedRowKeys.size)
+        assertFalse(model.isRowSelected(ViewKey.Number(3L)))
+        assertEquals(CheckState.Checked, model.pageRowSelection)
+        model.setQuery(
+            model.query.withFilter(
+                GridFilter.Column(
+                    GridColumnId("amount"),
+                    GridCondition.Compare(GridComparison.Greater, GridLiteral.Integer(2L))
+                )
+            )
+        )
+        assertEquals(2L, model.result.totalRows)
+        assertEquals(0L, model.result.topCount)
+        assertEquals(
+            Some(GridAggregateDisplay.Value("7")),
+            model.result.aggregates.total(GridColumnId("amount"))
+        )
+    }
+
+    @Test
+    fun `copy find statistics and export use logical values with explicit record scope`() {
+        val model =
+            DataGridState(
+                logicalRecords([1L, 2L, 3L]),
+                logicalColumns(LogicalReads()),
+                logicalQuery()
+            )
+        val total = GridRowKey.Total(GridTotalKey.AllFiltered)
+        val amount = GridColumnId("amount")
+        val name = GridColumnId("name")
+        val first = GridCellAddress(total, amount)
+        val last = GridCellAddress(total, name)
+        assertTrue(model.setCellRange(Some(GridCellRange(first, last))))
+        assertEquals(Some("6\tAll records"), model.copyText())
+        model.clearCellRange()
+        assertEquals(Some("6"), model.copyText(Some(first)))
+        assertTrue(model.setCellRange(Some(GridCellRange(first, last))))
+        assertEquals(Some(last), model.findCell("All records")?.address)
+        assertEquals(BigDecimal(6L), model.rangeStatistics()!!.sum)
+        assertEquals(1L, model.rangeStatistics()!!.rowCount)
+        assertEquals("Amount,Name\r\n1,r1\r\n2,r2\r\n3,r3\r\n", model.exportCsv())
+        assertEquals(
+            "Amount,Name\r\n1,r1\r\n2,r2\r\n3,r3\r\n6,All records\r\n",
+            model.exportCsv(GridCsvOptions(data = GridExportData.Displayed))
+        )
+        assertEquals(
+            model.exportCsv(),
+            model.exportCsv(GridCsvOptions(data = GridExportData.Displayed, includeTotals = false))
+        )
+        assertEquals(
+            "6\tAll records",
+            gridTsv(GridSliceRows(model.result.rows, 3L, 1L), model.columns)
+        )
+        assertTrue(model.setCellRange(Some(GridCellRange(last, last))))
+        model.setColumnStates([GridColumnState(name), GridColumnState(amount)])
+        assertEquals(None, model.cellRange)
+        assertEquals(Some("All records"), model.copyText(Some(last)))
+    }
+
+    @Test
+    fun `empty totals keep missing values and explicit failures without inventing records`() {
+        val columns = logicalColumns(LogicalReads())
+        val model = DataGridState(logicalRecords([]), columns, logicalQuery())
+        assertEquals(0L, model.result.totalRows)
+        assertEquals(0L, model.result.pageCount)
+        assertEquals(1L, model.result.rows.count)
+        assertEquals(Some(""), model.result.rows.rowAt(0L).text(columns[0L]))
+        model.setAggregation(GridColumnId("amount"), Some(GridAggregateId("count")))
+        assertEquals(Some("0"), model.result.rows.rowAt(0L).text(columns[0L]))
+        model.setAggregation(GridColumnId("amount"), Some(GridAggregateId("sum")))
+        model.replaceData(logicalRecords([Long.MAX_VALUE, 1L]))
+        val row = model.result.rows.rowAt(2L)
+        when (model.result.aggregates.total(GridColumnId("amount"))!!) {
+            case Failed(val message) -> assertEquals(Some(message), row.text(columns[0L]))
+            else -> fail(Some("overflow was hidden"))
+        }
+        assertEquals(None, row.numericValue(columns[0L]))
+    }
+
+    @Test
+    fun `metadata and totals remain sparse up to the actual long result count limit`() {
+        val model =
+            DataGridState(
+                LogicalHuge(Long.MAX_VALUE - 1L),
+                logicalColumns(LogicalReads()),
+                GridQuery(totals = GridTotals(GridTotalPlacement.After))
+            )
+        val key = GridRowKey.Total(GridTotalKey.AllFiltered)
+        assertEquals(Long.MAX_VALUE, model.result.rows.count)
+        assertEquals(Some(Long.MAX_VALUE - 1L), model.result.rows.indexOfKey(key))
+        assertEquals(key, model.result.rows.infoAt(Long.MAX_VALUE - 1L).key)
+        model.setPinnedRows(GridPinnedRows([ViewKey.Number(50000000L)], [ViewKey.Number(0L)]))
+        assertEquals(Long.MAX_VALUE, model.result.rows.count)
+        assertEquals(Some(Long.MAX_VALUE - 2L), model.result.rows.indexOfKey(key))
+        assertEquals(
+            GridRowKey.Data(ViewKey.Number(0L)),
+            model.result.rows.rowKeyAt(Long.MAX_VALUE - 1L)
+        )
+        val old = model.result
+        assertFailsWith<IllegalArgumentException> { model.replaceData(LogicalHuge(Long.MAX_VALUE)) }
+        assertTrue(old === model.result)
+    }
+
+    @Test
+    fun `saved total addresses restore with query settings and retire when hidden`() {
+        val model =
+            DataGridState(logicalRecords([1L, 2L]), logicalColumns(LogicalReads()), logicalQuery())
+        val address =
+            GridCellAddress(GridRowKey.Total(GridTotalKey.AllFiltered), GridColumnId("amount"))
+        assertTrue(model.setCellRange(Some(GridCellRange(address, address))))
+        model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.After, "Renamed")))
+        assertEquals(Some(GridCellRange(address, address)), model.cellRange)
+        val saved =
+            model.saveViewState(Some(GridReadingPosition(address.row, 4.0, 8.0)), Some(address))
+        model.setQuery(model.query.withTotals(GridTotals()))
+        assertEquals(None, model.cellRange)
+        assertEquals(None, model.result.rows.indexOfKey(address.row))
+        val restored = model.restoreViewState(saved)
+        assertEquals(0L, restored.issues.size)
+        assertEquals(Some(address), restored.state.focusedCell)
+        assertEquals(Some(address.row), restored.state.readingPosition?.row)
+        assertEquals(saved.query.totals, model.query.totals)
+        assertEquals(Some("3"), model.copyText())
+    }
+}

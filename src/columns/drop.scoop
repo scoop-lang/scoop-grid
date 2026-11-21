@@ -1,0 +1,162 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.min
+import scoop.ui.LayoutDirection
+
+internal class GridColumnDrop(
+    val anchor: Long,
+    val before: Boolean,
+    val x: Double,
+    val region: Rect
+)
+
+/** Resolve one insertion boundary without visiting or reading any rows. */
+internal fun gridColumnDrop(
+    columns: GridColumnLayout,
+    source: Long,
+    offset: Double,
+    point: Point,
+    height: Double
+): GridColumnDrop? {
+    val region = columns.region(source, 0.0, height)
+    if (!gridColumnDropContains(region, point))
+        return None
+    val first =
+        if (source < columns.startCount)
+            0L
+        else
+            if (source < columns.endStart)
+                columns.startCount
+            else
+                columns.endStart
+    val end =
+        if (source < columns.startCount)
+            columns.startCount
+        else
+            if (source < columns.endStart)
+                columns.endStart
+            else
+                columns.widths.size
+    val rtl = columns.direction == LayoutDirection.Rtl
+    val logical =
+        if (source < columns.startCount) {
+            if (rtl)
+                columns.viewport - point.x
+            else
+                point.x
+        } else
+            if (source >= columns.endStart) {
+                columns.prefix[columns.endStart] +
+                    if (rtl)
+                        columns.endWidth - point.x
+                    else
+                        point.x - columns.viewport + columns.endWidth
+            } else {
+                if (rtl)
+                    columns.total - offset - point.x
+                else
+                    offset + point.x
+            }
+    var low = first
+    var high = end
+    while (low < high) {
+        val middle = low + (high - low) / 2L
+        if (logical >= columns.prefix[middle] + columns.widths[middle] / 2.0)
+            low = middle + 1L
+        else
+            high = middle
+    }
+    val boundary = columns.prefix[low]
+    val before = low < end && (low == first || logical >= boundary)
+    val x =
+        if (source < columns.startCount) {
+            if (rtl)
+                columns.viewport - boundary
+            else
+                boundary
+        } else
+            if (source >= columns.endStart) {
+                if (rtl)
+                    columns.endWidth - boundary + columns.prefix[columns.endStart]
+                else
+                    columns.viewport -
+                        columns.endWidth +
+                        boundary -
+                        columns.prefix[columns.endStart]
+            } else {
+                if (rtl)
+                    columns.total - boundary - offset
+                else
+                    boundary - offset
+            }
+    return Some(
+        GridColumnDrop(
+            if (before)
+                low
+            else
+                low - 1L,
+            before,
+            x,
+            region
+        )
+    )
+}
+
+internal fun gridColumnMoveIndex(
+    states: Array<GridColumnState>,
+    source: GridColumnId,
+    anchor: GridColumnId,
+    before: Boolean
+): Long? {
+    val old = gridColumnStateIndex(states, source) ?: return None
+    val at = gridColumnStateIndex(states, anchor) ?: return None
+    val slot =
+        at +
+            if (before)
+                0L
+            else
+                1L
+    return Some(
+        if (old < slot)
+            slot - 1L
+        else
+            slot
+    )
+}
+
+internal fun gridColumnDragSpeed(
+    columns: GridColumnLayout,
+    source: Long,
+    point: Point,
+    height: Double,
+    density: Double
+): Double {
+    if (columns.frozen(source))
+        return 0.0
+    val region = columns.region(source, 0.0, height)
+    if (!gridColumnDropContains(region, point))
+        return 0.0
+    val edge = min(24.0 * density, region.width / 2.0)
+    if (edge <= 0.0)
+        return 0.0
+    val left = point.x - region.x
+    val right = region.x + region.width - point.x
+    if (left < edge)
+        return -600.0 * density * (1.0 - left / edge)
+    if (right < edge)
+        return 600.0 * density * (1.0 - right / edge)
+    return 0.0
+}
+
+private fun gridColumnDropContains(bounds: Rect, point: Point): Boolean =
+    point.x >=
+        bounds.x &&
+        point.x <
+        bounds.x +
+        bounds.width &&
+        point.y >=
+        bounds.y &&
+        point.y <
+        bounds.y +
+        bounds.height

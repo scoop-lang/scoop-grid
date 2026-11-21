@@ -1,0 +1,59 @@
+package scoop.grid.tests.heights
+
+import scoop.graphics.Rect
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.NativeNode
+import scoop.tests.window.nativeEditorKey
+import scoop.window.native.*
+
+/** Search only the mounted edit cell, never the virtual table's full row set. */
+internal fun HeightProbe.editorNode(node: NativeNode): NativeNode? {
+    if (node.text(2, Some("AXTextField")))
+        return Some(node)
+    for (index in 0L ..< node.count) {
+        when (val found = editorNode(keep(node.child(index)))) {
+            case Some(_) -> return found
+            case None -> {}
+        }
+    }
+    return None
+}
+
+internal fun HeightProbe.bounds(node: NativeNode, value: Rect) {
+    assertTrue(matchesBounds(node, value), Some(f"height frame at ${phase}"))
+}
+
+internal fun HeightProbe.matchesBounds(node: NativeNode, value: Rect): Boolean {
+    @Unsafe
+    {
+        val lease = window!!.acquireNativeWindow()
+        try {
+            return when (lease.handle) {
+                case AppKit(_, val pointer) ->
+                node.frame(pointer, 12.0 + value.x, 12.0 + value.y, value.width, value.height)
+            }
+        } finally {
+            lease.close()
+        }
+    }
+}
+
+internal fun HeightProbe.key(code: Int, text: String) {
+    @Unsafe
+    {
+        window!!.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                when (lease.handle) {
+                    case AppKit(_, val pointer) -> text.withUtf8Bytes {
+                        bytes,
+                        length -> @Unsafe
+                        {
+                            assertEquals(0, nativeEditorKey(pointer, code, bytes, length, 0))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,193 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.sortWith
+import scoop.comparisons.comparatorOf
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+/** Fixed identities and omitted page positions stay sparse even for a huge source. */
+internal fun <Row> gridPinResult(
+    page: TableSource<Row>,
+    ordered: TableSource<Row>,
+    total: Long,
+    pages: Long,
+    pins: GridPinnedRows,
+    aggregates: GridAggregations,
+    totals: GridTotals = GridTotals()
+): GridResult<Row> {
+    return gridComposeResult(
+        GridDataRows(page),
+        page,
+        ordered,
+        total,
+        pages,
+        pins,
+        aggregates,
+        totals,
+        total,
+        GridPageUnit.Records,
+        GridDataRows(ordered)
+    )
+}
+
+internal fun <Row> gridComposeResult(
+    logical: GridRowSource<Row>,
+    page: TableSource<Row>,
+    ordered: TableSource<Row>,
+    total: Long,
+    pages: Long,
+    pins: GridPinnedRows,
+    aggregates: GridAggregations,
+    totals: GridTotals,
+    rootCount: Long,
+    pageUnit: GridPageUnit,
+    pinnable: GridRowSource<Row>
+): GridResult<Row> {
+    val top = GridPickedLogicalRows(pinnable, pins.top)
+    val bottom = GridPickedLogicalRows(pinnable, pins.bottom)
+    if (top.count == 0L && bottom.count == 0L)
+        return GridResult(
+            gridTotalRows(logical, aggregates, totals),
+            page,
+            ordered,
+            total,
+            pages,
+            0L,
+            0L,
+            aggregates,
+            rootCount,
+            pageUnit
+        )
+    val omitted = ArrayList<Long>()
+    for (fixed in [top, bottom])
+        for (index in 0L ..< fixed.count)
+            when (logical.indexOfKey(fixed.rowKeyAt(index))) {
+                case Some(val at) -> omitted.add(at)
+                case None -> {}
+            }
+    omitted.sortWith(comparatorOf<Long> { a, b -> a.compareTo(b) })
+    val body =
+        if (omitted.size == 0L)
+            logical
+        else
+            GridUnpinnedLogicalRows(logical, omitted.toArray())
+    val rows = GridCombinedRows(top, gridTotalRows(body, aggregates, totals), bottom)
+    return GridResult(
+        rows,
+        page,
+        ordered,
+        total,
+        pages,
+        top.count,
+        bottom.count,
+        aggregates,
+        rootCount,
+        pageUnit
+    )
+}
+
+private class GridPickedLogicalRows<Row>(
+    private val source: GridRowSource<Row>,
+    keys: Array<ViewKey>
+): GridRowSource<Row> {
+    private val indices = ArrayList<Long>()
+    private val positions = HashMap<ViewKey, Long>()
+    init {
+        for (key in keys)
+            when (source.indexOfKey(GridRowKey.Data(key))) {
+                case Some(val at) -> {
+                    positions.put(source.keyAt(at), indices.size)
+                    indices.add(at)
+                }
+                case None -> {}
+            }
+    }
+    public override val count: Long get() = indices.size
+    public override fun keyAt(index: Long): ViewKey = source.keyAt(indices[index])
+    public override fun rowAt(index: Long): GridRow<Row> = source.rowAt(indices[index])
+    public override fun infoAt(index: Long): GridRowInfo = source.infoAt(indices[index])
+    public override fun indexOfKey(key: ViewKey): Long? = positions[key]
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? =
+        source.hierarchyAt(indices[index])
+}
+
+private class GridUnpinnedLogicalRows<Row>(
+    private val source: GridRowSource<Row>,
+    omitted: Array<Long>
+): GridRowSource<Row> {
+    private val rows = GridUnpinnedRows(source, omitted)
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> {
+        if (count == 0L)
+            return []
+        val first = rows.sourceIndex(start)
+        return source.unavailable(first, rows.sourceIndex(start + count - 1L) - first + 1L)
+    }
+    public override val count: Long get() = rows.count
+    public override fun keyAt(index: Long): ViewKey = rows.keyAt(index)
+    public override fun rowAt(index: Long): GridRow<Row> = rows.rowAt(index)
+    public override fun indexOfKey(key: ViewKey): Long? = rows.indexOfKey(key)
+    public override fun infoAt(index: Long): GridRowInfo = source.infoAt(rows.sourceIndex(index))
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? =
+        source.hierarchyAt(rows.sourceIndex(index))
+}
+
+internal class GridPickedRows<Row>(
+    private val source: TableSource<Row>,
+    keys: Array<ViewKey>
+): TableSource<Row> {
+    private val indices = ArrayList<Long>()
+    private val positions = HashMap<ViewKey, Long>()
+    init {
+        for (key in keys)
+            when (source.indexOfKey(key)) {
+                case Some(val at) -> {
+                    positions.put(key, indices.size)
+                    indices.add(at)
+                }
+                case None -> {}
+            }
+    }
+    public override val count: Long get() = indices.size
+    public override fun keyAt(index: Long): ViewKey = source.keyAt(indices[index])
+    public override fun rowAt(index: Long): Row = source.rowAt(indices[index])
+    public override fun indexOfKey(key: ViewKey): Long? = positions[key]
+}
+
+private class GridUnpinnedRows<Row>(
+    private val source: TableSource<Row>,
+    private val omitted: Array<Long>
+): TableSource<Row> {
+    public override val count: Long get() = source.count - omitted.size
+    fun sourceIndex(index: Long): Long {
+        gridRequire(index >= 0L && index < count, "grid row index is out of range")
+        var left = 0L
+        var right = omitted.size
+        while (left < right) {
+            val middle = left + (right - left) / 2L
+            if (omitted[middle] - middle <= index)
+                left = middle + 1L
+            else
+                right = middle
+        }
+        return index + left
+    }
+    public override fun keyAt(index: Long): ViewKey = source.keyAt(sourceIndex(index))
+    public override fun rowAt(index: Long): Row = source.rowAt(sourceIndex(index))
+    public override fun indexOfKey(key: ViewKey): Long? {
+        val at = source.indexOfKey(key) ?: return None
+        var left = 0L
+        var right = omitted.size
+        while (left < right) {
+            val middle = left + (right - left) / 2L
+            if (omitted[middle] < at)
+                left = middle + 1L
+            else
+                right = middle
+        }
+        return if (left < omitted.size && omitted[left] == at)
+            None
+        else
+            Some(at - left)
+    }
+}

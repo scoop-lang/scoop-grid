@@ -1,0 +1,125 @@
+package scoop.grid
+
+import scoop.collections.*
+import scoop.text.*
+import scoop.ui.*
+import scoop.ui.text.TextEditorState
+
+/** Search results keep the original candidate index as their view identity. */
+internal class GridFilterChoiceList(
+    val snapshot: GridFilterValues,
+    val indices: Array<Long>,
+    val key: ViewKey
+) {
+    private val positions = HashMap<Long, Long>()
+    init {
+        for (index in 0L ..< indices.size)
+            positions.put(indices[index], index)
+    }
+    fun indexOf(candidate: Long): Long? = positions[candidate]
+}
+
+internal class GridFilterSetDraft(private val initial: Array<GridLiteral>) {
+    private val initialSelection: Set<GridLiteral> = gridFilterSetCopy(initial)
+    private val selection = state(initialSelection)
+    private val shown = state<GridFilterChoiceList?>(None)
+    private var nextListKey = 0L
+    val search = TextEditorState()
+    val selected: Set<GridLiteral> get() = selection.value
+    val list: GridFilterChoiceList? get() = shown.value
+
+    fun setSelected(key: GridLiteral, checked: Boolean) {
+        selection.checkMutation()
+        if ((key in selected) == checked)
+            return
+        val next = gridFilterSetCopy(selected)
+        if (checked)
+            next.add(key)
+        else
+            next.remove(key)
+        selection.value = next
+    }
+    fun selectShown() {
+        selection.checkMutation()
+        val current = list ?: return
+        val next = gridFilterSetCopy(selected)
+        for (index in current.indices)
+            next.add(current.snapshot.values[index].key)
+        selection.value = next
+    }
+    fun clearSelection() {
+        selection.value = LinkedHashSet<GridLiteral>()
+    }
+    fun selectedValues(): Array<GridLiteral> {
+        if (selected === initialSelection)
+            return initial
+        val result = ArrayList<GridLiteral>()
+        for (key in selected)
+            result.add(key)
+        return result.toArray()
+    }
+    fun load(values: GridFilterValues, labels: GridFilterLabels = GridFilterLabels()) {
+        val previous = list
+        val key =
+            when (previous) {
+                case Some(val current) -> if (current.snapshot === values)
+                    current.key
+                else
+                    newKey()
+                case None -> newKey()
+            }
+        shown.value = Some(matching(values, key, labels))
+    }
+    fun applySearch(labels: GridFilterLabels = GridFilterLabels()) {
+        if (search.isComposing)
+            return
+        when (list) {
+            case Some(val current) -> shown.value =
+                Some(matching(current.snapshot, current.key, labels))
+            case None -> {}
+        }
+    }
+    fun reset() {
+        clearSelection()
+        shown.value = None
+        search.replaceAll("")
+    }
+    private fun newKey(): ViewKey {
+        val result = ViewKey.Number(nextListKey)
+        nextListKey += 1L
+        return result
+    }
+    private fun matching(
+        snapshot: GridFilterValues,
+        key: ViewKey,
+        labels: GridFilterLabels
+    ): GridFilterChoiceList {
+        val needle = search.committedText.lowercaseAscii()
+        val indices = ArrayList<Long>()
+        for (index in 0L ..< snapshot.values.size)
+            if (
+                gridFilterValueLabel(snapshot.values[index], labels).lowercaseAscii().contains(
+                    needle
+                )
+            )
+                indices.add(index)
+        return GridFilterChoiceList(snapshot, indices.toArray(), key)
+    }
+}
+
+private fun gridFilterSetCopy(values: Iterable<GridLiteral>): LinkedHashSet<GridLiteral> {
+    val result = LinkedHashSet<GridLiteral>()
+    for (value in values)
+        result.add(value)
+    return result
+}
+
+internal fun gridFilterValueLabel(value: GridFilterValue, labels: GridFilterLabels): String =
+    when (value.key) {
+        case Empty -> labels.missingValue
+        case Text(val text) -> if (text == "")
+            labels.emptyText
+        else
+            value.label
+        else -> value.label
+    }

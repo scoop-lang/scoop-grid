@@ -1,0 +1,63 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.ui.ViewKey
+import scoop.ui.component.CheckState
+import scoop.ui.component.TableSource
+
+public enum GridRowSelectionMode {
+    Disabled, Single, Multiple
+}
+
+/** Immutable membership shared by the model, mounted rows and semantic snapshots. */
+internal class GridSelectedRows(val keys: Array<ViewKey>) {
+    private val values = HashSet<ViewKey>()
+    init {
+        for (key in keys) {
+            gridRequire(key != ViewKey.Position, "row selection requires an explicit key")
+            gridRequire(values.add(key), "duplicate selected row key")
+        }
+    }
+    fun contains(key: ViewKey): Boolean = values.contains(key)
+    fun contains(key: GridRowKey): Boolean =
+        when (key.dataKey) {
+            case Some(val value) -> contains(value)
+            case None -> false
+        }
+    fun same(other: GridSelectedRows): Boolean {
+        if (keys.size != other.keys.size)
+            return false
+        for (key in keys)
+            if (!other.contains(key))
+                return false
+        return true
+    }
+}
+
+internal class GridSelectablePage<Row>(val source: TableSource<Row>, val count: Long)
+
+internal fun <Row> gridSurvivingSelection(
+    current: GridSelectedRows,
+    source: TableSource<Row>,
+    selectable: ((Row) -> Boolean)?
+): GridSelectedRows {
+    val kept = ArrayList<ViewKey>()
+    for (key in current.keys) {
+        val index = source.indexOfKey(key) ?: continue
+        if (selectable?.invoke(source.rowAt(index)) ?: true)
+            kept.add(key)
+    }
+    return if (kept.size == current.keys.size)
+        current
+    else
+        GridSelectedRows(kept.toArray())
+}
+
+internal fun gridSelectionState(selected: Long, total: Long): CheckState =
+    if (selected == 0L)
+        CheckState.Unchecked
+    else
+        if (selected == total)
+            CheckState.Checked
+        else
+            CheckState.Indeterminate

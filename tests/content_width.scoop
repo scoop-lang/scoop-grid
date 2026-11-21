@@ -1,0 +1,71 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.component.ItemExtent
+import scoop.ui.component.ItemExtentIndex
+
+@Test
+private class GridContentWidthTest {
+    @Test
+    fun `content sampling includes partial rows and excludes exact bottom boundaries`() {
+        fun check(
+            offset: Double,
+            height: Double,
+            count: Long,
+            first: Long,
+            end: Long,
+            width: Double = 500.0
+        ) {
+            val range =
+                GridRowLayout(ItemExtentIndex(count, ItemExtent.Fixed(32.0)), 0L, 0L, height)
+                .visible(offset, 0.0, width)
+            assertEquals(end - first, range.size)
+            for (index in 0L ..< range.size)
+                assertEquals(first + index, range[index])
+        }
+        check(0.0, 128.0, 100000000L, 0L, 4L)
+        check(1.0, 128.0, 100000000L, 0L, 5L)
+        check(32.0, 128.0, 100000000L, 1L, 5L)
+        check(321.0, 128.0, 12L, 10L, 12L)
+        check(0.0, 0.0, 100000000L, 0L, 0L)
+        check(32.0, 128.0, 100000000L, 0L, 0L, 0.0)
+        check(0.0, 128.0, 0L, 0L, 0L)
+        val large = 9223372036854775807L
+        check(large.toDouble() * 32.0, 128.0, large, large, large)
+    }
+
+    @Test
+    fun `variable height sampling uses intersecting rows rather than an estimated row count`() {
+        val rows = ItemExtentIndex(100000000L, ItemExtent.Variable(32.0))
+        rows.record(1L, 64.0)
+        rows.record(2L, 48.0)
+        rows.record(3L, 96.0)
+        val first = GridRowLayout(rows, 0L, 0L, 104.0).visible(40.0, 0.0, 500.0)
+        assertEquals(2L, first.size)
+        assertEquals(1L, first[0L])
+        assertEquals(2L, first[1L])
+        val partial = GridRowLayout(rows, 0L, 0L, 105.0).visible(40.0, 0.0, 500.0)
+        assertEquals(3L, partial.size)
+        assertEquals(3L, partial[2L])
+    }
+
+    @Test
+    fun `cancelled requests cannot complete later and unattached handles reject sizing`() {
+        val request = GridColumnFit()
+        assertTrue(request.isPending)
+        assertTrue(request.cancel())
+        assertFalse(request.cancel())
+        assertFalse(request.complete(GridColumnFitResult.Applied(120.0)))
+        when (request.result) {
+            case Cancelled -> {}
+            else -> fail(Some("cancelled sizing must retain its terminal result"))
+        }
+        val rejected = DataGridHandle().fitColumnToContent(GridColumnId("name"))
+        assertFalse(rejected.isPending)
+        assertFalse(rejected.cancel())
+        when (rejected.result) {
+            case Rejected(val message) -> assertTrue(message != "")
+            else -> fail(Some("an unattached handle must reject content sizing"))
+        }
+    }
+}

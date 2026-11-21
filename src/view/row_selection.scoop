@@ -1,0 +1,207 @@
+package scoop.grid
+
+import scoop.surface.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.ThemeSource
+import scoop.window.*
+import scoop.window.accessibility.*
+
+/** The selection captured for one rendered result; actions still address the current model. */
+internal class GridSelectionView<Row>(
+    val model: DataGridState<Row>,
+    private val session: GridSession<Row>,
+    val enabled: Boolean,
+    private val checkboxes: Boolean,
+    val theme: ThemeSource,
+    private val appearance: GridAppearance,
+    val labels: GridLabels
+) {
+    val selected = model.selectedRows
+    fun change(key: ViewKey, value: Boolean, extend: Boolean = false): GridRowActionResult =
+        if (session.usesModel(model))
+            session.setRowSelected(key, value, extend)
+        else
+            GridRowActionResult.Rejected("网格数据模型已替换")
+    fun semanticSelect(key: ViewKey, value: Boolean): SemanticActionResult {
+        if (!session.usesModel(model))
+            return SemanticActionResult.Unavailable
+        val at = model.result.rows.indexOfKey(key) ?: return SemanticActionResult.Unavailable
+        val dataKey =
+            model.result.rows.infoAt(at).dataKey ?: return SemanticActionResult.Unsupported
+        return when (change(dataKey, value)) {
+            case Applied -> SemanticActionResult.Completed
+            case Rejected(_) -> SemanticActionResult.Rejected
+        }
+    }
+    fun cell(key: ViewKey, row: Row, index: Long, column: Long, content: View): View {
+        if (!checkboxes || column != 0L)
+            return content
+        return leading(
+            component(
+                GridRowCheckboxProps(
+                    this,
+                    key,
+                    index,
+                    !model.isContextRow(key) && model.acceptsRow(row)
+                ),
+                { props, scope -> GridRowCheckbox(props, scope) },
+                ViewKey.Text("grid-row-checkbox")
+            ),
+            content
+        )
+    }
+    fun group(path: GridGroupPath, label: String, content: View): View {
+        if (!checkboxes || model.rowSelection != GridRowSelectionMode.Multiple)
+            return content
+        val view = this
+        val control =
+            checkbox(
+                binding(
+                    { view.model.groupRowSelection(path) },
+                    {
+                        next ->
+                        if (view.session.usesModel(view.model))
+                            view.session.selectGroupRows(path, next == CheckState.Checked)
+                        Unit
+                    }
+                )
+            ) {
+                enabled = view.enabled && view.model.groupSelectableRows(path) > 0L
+                theme = Some(view.theme)
+                semantics =
+                    ComponentSemantics(
+                        name = Some(view.labels.selectGroup(label)),
+                        automationId = Some(f"grid-group-selection-${path.encoded}")
+                    )
+            }
+        return leading(control, content)
+    }
+    fun header(column: Long, content: View): View {
+        if (!checkboxes || column != 0L || model.rowSelection != GridRowSelectionMode.Multiple)
+            return content
+        val view = this
+        val control =
+            checkbox(
+                binding(
+                    { view.model.pageRowSelection },
+                    {
+                        next ->
+                        if (view.session.usesModel(view.model))
+                            view.session.selectPageRows(next == CheckState.Checked);
+                        Unit
+                    }
+                )
+            ) {
+                enabled = view.enabled && view.model.pageSelectableRows > 0L
+                theme = Some(view.theme)
+                semantics =
+                    ComponentSemantics(
+                        name =
+                            Some(
+                                if (
+                                    view.model.isExternal &&
+                                        (
+                                            view.model.query.pagination ==
+                                                GridPagination.Disabled ||
+                                                !(view.model.result.external?.pageComplete ?: false)
+                                        )
+                                )
+                                    view.labels.selectLoaded
+                                else
+                                    view.labels.selectPage
+                            ),
+                        automationId = Some("grid-page-selection")
+                    )
+            }
+        return leading(control, content)
+    }
+    private fun leading(control: View, content: View): View {
+        val spacing = appearance.padding
+        return row {
+            this.spacing = spacing
+            alignment = CrossAlignment.Center
+            add(control)
+            item(content) { grow = 1.0 }
+        }
+    }
+}
+
+private class GridRowCheckboxProps<Row>(
+    val view: GridSelectionView<Row>,
+    val key: ViewKey,
+    val index: Long,
+    val selectable: Boolean
+)
+
+private class GridRowCheckbox<Row>(
+    private val props: Props<GridRowCheckboxProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private var extend = false
+    init {
+        scope.input.captureHandler =
+            {
+                _,
+                event -> extend =
+                    when (event) {
+                        case Pointer(
+                            InputPointerEvent.Button(val pointer, _, _, _)
+                        ) -> pointer.state.modifiers.shift
+                        case Keyboard(val key) -> key.modifiers.shift
+                        else -> false
+                    }
+            }
+        scope.resource { scope.input.addEventFinished { _ -> extend = false } }
+    }
+    public override fun render(): View {
+        val component = this
+        val input = props.value
+        return checkbox(
+            binding(
+                {
+                    component.props.value.selectable &&
+                        component.props.value.view.model.isRowSelected(component.props.value.key)
+                },
+                {
+                    value ->
+                    component.props.value.view.change(
+                        component.props.value.key,
+                        value,
+                        component.extend
+                    );
+                    Unit
+                }
+            )
+        ) {
+            enabled = input.view.enabled && input.selectable
+            theme = Some(input.view.theme)
+            semantics =
+                ComponentSemantics(
+                    name = Some(input.view.labels.selectRow(input.index + 1L)),
+                    automationId = Some(f"grid-row-selection-${input.index}")
+                )
+        }
+    }
+}
+
+internal fun gridRowSelectionKey(key: KeyEvent): Boolean =
+    key.state ==
+        ElementState.Pressed &&
+        !key.synthetic &&
+        key.logicalKey ==
+        LogicalKey.Named(NamedKey.Space) &&
+        key.modifiers.shift &&
+        !key.modifiers.control &&
+        !key.modifiers.superKey &&
+        !key.modifiers.alt &&
+        !key.modifiers.function
+
+internal fun gridSelectionItemKey(key: ViewKey): SemanticItemKey =
+    when (key) {
+        case Number(val value) -> SemanticItemKey.Number(value)
+        case Text(val value) -> SemanticItemKey.Text(value)
+        case Position -> throw IllegalArgumentException(
+            Some("row selection requires an explicit key")
+        )
+    }

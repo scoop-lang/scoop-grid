@@ -1,0 +1,61 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.graphics.Rect
+import scoop.ui.LayoutDirection
+
+@Test
+private class GridLayoutTest {
+    @Test
+    fun `one shared column layout keeps logical frozen edges while searching the center viewport`() {
+        val layout =
+            GridColumnLayout([80.0, 100.0, 120.0, 140.0, 60.0], 1L, 4L, 300.0, LayoutDirection.Ltr)
+        assertColumns([0L, 1L, 2L, 4L], layout.visible(0.0))
+        assertColumns([0L, 2L, 3L, 4L], layout.visible(100.0))
+        val start = layout.box(0L, 100.0, 32.0)
+        val end = layout.box(4L, 100.0, 32.0)
+        assertEquals(0.0, start.x - 100.0)
+        assertEquals(240.0, end.x - 100.0)
+        val center = layout.box(2L, 100.0, 32.0)
+        assertEquals(80.0, center.x - 100.0)
+        assertEquals(120.0, center.clip.width)
+        assertEquals(200.0, layout.reveal(3L, 0.0))
+        assertEquals(100.0, layout.reveal(4L, 100.0))
+        assertEquals(Rect(0.0, 32.0, 80.0, 288.0), layout.region(0L, 32.0, 288.0))
+        assertEquals(Rect(80.0, 32.0, 160.0, 288.0), layout.region(2L, 32.0, 288.0))
+        assertEquals(Rect(240.0, 0.0, 60.0, 32.0), layout.region(4L, 0.0, 32.0))
+    }
+    @Test
+    fun `RTL shares the same widths and mirrors frozen edges and center reveal`() {
+        val layout =
+            GridColumnLayout([80.0, 100.0, 120.0, 140.0, 60.0], 1L, 4L, 300.0, LayoutDirection.Rtl)
+        assertColumns([0L, 2L, 3L, 4L], layout.visible(0.0))
+        assertEquals(220.0, layout.box(0L, 0.0, 32.0).x)
+        assertEquals(0.0, layout.box(4L, 0.0, 32.0).x)
+        assertEquals(200.0, layout.reveal(1L, 0.0))
+        assertColumns([0L, 1L, 2L, 4L], layout.visible(200.0))
+        assertEquals(Rect(220.0, 32.0, 80.0, 288.0), layout.region(0L, 32.0, 288.0))
+        assertEquals(Rect(60.0, 32.0, 160.0, 288.0), layout.region(2L, 32.0, 288.0))
+        assertEquals(Rect(0.0, 0.0, 60.0, 32.0), layout.region(4L, 0.0, 32.0))
+    }
+    @Test
+    fun `narrow and zero width viewports clip frozen regions without overlapping input`() {
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            val narrow = GridColumnLayout([80.0, 100.0, 60.0], 1L, 2L, 100.0, direction)
+            assertColumns([0L, 2L], narrow.visible(0.0))
+            assertEquals(80.0, narrow.box(0L, 0.0, 32.0).clip.width)
+            assertEquals(20.0, narrow.box(2L, 0.0, 32.0).clip.width)
+            assertEquals(0.0, narrow.box(1L, 0.0, 32.0).clip.width)
+            assertEquals(0.0, narrow.region(1L, 32.0, 288.0).width)
+            val zero = GridColumnLayout([80.0, 100.0, 60.0], 1L, 2L, 0.0, direction)
+            assertEquals(0L, zero.visible(0.0).size)
+            assertEquals(0.0, zero.box(0L, 0.0, 32.0).clip.width)
+        }
+    }
+}
+
+private fun assertColumns(expected: Array<Long>, actual: Array<Long>) {
+    assertEquals(expected.size, actual.size)
+    for (index in 0L ..< expected.size)
+        assertEquals(expected[index], actual[index])
+}

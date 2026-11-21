@@ -1,0 +1,156 @@
+package scoop.grid.tests.window
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.surface.sendSurfaceKey
+import scoop.tests.window.setNativeClipboardNonText
+import scoop.ui.ViewKey
+import scoop.window.*
+
+internal class GridPasteProbe(private val probe: GridEditingProbe) {
+    private var submitted = 0
+    private var created = 0
+    private var pasteCount = 0L
+    private fun row(key: Long): EditRow =
+        probe.data.rowAt(probe.data.indexOfKey(ViewKey.Number(key))!!)
+    private fun last(): GridPasteResult = probe.pastes[probe.pastes.size - 1L]
+    private fun rejected(result: GridPasteResult, message: String) {
+        when (result) {
+            case Rejected(val reason) -> assertEquals(message, reason)
+            else -> fail(Some("paste should be rejected"))
+        }
+    }
+    private fun command(active: ActiveApplication, next: Int, code: Int, shift: Boolean = false) {
+        probe.next(active, next) {
+            assertTrue(sendSurfaceKey(probe.window!!, code, true, command = true, shift = shift))
+            assertTrue(sendSurfaceKey(probe.window!!, code, false, command = true, shift = shift))
+        }
+    }
+    fun advance(active: ActiveApplication) {
+        val handle = probe.handle
+        val clipboard = probe.window!!.clipboard
+        when (probe.phase) {
+            case 66 -> {
+                probe.defer = false
+                probe.model.setQuery(GridQuery())
+                probe.model.setColumnState(GridColumnState(GridColumnId("id")))
+                submitted = probe.submissions
+                assertTrue(handle.focusCell(probe.address(8L, "amount")))
+                probe.phase = 67
+            }
+            case 67 -> if (handle.focusedCell == Some(probe.address(8L, "amount"))) {
+                clipboard.writeText("120\r\n")
+                command(active, 68, 9)
+            }
+            case 68 -> if (handle.focusedCell == Some(probe.address(8L, "amount"))) {
+                assertEquals(120L, row(8L).amount)
+                assertEquals(GridPasteResult.Committed, last())
+                assertEquals(submitted + 1, probe.submissions)
+                assertEquals(None, handle.editingCell)
+                created = probe.created
+                rejected(handle.pasteCell(probe.address(8L, "id"), "99"), "当前单元格不可编辑")
+                rejected(handle.pasteCell(probe.address(1000L, "amount"), "99"), "当前单元格不可编辑")
+                assertEquals(created, probe.created)
+                clipboard.writeText("30\t40")
+                command(active, 69, 9)
+            }
+            case 69 -> {
+                rejected(last(), "一次只能粘贴到一个单元格")
+                assertEquals(None, handle.editingCell)
+                assertEquals(created, probe.created)
+                assertEquals(submitted + 1, probe.submissions)
+                assertEquals(120L, row(8L).amount)
+                assertTrue(handle.focusCell(probe.address(1L, "name")))
+                probe.phase = 70
+            }
+            case 70 -> if (handle.focusedCell == Some(probe.address(1L, "name"))) {
+                clipboard.writeText("\"中\n😀\"")
+                command(active, 71, 9)
+            }
+            case 71 -> {
+                assertEquals("中\n😀", row(1L).name)
+                assertEquals(GridPasteResult.Committed, last())
+                assertEquals(None, handle.editingCell)
+                assertTrue(handle.focusCell(probe.address(1L, "amount")))
+                probe.phase = 72
+            }
+            case 72 -> if (handle.focusedCell == Some(probe.address(1L, "amount"))) {
+                clipboard.writeText("bad")
+                command(active, 73, 9)
+            }
+            case 73 -> if (probe.number?.focused ?: false) {
+                rejected(last(), "请输入有效整数")
+                assertEquals(Some(probe.address(1L, "amount")), handle.editingCell)
+                assertEquals("bad", probe.number!!.text.state.text)
+                assertEquals(101L, row(1L).amount)
+                created = probe.created
+                rejected(handle.pasteCell(probe.address(1L, "amount"), "99"), "请先完成当前单元格编辑")
+                assertEquals(created, probe.created)
+                probe.number!!.text.state.replaceAll("130")
+                assertEquals(GridEditAttempt.Committed, handle.commitEdit())
+                probe.phase = 74
+            }
+            case 74 -> {
+                assertEquals(130L, row(1L).amount)
+                probe.defer = true
+                assertEquals(
+                    GridPasteResult.Pending,
+                    handle.pasteCell(probe.address(2L, "amount"), "140")
+                )
+                submitted = probe.submissions
+                rejected(handle.pasteCell(probe.address(3L, "name"), "other"), "请先完成当前单元格编辑")
+                assertEquals(submitted, probe.submissions)
+                assertTrue(handle.isSubmitting)
+                probe.accept()
+                assertEquals(140L, row(2L).amount)
+                probe.defer = false
+                probe.multiline = true
+                assertTrue(handle.beginEdit(probe.address(3L, "name")))
+                probe.phase = 75
+            }
+            case 75 -> if (probe.text?.focused ?: false) {
+                probe.text!!.text.state.replaceAll("")
+                pasteCount = probe.pastes.size
+                clipboard.writeText("编辑\n内部")
+                command(active, 76, 9)
+            }
+            case 76 -> {
+                assertEquals("编辑\n内部", probe.text!!.text.state.text)
+                assertEquals(pasteCount, probe.pastes.size)
+                assertEquals("row-3", row(3L).name)
+                command(active, 77, 6)
+            }
+            case 77 -> {
+                assertEquals("", probe.text!!.text.state.text)
+                command(active, 78, 6, shift = true)
+            }
+            case 78 -> {
+                assertEquals("编辑\n内部", probe.text!!.text.state.text)
+                assertEquals(GridEditAttempt.Committed, handle.commitEdit())
+                probe.phase = 79
+            }
+            case 79 -> if (handle.focusedCell == Some(probe.address(3L, "name"))) {
+                assertEquals("编辑\n内部", row(3L).name)
+                @Unsafe
+                {
+                    assertEquals(0, setNativeClipboardNonText())
+                }
+                command(active, 80, 9)
+            }
+            case 80 -> {
+                rejected(last(), "剪贴板中没有可粘贴的文本")
+                assertEquals(None, handle.editingCell)
+                clipboard.writeText("")
+                command(active, 81, 9)
+            }
+            case 81 -> {
+                assertEquals("", row(3L).name)
+                assertEquals(GridPasteResult.Committed, last())
+                assertEquals(None, handle.editingCell)
+                probe.phase = 82
+                probe.frame!!.requestFrame()
+            }
+            else -> {}
+        }
+    }
+}

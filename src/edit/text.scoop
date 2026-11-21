@@ -1,0 +1,101 @@
+package scoop.grid
+
+import scoop.text.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.text.TextEditorState
+import scoop.ui.text.TextInputStartOptions
+
+public class GridTextEditor<T> public constructor(
+    initial: T,
+    format: (T) -> String,
+    private val parse: (String) -> GridCandidate<T>,
+    public val multiline: Boolean = false,
+    private val labels: GridEditorLabels = GridEditorLabels()
+): GridEditor<T> {
+    private var document = TextEditorState(format(initial))
+    public val state: TextEditorState get() = document
+    public override fun startInput(state: TextEditorState): TextInputStartOptions? {
+        document = state
+        return Some(TextInputStartOptions(multiline = multiline))
+    }
+    public override val composing: Boolean get() = state.isComposing
+    public override fun candidate(): GridCandidate<T> = parse(state.committedText)
+    public override fun importText(text: String): String? {
+        if (composing)
+            return Some(labels.finishComposing)
+        state.replaceAll(text)
+        return None
+    }
+    public override fun cancelComposition() {
+        state.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        val configure: InputBuilder.() -> Unit =
+            {
+                focus = FocusOptions(Some(options.focus))
+                fonts = Some(options.fonts)
+                theme = Some(options.theme)
+                invalid = options.error != None
+                semantics = gridEditorSemantics(options)
+                readOnly = options.submitting
+                onSubmit = { _ -> options.onSubmit() }
+                onEdited = { _ -> options.onEdited() }
+            }
+        return if (multiline)
+            textarea(state) {
+                configure(this)
+                rows = 1L
+            }
+        else
+            input(state, configure)
+    }
+}
+
+public fun gridTextEditor(
+    value: String,
+    multiline: Boolean = false,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridTextEditor<String> =
+    GridTextEditor(
+        value,
+        { text -> text },
+        { text -> GridCandidate.Value(text) },
+        multiline,
+        labels
+    )
+
+public fun gridLongEditor(
+    value: Long,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridTextEditor<Long> =
+    GridTextEditor(
+        value,
+        { number -> f"${number}" },
+        {
+            text -> when (text.toLongOrNone()) {
+                case Some(val number) -> GridCandidate.Value(number)
+                case None -> GridCandidate.Rejected(labels.invalidInteger)
+            }
+        },
+        labels = labels
+    )
+
+public fun gridDoubleEditor(
+    value: Double,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridTextEditor<Double> =
+    GridTextEditor(
+        value,
+        { number -> f"${number}" },
+        {
+            text -> when (text.toDoubleOrNone()) {
+                case Some(val number) -> if (number.isFinite())
+                    GridCandidate.Value(number)
+                else
+                    GridCandidate.Rejected(labels.nonfiniteNumber)
+                case None -> GridCandidate.Rejected(labels.invalidNumber)
+            }
+        },
+        labels = labels
+    )

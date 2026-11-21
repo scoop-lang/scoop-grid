@@ -1,0 +1,147 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.ThemeSource
+
+internal class GridHeaderResizeProps<Row>(
+    val model: DataGridState<Row>,
+    val column: GridColumn<Row>,
+    val session: GridSession<Row>,
+    val content: View,
+    val enabled: Boolean,
+    val theme: ThemeSource,
+    val labels: GridLabels
+)
+
+internal class GridHeaderResize<Row>(
+    private val props: Props<GridHeaderResizeProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private var gesture: GridColumnGesture<Row>? = None
+    private val error = state<String?>(None)
+    private var errorModel: DataGridState<Row>? = None
+    private var errorStates: Array<GridColumnState>? = None
+    private fun entry(): GridColumnState? {
+        val input = props.value
+        val states = input.model.columnState
+        val index = gridColumnStateIndex(states, input.column.id) ?: return None
+        return Some(states[index])
+    }
+    private fun width(): Double? =
+        when (entry()) {
+            case Some(val value) -> value.width
+            case None -> None
+        }
+    private fun rejected(message: String) {
+        if (scope.isMounted) {
+            errorModel = Some(props.value.model)
+            errorStates = Some(props.value.model.columnState)
+            error.value = Some(message)
+        }
+    }
+    private fun begin(): Boolean {
+        val input = props.value
+        when (val result = input.session.columnActions.beginGesture(input.model, input.column.id)) {
+            case Ready(val active) -> {
+                gesture = Some(active)
+                error.value = None
+                return true
+            }
+            case Rejected(val message) -> {
+                rejected(message);
+                return false
+            }
+        }
+    }
+    private fun change(width: Double?) {
+        val input = props.value
+        val current = entry() ?: return
+        val result =
+            when (gesture) {
+                case Some(val active) -> input.session.columnActions.resize(active, width)
+                case None -> input.session.setColumnState(
+                    GridColumnState(current.id, current.visible, width, current.pin)
+                )
+            }
+        when (result) {
+            case Applied -> if (scope.isMounted)
+                error.value = None
+            case Rejected(val message) -> rejected(message)
+        }
+    }
+    private fun finish(end: TableColumnResizeEnd) {
+        val previous = gesture
+        gesture = None
+        when (end) {
+            case Completed -> {}
+            case Cancelled(_) -> previous?.restore()
+        }
+    }
+    public override fun render(): View {
+        val input = props.value
+        val message = error.value
+        val currentError =
+            when (errorModel) {
+                case Some(val model) -> when (errorStates) {
+                    case Some(val states) -> if (
+                        model === input.model && states === model.columnState
+                    )
+                        when (message) {
+                            case Some(val text) -> Some(input.labels.error(text))
+                            case None -> None
+                        }
+                    else
+                        None
+                    case None -> None
+                }
+                case None -> None
+            }
+        val content =
+            tableColumnResize(
+                input.content,
+                binding({ this @GridHeaderResize.width() }, { value -> change(value) })
+            ) {
+                size =
+                    input.session.columnActions.resizeSize(input.model, input.column.id) ?:
+                        input.column.size
+                enabled = input.enabled && !input.session.submitting
+                theme = Some(input.theme)
+                semantics =
+                    ComponentSemantics(
+                        name = Some(input.labels.resizeColumn(input.column.title)),
+                        automationId = Some(f"grid-resize-${input.column.id.value}"),
+                        description = currentError,
+                        error = currentError
+                    )
+                onResizeStart = { this @GridHeaderResize.begin() }
+                onResizeEnd = Some { end -> this @GridHeaderResize.finish(end) }
+            }
+        return element({ mount -> GridHeaderBoundary(mount) }, [content])
+    }
+    public override fun onUnmount() {
+        val previous = gesture
+        gesture = None
+        previous?.restore()
+    }
+}
+
+/** The shared handle and header content have exactly the same frozen-region clip. */
+private class GridHeaderBoundary(scope: ComponentScope): Element<GridCellClip>(scope) {
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        GridCellClip
+    > {
+        val clip = context.input<GridCellClip>()
+        val child = context.measureChild(0L, constraints)
+        context.placeChild(0L, Point(0.0, 0.0))
+        return LayoutResult(child, clip)
+    }
+    public override fun scene(context: SceneContext, clip: GridCellClip) {
+        context.withScrollReveal(clip.viewport, clip.region, clip.axes) {
+            content ->
+            content.clipRect(clip.bounds)
+            content.children()
+        }
+    }
+}

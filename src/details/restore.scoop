@@ -1,0 +1,31 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.ui.ViewKey
+
+internal fun <Row> gridRestoreDetails(
+    keys: Array<ViewKey>,
+    previous: GridComputed<Row>,
+    issues: ArrayList<GridRestoreIssue>
+): GridDetailState<Row> {
+    val kept = ArrayList<ViewKey>()
+    val seen = HashSet<ViewKey>()
+    for (key in keys) {
+        if (
+            key ==
+                ViewKey.Position ||
+                !seen.add(key) ||
+                !previous.details.available ||
+                (
+                    previous.external?.source?.blockSize ==
+                        None &&
+                        previous.source.indexOfKey(key) ==
+                        None
+                )
+        )
+            issues.add(GridRestoreIssue(GridStatePart.Detail(key), "详情重复、父记录已移除或未声明详情"))
+        else
+            kept.add(key)
+    }
+    return GridDetailState(previous.details.definition, kept.toArray())
+}

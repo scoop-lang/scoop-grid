@@ -1,0 +1,116 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.max
+import scoop.ui.*
+
+/** Probe the same mounted children, then let the caller apply their final constraints. */
+internal fun gridMeasureColumnContent(
+    context: MeasureContext,
+    plan: GridMeasurePlan,
+    probe: GridColumnProbe,
+    sampleWidth: Double,
+    density: Double,
+    bodyExtent: Double
+): GridColumnMeasured {
+    val input = LayoutInput(plan.probing(probe))
+    val header =
+        context.measureChild(
+            0L,
+            Constraints(minHeight = plan.headerHeight, maxHeight = Some(plan.headerHeight)),
+            input
+        )
+    val body =
+        context.measureChild(
+            1L,
+            Constraints(minHeight = bodyExtent, maxHeight = Some(bodyExtent)),
+            input
+        )
+    val width = max(sampleWidth, max(header.size.width, body.size.width) / density)
+    return GridColumnMeasured(probe.fit, width)
+}
+
+internal fun <Row> gridMeasureContentRows(
+    context: LazyMeasureContext,
+    constraints: Constraints,
+    plan: GridMeasurePlan,
+    probe: GridColumnProbe,
+    source: GridRowSource<Row>
+): LayoutResult<Rect> {
+    var width = 0.0
+    for (index in probe.rows) {
+        if (!source.rowKeyAt(index).hasCells)
+            continue
+        val height = plan.rows.index.extent(index)
+        val row =
+            context.measureItem(index, Constraints(minHeight = height, maxHeight = Some(height)))
+        width = max(width, row.size.width)
+    }
+    val offset = plan.scroll.presentationOffset
+    return LayoutResult(
+        LayoutMetrics(constraints.constrain(Size(width, 0.0))),
+        Rect(
+            offset.x - plan.scroll.snapshot.offset.x,
+            offset.y - plan.scroll.snapshot.offset.y,
+            plan.columns.viewport,
+            plan.bands.available
+        )
+    )
+}
+
+internal fun gridMeasureContentCell(
+    context: LazyMeasureContext,
+    constraints: Constraints,
+    plan: GridMeasurePlan,
+    probe: GridColumnProbe,
+    header: Boolean,
+    item: Long? = None
+): LayoutResult<Unit> {
+    val headerBox =
+        if (header)
+            Some(
+                plan.headers.box(
+                    probe.column,
+                    plan.columns,
+                    plan.scroll.presentationOffset.x,
+                    plan.headerRowHeight,
+                    plan.headerHeight
+                )
+            )
+        else
+            None
+    val height =
+        if (header)
+            headerBox!!.height
+        else
+            constraints.maxHeight ?: plan.rows.estimate
+    val box = plan.columns.box(probe.column, plan.scroll.presentationOffset.x, height)
+    val child =
+        context.measureItem(
+            item ?: probe.column,
+            Constraints(minHeight = height, maxHeight = Some(height)),
+            LayoutInput(
+                GridCellClip(
+                    box.clip,
+                    if (header)
+                        headerBox!!.region
+                    else
+                        plan.columns.region(
+                            probe.column,
+                            if (header)
+                                0.0
+                            else
+                                plan.headerHeight,
+                            if (header)
+                                plan.headerHeight
+                            else
+                                plan.bodyHeight
+                        ),
+                    ScrollAxes.Both,
+                    plan.viewport,
+                    measure = GridCellMeasure.Width
+                )
+            )
+        )
+    return LayoutResult(LayoutMetrics(constraints.constrain(child.size)), Unit)
+}

@@ -1,0 +1,136 @@
+package scoop.grid.tests.details
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.InputScope
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.text.TextEditorState
+import scoop.window.accessibility.*
+
+internal class DetailPanel(
+    private val props: Props<Long>,
+    private val probe: DetailProbe,
+    scope: ComponentScope
+): Component(scope) {
+    val parent: Long get() = props.value
+    val inputScope: InputScope = scope.input
+    val text = TextEditorState("memo")
+    val textFocus = FocusHandle()
+    val choice = state<Long?>(Some(1L))
+    val choiceFocus = FocusHandle()
+    val popup = OverlayHandle()
+    val handle = DataGridHandle()
+    var editor: GridTextEditor<Long>? = None
+    var options: GridEditorOptions? = None
+    var pending: GridCommit<Long>? = None
+    val model =
+        DataGridState(
+            TableRows([TableRecord(ViewKey.Number(0L), 1L), TableRecord(ViewKey.Number(1L), 2L)]),
+            columns()
+        )
+    public override fun onMount() {
+        probe.reads.mounted += 1L
+        probe.live.put(parent, this)
+    }
+    public override fun onUnmount() {
+        probe.reads.unmounted += 1L
+        probe.live.remove(parent)
+    }
+    private fun columns(): Array<GridColumn<Long>> {
+        val panel = this
+        return [
+            gridColumn<Long, Long>(
+                GridColumnId("value"),
+                "Nested value",
+                { value -> value },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fraction(1.0)),
+                edit =
+                    Some(
+                        gridEdit<Long, Long>(
+                            {
+                                value ->
+                                val editor = gridLongEditor(value)
+                                panel.editor = Some(editor)
+                                DetailEditor(editor, { options -> panel.options = Some(options) })
+                            },
+                            { _, completion -> panel.pending = Some(completion) }
+                        )
+                    )
+            )
+        ]
+    }
+    public override fun render(): View {
+        val panel = this
+        return element(
+            DetailContentProps(parent, probe.extra.value),
+            { props, scope -> DetailContentLayout(props, scope) },
+            [
+                input(text) {
+                    focus = FocusOptions(Some(panel.textFocus))
+                    semantics =
+                        ComponentSemantics(
+                            name = Some("Detail memo"),
+                            automationId = Some(f"detail-input-${panel.parent}")
+                        )
+                },
+                select(choice.binding()) {
+                    focus = FocusOptions(Some(panel.choiceFocus))
+                    handle = Some(panel.popup)
+                    semantics =
+                        ComponentSemantics(
+                            name = Some("Detail priority"),
+                            automationId = Some(f"detail-select-${panel.parent}")
+                        )
+                    popupSemantics =
+                        ComponentSemantics(automationId = Some(f"detail-popup-${panel.parent}"))
+                    item(Choice(ViewKey.Text("low"), 1L, "Low"))
+                    item(Choice(ViewKey.Text("high"), 2L, "High"))
+                },
+                dataGrid(model) {
+                    handle = Some(panel.handle);
+                    height = 132.0;
+                    headerHeight = 32.0;
+                    rowHeight = 36.0
+                    labels = GridLabels(name = "Nested grid")
+                }
+            ]
+        )
+    }
+}
+
+private class DetailContentProps(val parent: Long, val extra: Double)
+
+private class DetailContentLayout(
+    private val props: Props<DetailContentProps>,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    private val semantics = scope.semantics(SemanticRole.Group)
+    public override fun update(): UiInvalidation {
+        semantics.update(
+            SemanticProperties(automationId = Some(f"detail-content-${props.value.parent}"))
+        )
+        scope.routeSemanticsChildren(Some(semantics))
+        return UiInvalidation.Layout
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val width = constraints.maxWidth ?: 480.0
+        context.measureChild(0L, Constraints.tight(Size(width, 36.0)))
+        context.placeChild(0L, Point(0.0, 0.0))
+        context.measureChild(1L, Constraints.tight(Size(width, 36.0)))
+        context.placeChild(1L, Point(0.0, 44.0))
+        context.measureChild(2L, Constraints.tight(Size(width, 132.0)))
+        context.placeChild(2L, Point(0.0, 88.0))
+        return LayoutResult(
+            LayoutMetrics(constraints.constrain(Size(width, 220.0 + props.value.extra))),
+            Unit
+        )
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.semantics(semantics, Rect(0.0, 0.0, context.size.width, context.size.height))
+        context.children()
+    }
+}

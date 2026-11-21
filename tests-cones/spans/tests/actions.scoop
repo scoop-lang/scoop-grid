@@ -1,0 +1,167 @@
+package scoop.grid.tests.spans
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.style.shadcn.shadcnTheme
+
+internal fun SpanProbe.advance() {
+    when (phase) {
+        case 1 -> scroll.scrollTo(Point(1660.0, 0.0))
+        case 2 -> focus(0L, 22L)
+        case 3 -> key(124, "\uf703")
+        case 4 -> key(123, "\uf702")
+        case 5 -> key(125, "\uf701")
+        case 6 -> key(124, "\uf703")
+        case 7 -> key(126, "\uf700")
+        case 8 -> key(48, "\t")
+        case 9 -> key(48, "\t", 1)
+        case 10 -> key(115, "\uf729")
+        case 11 -> key(119, "\uf72b")
+        case 12 -> beforeCreated = created
+        case 13 -> frame!!.requestLayout()
+        case 14 -> assertTrue(outside.requestFocus())
+        case 15 -> {}
+        case 16 -> {}
+        case 17 -> {
+            assertTrue(outside.requestFocus())
+            replace(merged = false)
+            scroll.scrollTo(Point(1520.0, 0.0))
+        }
+        case 18 -> focus(0L, 21L)
+        case 19 -> replace()
+        case 20 -> {
+            assertFalse(handle.beginEdit(spanAddress(0L, 20L)))
+            assertFalse(handle.beginEdit(spanAddress(0L, 21L)))
+            when (handle.pasteCell(spanAddress(0L, 21L), "changed")) {
+                case Rejected(_) -> {}
+                else -> fail(Some("covered paste was accepted"))
+            }
+        }
+        case 21 -> {
+            change(21L, visible = false);
+            focus(0L, 22L)
+        }
+        case 22 -> change(21L)
+        case 23 -> model.moveColumn(spanId(21L), 23L)
+        case 24 -> model.moveColumn(spanId(21L), 21L)
+        case 25 -> change(21L, pin = GridPin.Start)
+        case 26 -> {
+            change(21L)
+            change(1L, Some(40.0), pin = GridPin.Start)
+            change(28L, Some(40.0), pin = GridPin.End)
+        }
+        case 27 -> {
+            model.setPinnedRows(GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(8L)]))
+            previousY = scroll.offset.y
+            focus(8L, 29L)
+        }
+        case 28 -> focus(8L, 21L)
+        case 29 -> {
+            theme.current.value =
+                shadcnTheme() { tokens { typography { body { fontSize = 21.0 } } } }
+            direction.value = LayoutDirection.Rtl
+            focus(0L, 1L)
+        }
+        case 30 -> width.value = 180.0
+        case 31 -> {
+            width.value = 500.0
+            theme.current.value = shadcnTheme()
+            direction.value = LayoutDirection.Ltr
+            change(20L, Some(40.0));
+            change(21L, Some(40.0));
+            change(22L, Some(40.0))
+            mode.value = GridRowSizing.Content([spanId(21L), spanId(22L)])
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 32 -> change(20L, Some(240.0))
+        case 33 -> {
+            widthSamples.clear();
+            fit = Some(handle.fitColumnToContent(spanId(21L)))
+        }
+        case 34 -> {
+            widthSamples.clear();
+            fit = Some(handle.fitColumnToContent(spanId(20L)))
+        }
+        case 35 -> {
+            mode.value = GridRowSizing.Fixed
+            model.setPinnedRows(GridPinnedRows())
+            replace(11L, false)
+            focus(0L, 21L)
+        }
+        case 36 -> {
+            assertTrue(handle.beginEdit(spanAddress(0L, 21L)))
+            editor!!.state.replaceAll("changed")
+        }
+        case 37 -> replace(11L)
+        case 38 -> {
+            replace(11L, false)
+            assertTrue(handle.beginEdit(spanAddress(0L, 20L)))
+        }
+        case 39 -> {
+            editor!!.state.replaceAll("pending")
+            assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+        }
+        case 40 -> {
+            replace(11L)
+            assertFalse(pending!!.reject("late"))
+            assertFalse(pending!!.accept(SpanRows(reads, 11L, false)))
+        }
+        case 41 -> rules.value = None
+        case 42 -> {
+            focus(0L, 21L)
+            rules.value = Some(::spanRanges)
+        }
+        case 43 -> {
+            assertTrue(outside.requestFocus())
+            enabled.value = false
+        }
+        case 44 -> enabled.value = true
+        case 45 -> focus(10L, 29L)
+        case 46 -> key(48, "\t")
+        case 47 -> {
+            change(20L);
+            change(21L);
+            change(22L)
+            val nodes = ArrayList<GridHeaderNode>()
+            for (column in 0L ..< 30L) {
+                if (column == 20L)
+                    nodes.add(
+                        GridHeaderNode.Group(
+                            GridColumnGroupId("metrics"),
+                            "Metrics",
+                            [
+                                GridHeaderNode.Column(spanId(20L)),
+                                GridHeaderNode.Column(spanId(21L)),
+                                GridHeaderNode.Column(spanId(22L))
+                            ]
+                        )
+                    )
+                else
+                    if (column != 21L && column != 22L)
+                        nodes.add(GridHeaderNode.Column(spanId(column)))
+            }
+            model.replaceColumns(model.columns, headers = Some(nodes.toArray()))
+            focus(0L, 21L)
+        }
+        case 48 -> change(21L, visible = false)
+        case 49 -> {
+            change(21L);
+            change(20L, Some(0.0));
+            focus(0L, 22L)
+        }
+        case 50 -> replace(11L, removed = Some(0L))
+        case 51 -> replace(11L)
+        case 52 -> {
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+        }
+        case 53 -> {
+            finished = true;
+            active!!.requestExit()
+        }
+        else -> fail(Some("unknown span action phase"))
+    }
+}

@@ -1,0 +1,75 @@
+package scoop.grid.tests.heights
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.button
+import scoop.window.LogicalSize
+
+internal class HeightScene(private val probe: HeightProbe, scope: ComponentScope): Component(
+    scope
+) {
+    public override fun render(): View {
+        val probe = this.probe
+        return direction(
+            element(
+                { mount -> HeightLayout(probe, mount) },
+                [
+                    dataGrid(probe.model) {
+                        width = Some(500.0);
+                        height = probe.height.value;
+                        rowHeight = probe.baseHeight.value
+                        rowSizing = probe.mode.value;
+                        headerHeight = 32.0;
+                        overscan = 64.0
+                        scroll = Some(probe.scroll);
+                        handle = Some(probe.handle);
+                        enabled = probe.enabled.value
+                    },
+                    button("Outside grid", onClick = {}) {
+                        focus = FocusOptions(Some(probe.outside))
+                    }
+                ]
+            ),
+            probe.direction.value
+        )
+    }
+}
+
+private class HeightLayout(private val probe: HeightProbe, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    init {
+        probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints(maxWidth = Some(500.0), maxHeight = Some(400.0)))
+        context.placeChild(0L, Point(12.0, 12.0))
+        context.measureChild(1L, Constraints(maxWidth = Some(240.0)))
+        context.placeChild(1L, Point(540.0, 24.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(800.0, 440.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val discard = probe.discardNext
+        context.children()
+        if (discard) {
+            probe.discardNext = false
+            probe.window!!.requestSize(LogicalSize(800.0, 442.0))
+        }
+        context.onFrameComplete {
+            frame -> when (frame.submission) {
+                case Accepted -> probe.accepted()
+                case Discarded -> {
+                    assertTrue(discard)
+                    assertEquals(probe.beforeDiscard, probe.scroll.offset)
+                    probe.discarded += 1
+                    probe.frame!!.requestFrame()
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,95 @@
+package scoop.grid
+
+import scoop.ui.component.TableSource
+
+internal class GridTreeComputed<Row>(
+    val matches: GridTreeMatches<Row>,
+    val columns: GridColumns<Row>,
+    val aggregates: GridAggregations,
+    val order: GridTreeOrder<Row>,
+    val query: GridQuery
+) {
+    val topology: GridTreeTopology<Row> get() = matches.topology
+}
+
+internal fun <Row> gridComputeTree(
+    topology: GridTreeTopology<Row>,
+    filtered: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    previous: GridTreeComputed<Row>?
+): GridTreeComputed<Row> {
+    val matches =
+        when (previous) {
+            case Some(val old) -> if (
+                old.topology === topology && old.matches.filtered === filtered
+            )
+                old.matches
+            else
+                GridTreeMatches(topology, filtered)
+            case None -> GridTreeMatches(topology, filtered)
+        }
+    val aggregates =
+        when (previous) {
+            case Some(val old) -> if (
+                old.matches ===
+                    matches &&
+                    old.columns ===
+                    columns &&
+                    gridArrayEqual(old.query.aggregations, query.aggregations)
+            )
+                old.aggregates
+            else
+                gridTreeAggregate(matches, columns, query.aggregations)
+            case None -> gridTreeAggregate(matches, columns, query.aggregations)
+        }
+    val order =
+        when (previous) {
+            case Some(val old) -> if (
+                old.matches ===
+                    matches &&
+                    old.columns ===
+                    columns &&
+                    gridArrayEqual(old.query.sorting, query.sorting)
+            )
+                old.order
+            else
+                gridOrderTree(matches, columns, query.sorting)
+            case None -> gridOrderTree(matches, columns, query.sorting)
+        }
+    when (previous) {
+        case Some(val old) -> if (
+            old.matches === matches && old.aggregates === aggregates && old.order === order
+        )
+            return old
+        case None -> {}
+    }
+    return GridTreeComputed(matches, columns, aggregates, order, query)
+}
+
+private fun <Row> gridTreeAggregate(
+    matches: GridTreeMatches<Row>,
+    columns: GridColumns<Row>,
+    selections: Array<GridAggregationSelection>
+): GridAggregations {
+    val topology = matches.topology
+    val runs = gridAggregateRuns(columns, selections)
+    for (run in runs)
+        for (group in 0L .. topology.source.count)
+            run.ensure(group)
+    if (runs.size > 0L)
+        for (index in 0L ..< matches.filtered.count) {
+            var node = topology.positions[matches.filtered.keyAt(index)]!!
+            val groups = ArrayList<Long>()
+            groups.add(0L)
+            while (node >= 0L) {
+                groups.add(node + 1L)
+                node = topology.parents[node]
+            }
+            val row = matches.filtered.rowAt(index)
+            val targets = groups.toArray()
+            for (run in runs)
+                run.addGroups(targets, row)
+        }
+    return gridFinishAggregates(selections, runs)
+}

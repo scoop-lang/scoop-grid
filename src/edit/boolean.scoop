@@ -1,0 +1,67 @@
+package scoop.grid
+
+import scoop.text.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+public class GridBooleanEditor public constructor(
+    initial: Boolean,
+    private val labels: GridEditorLabels = GridEditorLabels()
+): GridEditor<Boolean> {
+    public val value: State<Boolean> = state(initial)
+    private val reference = FieldTarget()
+    public override val composing: Boolean get() = false
+    public override fun candidate(): GridCandidate<Boolean> = GridCandidate.Value(value.value)
+    public override fun importText(text: String): String? {
+        when (text.trim().lowercaseAscii()) {
+            case "true" -> value.value = true
+            case "1" -> value.value = true
+            case "是" -> value.value = true
+            case "false" -> value.value = false
+            case "0" -> value.value = false
+            case "否" -> value.value = false
+            else -> return Some(labels.invalidBoolean)
+        }
+        return None
+    }
+    public override fun cancelComposition(): Unit = Unit
+    public override fun view(options: GridEditorOptions): View {
+        val draft = value
+        val reference = this.reference
+        val control =
+            checkbox(
+                binding(
+                    { draft.value },
+                    {
+                        next -> if (!options.submitting) {
+                            draft.value = next
+                            options.onEdited()
+                        }
+                    }
+                )
+            ) {
+                focus = FocusOptions(Some(options.focus))
+                enabled = !options.submitting
+                invalid = options.error != None
+                semantics = gridEditorSemantics(options)
+                theme = Some(options.theme)
+                labelTarget = Some(reference)
+            }
+        return gridEditorField(
+            control,
+            options,
+            reference,
+            Some(
+                if (draft.value)
+                    labels.yes
+                else
+                    labels.no
+            )
+        )
+    }
+}
+
+public fun gridBooleanEditor(
+    value: Boolean,
+    labels: GridEditorLabels = GridEditorLabels()
+): GridBooleanEditor = GridBooleanEditor(value, labels)

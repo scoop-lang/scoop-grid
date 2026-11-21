@@ -1,0 +1,144 @@
+package scoop.grid
+
+import scoop.ui.*
+
+internal class GridFilterKeys {
+    private var next = 0L
+    fun take(): ViewKey {
+        val result = ViewKey.Number(next)
+        next += 1L
+        return result
+    }
+}
+
+internal enum GridFilterNode {
+    All(ViewKey), Condition(GridFilterConditionDraft), Group(GridFilterGroupDraft)
+    val key: ViewKey get() =
+        when (this) {
+            case All(val key) -> key
+            case Condition(val condition) -> condition.key
+            case Group(val group) -> group.key
+        }
+    val composing: Boolean get() =
+        when (this) {
+            case All(_) -> false
+            case Condition(val condition) -> condition.composing
+            case Group(val group) -> group.composing
+        }
+    fun filter(
+        kind: (GridColumnId) -> GridValueKind,
+        labels: GridFilterLabels = GridFilterLabels()
+    ): GridFilter =
+        when (this) {
+            case All(_) -> GridFilter.All
+            case Condition(val condition) -> GridFilter.Column(
+                condition.column.value,
+                condition.condition(kind(condition.column.value), labels)
+            )
+            case Group(val group) -> group.filter(kind, false, labels)
+        }
+}
+
+internal class GridFilterGroupDraft(
+    val key: ViewKey,
+    conjunction: Boolean,
+    children: Array<GridFilterNode>,
+    singularRoot: Boolean = false
+) {
+    val conjunction = state(conjunction)
+    val children = state(children)
+    private val singularRoot = state(singularRoot)
+    val composing: Boolean get() {
+        for (child in children.value)
+            if (child.composing)
+                return true
+        return false
+    }
+    fun join(value: Boolean) {
+        if (composing)
+            return
+        conjunction.value = value
+        singularRoot.value = false
+    }
+    fun append(node: GridFilterNode) {
+        val current = children.value
+        children.value =
+            Array<GridFilterNode>(current.size + 1L) {
+                index -> if (index == current.size)
+                    node
+                else
+                    current[index]
+            }
+    }
+    fun remove(key: ViewKey) {
+        if (composing)
+            return
+        val next = ArrayList<GridFilterNode>()
+        for (child in children.value)
+            if (child.key != key)
+                next.add(child)
+        children.value = next.toArray()
+    }
+    fun filter(
+        kind: (GridColumnId) -> GridValueKind,
+        root: Boolean,
+        labels: GridFilterLabels
+    ): GridFilter {
+        val current = children.value
+        if (current.size == 0L) {
+            gridRequire(root, labels.emptyNestedGroup)
+            return GridFilter.All
+        }
+        val filters =
+            Array<GridFilter>(current.size) { index -> current[index].filter(kind, labels) }
+        if (root && singularRoot.value && filters.size == 1L)
+            return filters[0L]
+        return if (conjunction.value)
+            GridFilter.And(filters)
+        else
+            GridFilter.Or(filters)
+    }
+}
+
+internal class GridFilterDraft(filter: GridFilter, val keys: GridFilterKeys) {
+    val root = gridFilterRoot(filter, keys)
+    val composing: Boolean get() = root.composing
+    fun filter(
+        kind: (GridColumnId) -> GridValueKind,
+        labels: GridFilterLabels = GridFilterLabels()
+    ): GridFilter = root.filter(kind, true, labels)
+}
+
+private fun gridFilterRoot(filter: GridFilter, keys: GridFilterKeys): GridFilterGroupDraft =
+    when (filter) {
+        case All -> GridFilterGroupDraft(keys.take(), true, [], true)
+        case And(val children) -> GridFilterGroupDraft(
+            keys.take(),
+            true,
+            gridFilterNodes(children, keys)
+        )
+        case Or(val children) -> GridFilterGroupDraft(
+            keys.take(),
+            false,
+            gridFilterNodes(children, keys)
+        )
+        else -> GridFilterGroupDraft(keys.take(), true, [gridFilterNode(filter, keys)], true)
+    }
+
+private fun gridFilterNodes(filters: Array<GridFilter>, keys: GridFilterKeys): Array<
+    GridFilterNode
+> = Array<GridFilterNode>(filters.size) { index -> gridFilterNode(filters[index], keys) }
+
+private fun gridFilterNode(filter: GridFilter, keys: GridFilterKeys): GridFilterNode =
+    when (filter) {
+        case All -> GridFilterNode.All(keys.take())
+        case Column(val column, val condition) -> GridFilterNode.Condition(
+            GridFilterConditionDraft(keys.take(), column, condition)
+        )
+        case And(val children) -> GridFilterNode.Group(
+            GridFilterGroupDraft(keys.take(), true, gridFilterNodes(children, keys))
+        )
+        case Or(val children) -> GridFilterNode.Group(
+            GridFilterGroupDraft(keys.take(), false, gridFilterNodes(children, keys))
+        )
+    }

@@ -1,0 +1,84 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+
+internal fun gridDefaultColumnStates(headers: GridHeaders): Array<GridColumnState> =
+    Array<GridColumnState>(headers.leaves.size) { at -> GridColumnState(headers.leaves[at]) }
+
+/** Preserve settings by identity, then reconcile only an invalid tree order. */
+internal fun <Row> gridReconcileColumns(
+    previous: Array<GridColumnState>,
+    columns: GridColumns<Row>,
+    headers: GridHeaders,
+    forceOrder: Boolean = false
+): Array<GridColumnState> {
+    val states = HashMap<GridColumnId, GridColumnState>()
+    val kept = ArrayList<GridColumnState>()
+    for (old in previous)
+        when (columns.find(old.id)) {
+            case Some(val column) -> {
+                val width =
+                    when (old.width) {
+                        case Some(val value) -> Some(column.size.constrain(value))
+                        case None -> None
+                    }
+                val entry = GridColumnState(old.id, old.visible, width, old.pin)
+                states.put(old.id, entry)
+                kept.add(entry)
+            }
+            case None -> {}
+        }
+    for (id in headers.leaves)
+        if (!states.containsKey(id)) {
+            val entry = GridColumnState(id)
+            states.put(id, entry)
+            kept.add(entry)
+        }
+    val ordered = kept.toArray()
+    val result =
+        if (forceOrder || headers.orderError(ordered) != None)
+            Array<GridColumnState>(headers.leaves.size) { at -> states[headers.leaves[at]]!! }
+        else
+            ordered
+    return if (gridArrayEqual(previous, result))
+        previous
+    else
+        result
+}
+
+internal fun <Row> gridSurvivingPivot(
+    value: GridPivot?,
+    columns: GridColumns<Row>,
+    aggregations: Array<GridAggregationSelection>
+): GridPivot? {
+    val pivot = value ?: return None
+    if (aggregations.size == 0L)
+        return None
+    val dimensions = ArrayList<GridSort>()
+    for (dimension in pivot.dimensions)
+        when (columns.find(dimension.column)?.pivoting ?: None) {
+            case Some(_) -> dimensions.add(dimension)
+            case None -> {}
+        }
+    return Some(GridPivot(dimensions.toArray(), pivot.label))
+}
+
+internal fun gridColumnOrderMatches(states: Array<GridColumnState>, headers: GridHeaders): Boolean {
+    if (states.size != headers.leaves.size)
+        return false
+    for (at in 0L ..< states.size)
+        if (states[at].id != headers.leaves[at])
+            return false
+    return true
+}
+
+internal fun <Row> gridPivotResetOrder(
+    previous: GridComputed<Row>,
+    next: GridComputed<Row>,
+    states: Array<GridColumnState>
+): Boolean =
+    when (previous.pivot) {
+        case Some(val old) -> !gridPivotDimensionsEqual(previous.query.pivot, next.query.pivot) ||
+            gridColumnOrderMatches(states, old.schema.headers)
+        case None -> true
+    }

@@ -1,0 +1,89 @@
+package scoop.grid.tests.columns
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+
+internal class ColumnsScene(private val probe: ColumnsProbe, scope: ComponentScope): Component(
+    scope
+) {
+    public override fun render(): View {
+        val probe = this.probe
+        return direction(
+            element(
+                probe.model,
+                { props, mount -> ColumnsLayout(props, probe, mount) },
+                [
+                    gridColumnsPanel(probe.model, probe.handle) {
+                        height = 260.0
+                        enabled = probe.enabled.value
+                        if (probe.localized.value)
+                            labels =
+                                GridColumnsLabels(
+                                    fit = "Fit",
+                                    fitName = "Fit visible columns",
+                                    name = "Columns",
+                                    widthName = { title -> f"Width of ${title}" },
+                                    pinStart = "Start",
+                                    pinEnd = "End",
+                                    unpinned = "Unpinned",
+                                    sort =
+                                        {
+                                            priority,
+                                            direction -> if (
+                                                direction == GridSortDirection.Ascending
+                                            )
+                                                f"order=${priority}:up"
+                                            else
+                                                f"order=${priority}:down"
+                                        },
+                                    filtered = "filtered",
+                                    decorate = { title, status -> f"${title} | ${status}" },
+                                    invalidWidth = "Width must be finite and nonnegative",
+                                    error = { text -> f"Problem:${text}" }
+                                )
+                    },
+                    dataGrid(probe.model) {
+                        handle = Some(probe.handle)
+                        width = Some(probe.width.value)
+                        height = 340.0
+                        rowHeight = 32.0
+                        headerHeight = 32.0
+                        minimumCenterWidth = 100.0
+                        enabled = probe.enabled.value
+                        scroll = Some(probe.scroll)
+                    }
+                ]
+            ),
+            probe.direction.value
+        )
+    }
+}
+
+private class ColumnsLayout(
+    private val model: Props<DataGridState<Long>>,
+    private val probe: ColumnsProbe,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    init {
+        probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(420.0, 620.0)))
+        context.placeChild(0L, Point(12.0, 12.0))
+        context.measureChild(1L, Constraints(maxWidth = Some(500.0), maxHeight = Some(340.0)))
+        context.placeChild(1L, Point(448.0, 12.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(960.0, 660.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val presented = model.value
+        context.children()
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted && presented === probe.model)
+                probe.accepted()
+        }
+    }
+}

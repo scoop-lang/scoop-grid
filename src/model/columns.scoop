@@ -1,0 +1,88 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.HashSet
+
+public enum GridPin: Equals<GridPin> {
+    None, Start, End
+    public override operator fun equals(other: GridPin): Boolean =
+        when ((this, other)) {
+            case(None, None) -> true
+            case(Start, Start) -> true
+            case(End, End) -> true
+            else -> false
+        }
+}
+
+public class GridColumnState public constructor(
+    public val id: GridColumnId,
+    public val visible: Boolean = true,
+    public val width: Double? = None,
+    public val pin: GridPin = GridPin.None
+): Equals<GridColumnState> {
+    public override operator fun equals(other: GridColumnState): Boolean =
+        id == other.id && visible == other.visible && width == other.width && pin == other.pin
+}
+
+internal fun gridOrderedColumnStates(values: Array<GridColumnState>): Array<GridColumnState> {
+    val result = ArrayList<GridColumnState>()
+    for (pin in [GridPin.Start, GridPin.None, GridPin.End])
+        for (entry in values)
+            if (entry.pin == pin)
+                result.add(entry)
+    return result.toArray()
+}
+
+internal class GridColumns<Row>(val values: Array<GridColumn<Row>>, allowResults: Boolean = false) {
+    private val lookup = HashMap<GridColumnId, GridColumn<Row>>()
+    init {
+        gridRequire(values.size > 0L, "grid requires at least one column")
+        for (column in values) {
+            gridRequire(
+                allowResults || column.id.isSource,
+                "source columns require source identities"
+            )
+            gridRequire(!lookup.containsKey(column.id), "duplicate grid column id")
+            val operations = HashSet<GridAggregateId>()
+            for (operation in column.aggregations)
+                gridRequire(operations.add(operation.id), "duplicate grid aggregate id")
+            lookup.put(column.id, column)
+        }
+    }
+    fun find(id: GridColumnId): GridColumn<Row>? = lookup[id]
+    fun contains(id: GridColumnId): Boolean = lookup.containsKey(id)
+    fun get(id: GridColumnId): GridColumn<Row> =
+        find(id) ?: throw IllegalArgumentException(Some(f"unknown grid column: ${id.value}"))
+}
+
+internal fun <Row> gridSurvivingFilter(filter: GridFilter, columns: GridColumns<Row>): GridFilter? =
+    when (filter) {
+        case All -> Some(filter)
+        case Column(val id, _) -> if (columns.contains(id))
+            Some(filter)
+        else
+            None
+        case And(val children) -> gridSurvivingChildren(children, columns, true)
+        case Or(val children) -> gridSurvivingChildren(children, columns, false)
+    }
+
+private fun <Row> gridSurvivingChildren(
+    children: Array<GridFilter>,
+    columns: GridColumns<Row>,
+    conjunction: Boolean
+): GridFilter? {
+    val result = ArrayList<GridFilter>()
+    for (child in children)
+        when (gridSurvivingFilter(child, columns)) {
+            case Some(val value) -> result.add(value)
+            case None -> {}
+        }
+    if (result.size == 0L)
+        return None
+    return Some(
+        if (conjunction)
+            GridFilter.And(result.toArray())
+        else
+            GridFilter.Or(result.toArray())
+    )
+}

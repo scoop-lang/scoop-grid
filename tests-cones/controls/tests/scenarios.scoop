@@ -1,0 +1,457 @@
+package scoop.grid.tests.controls
+
+import scoop.datetime.LocalDate
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.surface.sendSurfaceKey
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.window.ActiveApplication
+
+private class TrackedControl<T>(
+    private val editor: GridEditor<T>,
+    private val seen: (GridEditorOptions) -> Unit
+): GridEditor<T> {
+    public override val composing: Boolean get() = editor.composing
+    public override val holdsFocus: Boolean get() = editor.holdsFocus
+    public override fun candidate(): GridCandidate<T> = editor.candidate()
+    public override fun importText(text: String): String? = editor.importText(text)
+    public override fun cancelComposition() {
+        editor.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        seen(options)
+        return editor.view(options)
+    }
+}
+
+internal class GridControlScenarios(private val probe: ControlProbe) {
+    private var focus: FocusHandle? = None
+    private var options: GridEditorOptions? = None
+    private var staleOptions: GridEditorOptions? = None
+    private var flag: GridBooleanEditor? = None
+    private var labelledFlag: GridBooleanEditor? = None
+    private var labelledFocus: FocusHandle? = None
+    private val labels =
+        GridEditorLabels(
+            invalidDate = "Use an ISO date",
+            yes = "Enabled",
+            no = "Disabled",
+            calendarName = "Choose a date",
+            calendarLocale =
+                CalendarLocale(previousMonth = "Previous page", nextMonth = "Next page")
+        )
+    private var date: GridDateEditor? = None
+    private var choice: GridChoiceEditor<Long>? = None
+    private var submitted = 0
+    private val choices =
+        [
+            Choice(ViewKey.Text("one"), 1L, "同名"),
+            Choice(ViewKey.Text("disabled"), 2L, "禁用", false),
+            Choice(ViewKey.Text("three"), 3L, "同名")
+        ]
+    private val focused: Boolean get() = focus?.hasFocus ?: false
+    val diagnostic: String get() =
+        f"focus=${focused}, dateOpen=${date?.picker?.isOpen ?: false}, dateHold=${
+            date?.holdsFocus ?: false
+        }, choiceOpen=${choice?.popup?.isOpen ?: false}, choiceHold=${choice?.holdsFocus ?: false}"
+    private fun popupFocused(column: String): Boolean =
+        !focused && probe.handle.focusedCell == Some(probe.address(2L, column))
+    private fun row(): ControlRow = probe.data.rowAt(probe.data.indexOfKey(ViewKey.Number(2L))!!)
+    private fun <T> track(editor: GridEditor<T>): GridEditor<T> {
+        val control = this
+        return TrackedControl(
+            editor,
+            {
+                options ->
+                control.focus = Some(options.focus)
+                control.options = Some(options)
+            }
+        )
+    }
+    fun columns(): Array<GridColumn<ControlRow>> {
+        val controls = this
+        val probe = this.probe
+        val size = TableColumnSize(GridTrack.Fixed(200.0))
+        return [
+            gridColumn<ControlRow, Boolean>(
+                GridColumnId("flag"),
+                "Flag",
+                { row -> row.flag },
+                gridBooleanValues(),
+                size,
+                edit =
+                    Some(
+                        gridEdit<ControlRow, Boolean>(
+                            {
+                                value ->
+                                val editor = gridBooleanEditor(value, controls.labels)
+                                controls.flag = Some(editor)
+                                controls.track(editor)
+                            },
+                            {
+                                change, completion ->
+                                val row = change.row
+                                probe.submit(
+                                    ControlRow(
+                                        row.id,
+                                        row.name,
+                                        row.amount,
+                                        change.value,
+                                        row.date,
+                                        row.choice
+                                    ),
+                                    completion
+                                )
+                            }
+                        )
+                    )
+            ),
+            gridColumn<ControlRow, LocalDate>(
+                GridColumnId("date"),
+                "Date",
+                { row -> row.date },
+                gridDateValues(),
+                size,
+                edit =
+                    Some(
+                        gridEdit<ControlRow, LocalDate>(
+                            {
+                                value ->
+                                val editor = gridDateEditor(value, controls.labels)
+                                controls.date = Some(editor)
+                                controls.track(editor)
+                            },
+                            {
+                                change, completion ->
+                                val row = change.row
+                                probe.submit(
+                                    ControlRow(
+                                        row.id,
+                                        row.name,
+                                        row.amount,
+                                        row.flag,
+                                        change.value,
+                                        row.choice
+                                    ),
+                                    completion
+                                )
+                            },
+                            validate =
+                                {
+                                    _,
+                                    date -> if (date < LocalDate(2026, 11, 20))
+                                        Some("日期太早")
+                                    else
+                                        None
+                                }
+                        )
+                    )
+            ),
+            gridColumn<ControlRow, Long>(
+                GridColumnId("choice"),
+                "Choice",
+                { row -> row.choice },
+                gridLongValues(),
+                size,
+                edit =
+                    Some(
+                        gridEdit<ControlRow, Long>(
+                            {
+                                value ->
+                                val editor =
+                                    gridChoiceEditor(
+                                        value,
+                                        controls.choices,
+                                        labels = controls.labels
+                                    )
+                                controls.choice = Some(editor)
+                                controls.track(editor)
+                            },
+                            {
+                                change, completion ->
+                                val row = change.row
+                                probe.submit(
+                                    ControlRow(
+                                        row.id,
+                                        row.name,
+                                        row.amount,
+                                        row.flag,
+                                        row.date,
+                                        change.value
+                                    ),
+                                    completion
+                                )
+                            }
+                        )
+                    )
+            )
+        ]
+    }
+    private fun key(active: ActiveApplication, next: Int, code: Int, shift: Boolean = false) {
+        probe.next(active, next) {
+            assertTrue(sendSurfaceKey(probe.window!!, code, true, shift = shift))
+            assertTrue(sendSurfaceKey(probe.window!!, code, false, shift = shift))
+        }
+    }
+    fun advance(active: ActiveApplication) {
+        val handle = probe.handle
+        when (probe.phase) {
+            case 0 -> {
+                probe.model.replaceColumns(columns())
+                probe.phase = 1
+            }
+            case 1 -> {
+                assertTrue(handle.beginEdit(probe.address(2L, "flag")))
+                probe.phase = 2
+            }
+            case 2 -> if (focused) {
+                labelledFlag = flag
+                labelledFocus = focus
+                probe.labels.value =
+                    GridLabels(saving = "Saving changes", error = { text -> f"Problem: ${text}" })
+                key(active, 3, 49)
+            }
+            case 3 -> {
+                assertTrue(flag!! === labelledFlag!!)
+                assertTrue(focus!! === labelledFocus!!)
+                assertTrue(focused)
+                assertEquals("Saving changes", options!!.savingText)
+                assertTrue(flag!!.value.value)
+                assertFalse(row().flag)
+                key(active, 4, 36)
+            }
+            case 4 -> {
+                assertEquals(None, handle.editingCell)
+                assertTrue(row().flag)
+                assertTrue(handle.beginEdit(probe.address(2L, "flag")))
+                probe.phase = 5
+            }
+            case 5 -> if (focused) {
+                key(active, 6, 49)
+            }
+            case 6 -> {
+                assertFalse(flag!!.value.value)
+                key(active, 7, 53)
+            }
+            case 7 -> {
+                assertEquals(None, handle.editingCell)
+                assertTrue(row().flag)
+                assertTrue(handle.beginEdit(probe.address(2L, "date")))
+                probe.phase = 8
+            }
+            case 8 -> if (focused) {
+                date!!.draft.editor.replaceAll("2026-11-21")
+                key(active, 9, 36)
+            }
+            case 9 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(LocalDate(2026, 11, 21), row().date)
+                submitted = probe.submissions
+                assertTrue(handle.beginEdit(probe.address(2L, "date")))
+                probe.phase = 10
+            }
+            case 10 -> if (focused) {
+                key(active, 11, 36)
+            }
+            case 11 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(submitted, probe.submissions)
+                when (handle.pasteCell(probe.address(2L, "date"), "")) {
+                    case Rejected(_) -> {}
+                    else -> fail(Some("empty date should be rejected"))
+                }
+                probe.phase = 12
+            }
+            case 12 -> if (focused) {
+                assertEquals("", date!!.draft.editor.text)
+                assertEquals(Some("Use an ISO date"), handle.editError)
+                assertEquals(Some("Problem: Use an ISO date"), options!!.error)
+                date!!.draft.editor.replaceAll("2026-02-30")
+                key(active, 13, 36)
+            }
+            case 13 -> {
+                assertEquals(Some(probe.address(2L, "date")), handle.editingCell)
+                assertEquals(Some("Use an ISO date"), date!!.draft.error)
+                date!!.draft.editor.replaceAll("2026-11-19")
+                key(active, 14, 36)
+            }
+            case 14 -> {
+                assertEquals(Some("日期太早"), handle.editError)
+                assertEquals(Some("Problem: 日期太早"), options!!.error)
+                assertEquals(LocalDate(2026, 11, 21), row().date)
+                date!!.draft.editor.replaceAll("2026-12-01")
+                key(active, 15, 36)
+            }
+            case 15 -> {
+                assertEquals(None, handle.editingCell)
+                assertEquals(LocalDate(2026, 12, 1), row().date)
+                assertTrue(handle.beginEdit(probe.address(2L, "date")))
+                probe.phase = 16
+            }
+            case 16 -> if (focused) {
+                assertTrue(date!!.picker.openCalendar())
+                probe.phase = 17
+            }
+            case 17 -> if (date!!.picker.isOpen && popupFocused("date")) {
+                key(active, 18, 53)
+            }
+            case 18 -> if (!date!!.picker.isOpen && focused) {
+                assertEquals(Some(probe.address(2L, "date")), handle.editingCell)
+                key(active, 19, 53)
+            }
+            case 19 -> {
+                assertTrue(handle.editingCell == None, Some(diagnostic))
+                assertTrue(handle.beginEdit(probe.address(2L, "choice")))
+                probe.phase = 20
+            }
+            case 20 -> if (focused) {
+                key(active, 21, 36)
+            }
+            case 21 -> if (choice!!.popup.isOpen && popupFocused("choice")) {
+                key(active, 22, 125)
+            }
+            case 22 -> key(active, 23, 36)
+            case 23 -> if (handle.editingCell == None) {
+                assertEquals(3L, row().choice)
+                assertEquals("row-2", row().name)
+                assertEquals(2L, row().amount)
+                assertTrue(row().flag)
+                assertEquals(LocalDate(2026, 12, 1), row().date)
+                submitted = probe.submissions
+                assertTrue(handle.beginEdit(probe.address(2L, "choice")))
+                probe.phase = 24
+            }
+            case 24 -> if (focused) {
+                key(active, 25, 36)
+            }
+            case 25 -> if (choice!!.popup.isOpen && popupFocused("choice")) {
+                key(active, 26, 36)
+            }
+            case 26 -> if (handle.editingCell == None) {
+                assertEquals(submitted, probe.submissions)
+                assertTrue(handle.beginEdit(probe.address(2L, "choice")))
+                probe.phase = 27
+            }
+            case 27 -> if (focused) {
+                key(active, 28, 36)
+            }
+            case 28 -> if (choice!!.popup.isOpen && popupFocused("choice")) {
+                key(active, 29, 53)
+            }
+            case 29 -> if (!choice!!.popup.isOpen && focused) {
+                assertEquals(Some(probe.address(2L, "choice")), handle.editingCell)
+                key(active, 30, 53)
+            }
+            case 30 -> {
+                assertEquals(None, handle.editingCell)
+                assertTrue(handle.beginEdit(probe.address(2L, "choice")))
+                probe.phase = 31
+            }
+            case 31 -> if (focused) {
+                key(active, 32, 36)
+            }
+            case 32 -> if (choice!!.popup.isOpen && popupFocused("choice")) {
+                key(active, 33, 48)
+            }
+            case 33 -> {
+                if (!handle.isPending && handle.editingCell == None) {
+                    assertEquals(Some(probe.address(3L, "flag")), handle.focusedCell)
+                    assertTrue(handle.beginEdit(probe.address(2L, "flag")))
+                    probe.phase = 34
+                }
+            }
+            case 34 -> if (focused) {
+                probe.defer = true
+                key(active, 35, 49)
+            }
+            case 35 -> {
+                assertFalse(flag!!.value.value)
+                assertTrue(row().flag)
+                assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+                probe.phase = 36
+            }
+            case 36 -> {
+                assertTrue(handle.isSubmitting)
+                assertTrue(options!!.submitting)
+                assertEquals("Saving changes", options!!.savingText)
+                assertFalse(focused)
+                assertTrue(probe.completion!!.reject("请重试"))
+                probe.phase = 37
+            }
+            case 37 -> if (focused) {
+                assertFalse(handle.isSubmitting)
+                assertFalse(flag!!.value.value)
+                assertEquals(Some("请重试"), handle.editError)
+                assertEquals(Some("Problem: 请重试"), options!!.error)
+                assertTrue(row().flag)
+                probe.defer = false
+                assertEquals(GridEditAttempt.Committed, handle.commitEdit())
+                probe.phase = 38
+            }
+            case 38 -> if (handle.editingCell == None) {
+                assertFalse(row().flag)
+                assertTrue(handle.beginEdit(probe.address(2L, "date")))
+                probe.phase = 39
+            }
+            case 39 -> if (focused) {
+                assertTrue(date!!.picker.openCalendar())
+                probe.phase = 40
+            }
+            case 40 -> if (date!!.picker.isOpen && popupFocused("date")) {
+                key(active, 41, 124)
+            }
+            case 41 -> key(active, 42, 36)
+            case 42 -> if (handle.editingCell == None) {
+                assertEquals(LocalDate(2026, 12, 2), row().date)
+                assertTrue(handle.beginEdit(probe.address(2L, "choice")))
+                probe.phase = 43
+            }
+            case 43 -> if (focused) {
+                key(active, 44, 36)
+            }
+            case 44 -> if (choice!!.popup.isOpen && popupFocused("choice")) {
+                choice!!.value.value = 1L
+                assertTrue(probe.outside.requestFocus())
+                probe.phase = 45
+            }
+            case 45 -> if (probe.outside.hasFocus && handle.editingCell == None) {
+                assertEquals(1L, row().choice)
+                assertTrue(handle.beginEdit(probe.address(2L, "choice")))
+                probe.phase = 46
+            }
+            case 46 -> if (focused) {
+                key(active, 47, 36)
+            }
+            case 47 -> if (choice!!.popup.isOpen && popupFocused("choice")) {
+                key(active, 48, 48, shift = true)
+            }
+            case 48 -> if (!handle.isPending && handle.editingCell == None) {
+                assertEquals(Some(probe.address(2L, "date")), handle.focusedCell)
+                assertTrue(handle.beginEdit(probe.address(2L, "flag")))
+                probe.phase = 49
+            }
+            case 49 -> if (focused) {
+                staleOptions = options
+                assertTrue(handle.cancelEdit())
+                assertTrue(handle.beginEdit(probe.address(2L, "date")))
+                probe.phase = 50
+            }
+            case 50 -> {
+                if (focused) {
+                    submitted = probe.submissions
+                    staleOptions!!.onSubmit()
+                    staleOptions!!.onCancel()
+                    staleOptions!!.onEdited()
+                    staleOptions!!.onFocusSettled()
+                    assertEquals(Some(probe.address(2L, "date")), handle.editingCell)
+                    assertEquals(submitted, probe.submissions)
+                    assertTrue(handle.cancelEdit())
+                    probe.finished = true
+                    active.requestExit()
+                }
+            }
+            else -> {}
+        }
+    }
+}

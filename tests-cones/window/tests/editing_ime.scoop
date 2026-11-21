@@ -1,0 +1,124 @@
+package scoop.grid.tests.window
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.window.saveNativeInputSource
+import scoop.tests.window.restoreNativeInputSource
+import scoop.window.ActiveApplication
+
+/** Exercises the installed system Pinyin service; it does not fabricate preedit strings. */
+internal class GridSystemImeProbe(private val probe: GridEditingProbe) {
+    private var source: Ptr<Unit>? = None
+    private val codes = [45, 34, 4, 0, 31]
+    private var index = 0L
+    private var committed = ""
+    fun close() {
+        when (source) {
+            case Some(val saved) -> {
+                source = None
+                @Unsafe
+                {
+                    assertEquals(0, restoreNativeInputSource(saved))
+                }
+            }
+            case None -> {}
+        }
+    }
+    private fun typeNext(active: ActiveApplication, phase: Int): Boolean {
+        if (index == codes.size)
+            return false
+        val code = codes[index]
+        index += 1L
+        probe.next(active, phase) { assertEquals(0, gridImeKey(probe.window!!, code)) }
+        return true
+    }
+    fun advance(active: ActiveApplication) {
+        val window = probe.window!!
+        when (probe.phase) {
+            case 34 -> {
+                assertTrue(probe.handle.beginEdit(probe.address(1L, "name")))
+                probe.phase = 35
+            }
+            case 35 -> if (probe.text?.focused ?: false) {
+                probe.text!!.text.state.replaceAll("")
+                @Unsafe
+                {
+                    source =
+                        Some(saveNativeInputSource() ?: fail(Some("cannot retain input source")))
+                }
+                probe.next(active, 36) { assertEquals(0, gridSelectPinyin(window)) }
+            }
+            case 36 -> {
+                assertTrue(gridPinyinSelected(window))
+                index = 0L
+                typeNext(active, 37)
+            }
+            case 37 -> {
+                if (typeNext(active, 37))
+                    return
+                if (!probe.text!!.composing)
+                    return
+                assertTrue(gridPinyinSelected(window))
+                assertTrue(gridNativeDocument(window, probe.text!!.text.state))
+                assertEquals(GridEditAttempt.Composing, probe.handle.commitEdit())
+                probe.next(active, 38) { assertEquals(0, gridImeKey(window, 53)) }
+            }
+            case 38 -> {
+                if (probe.text!!.composing)
+                    return
+                assertEquals("", probe.text!!.text.state.text)
+                assertEquals(Some(probe.address(1L, "name")), probe.handle.editingCell)
+                assertTrue(probe.handle.cancelEdit())
+                probe.phase = 39
+            }
+            case 39 -> {
+                assertEquals(None, probe.handle.editingCell)
+                assertTrue(probe.handle.beginEdit(probe.address(1L, "name")))
+                probe.phase = 40
+            }
+            case 40 -> if (probe.text?.focused ?: false) {
+                probe.text!!.text.state.replaceAll("")
+                probe.next(active, 41) { assertEquals(0, gridSelectPinyin(window)) }
+            }
+            case 41 -> {
+                assertTrue(gridPinyinSelected(window))
+                index = 0L
+                typeNext(active, 42)
+            }
+            case 42 -> {
+                if (typeNext(active, 42))
+                    return
+                if (!probe.text!!.composing)
+                    return
+                assertEquals(GridEditAttempt.Composing, probe.handle.commitEdit())
+                probe.next(active, 43) { assertEquals(0, gridImeKey(window, 49)) }
+            }
+            case 43 -> {
+                if (probe.text!!.composing)
+                    return
+                val value = probe.text!!.text.state.text
+                var cjk = false
+                for (character in value)
+                    if (character.code >= 13312 && character.code <= 40959)
+                        cjk = true
+                assertTrue(cjk, Some("system Pinyin did not commit Chinese text: " + value))
+                assertTrue(gridNativeDocument(window, probe.text!!.text.state))
+                committed = value
+                probe.next(active, 44) { assertEquals(0, gridImeKey(window, 36)) }
+            }
+            case 44 -> {
+                if (probe.handle.editingCell == None) {
+                    assertEquals(committed, nativeGridData(probe.model.result.rows.rowAt(0L)).name)
+                    assertEquals(
+                        GridEditEndReason.Accepted,
+                        probe.ends[probe.ends.size - 1L].reason
+                    )
+                    close()
+                    probe.phase = 45
+                    probe.frame!!.requestFrame()
+                }
+            }
+            else -> {}
+        }
+    }
+}

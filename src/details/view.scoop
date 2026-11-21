@@ -1,0 +1,105 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.max
+import scoop.surface.*
+import scoop.ui.*
+import scoop.window.*
+import scoop.window.accessibility.*
+
+internal class GridDetailProps<Row>(
+    val info: GridDetailRow,
+    val index: Long,
+    val session: GridSession<Row>,
+    val appearance: GridAppearance,
+    val enabled: Boolean
+)
+
+/** Full-width ordinary content shares the body's measured extent and accepted reveal. */
+internal class GridDetailView<Row>(
+    private val props: Props<GridDetailProps<Row>>,
+    scope: ComponentScope
+): Element<GridCellClip>(scope) {
+    private val input = scope.input
+    private val semantics = scope.semantics(SemanticRole.Group)
+    private val area = scope.createArea(focusable = true)
+    private val focus = scope.focusTarget(area, FocusOptions(order = Int.MAX_VALUE))
+    private val group = scope.focusScope()
+    init {
+        semantics.bindFocus(Some(focus))
+        scope.routeChildren(area)
+        scope.resource {
+            area.scope.addDefaultAction {
+                context, event ->
+                val key =
+                    when (event) {
+                        case Keyboard(val value) -> value
+                        else -> return@addDefaultAction
+                    }
+                if (gridPlainKey(key) && key.logicalKey == LogicalKey.Named(NamedKey.Escape)) {
+                    if (props.value.session.detailActions.restore(props.value.info.parent))
+                        context.consume()
+                }
+            }
+        }
+    }
+    public override fun onMount() {
+        props.value.session.detailActions.register(props.value.info.parent, input)
+    }
+    public override fun onUnmount() {
+        props.value.session.detailActions.remove(props.value.info.parent, input)
+    }
+    public override fun update(): UiInvalidation {
+        area.scope.enabled = props.value.enabled
+        scope.routeSemanticsChildren(Some(semantics))
+        semantics.update(
+            SemanticProperties(name = Some(props.value.info.label), enabled = props.value.enabled)
+        )
+        return UiInvalidation.Layout
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        GridCellClip
+    > {
+        val plan = context.input<GridMeasurePlan>()
+        val padding = 12.0 * props.value.appearance.density
+        val width = max(0.0, plan.columns.viewport - padding * 2.0)
+        val child = context.measureChild(0L, Constraints(minWidth = width, maxWidth = Some(width)))
+        val height = max(plan.rows.estimate, child.size.height + padding * 2.0)
+        val x = plan.scroll.presentationOffset.x - plan.scroll.snapshot.offset.x
+        context.placeChild(0L, Point(x + padding, padding))
+        val row = plan.bands.box(props.value.index, plan.scroll.presentationOffset.y, height)
+        return LayoutResult(
+            LayoutMetrics(constraints.constrain(Size(plan.columns.total, height))),
+            GridCellClip(
+                Rect(x, row.clipTop, plan.columns.viewport, row.clipHeight),
+                Rect(
+                    0.0,
+                    plan.headerHeight + row.regionTop,
+                    plan.columns.viewport,
+                    row.regionHeight
+                ),
+                ScrollAxes.Vertical,
+                plan.viewport,
+                fixedRow = row.fixed
+            )
+        )
+    }
+    public override fun scene(context: SceneContext, clip: GridCellClip) {
+        context.withScrollReveal(clip.viewport, clip.region, clip.axes) {
+            body -> if (clip.fixedRow)
+                body.withScrollReveal(clip.viewport, clip.region, ScrollAxes.Horizontal) {
+                    fixed -> present(fixed, clip.bounds)
+                }
+            else
+                present(body, clip.bounds)
+        }
+    }
+    private fun present(context: SceneContext, clip: Rect) {
+        val palette = props.value.appearance.theme.tokens.palette
+        context.clipRect(clip)
+        context.draw { paint -> paint.canvas.drawRect(clip, Paint(palette.muted.background)) }
+        context.place(area, clip)
+        context.semantics(semantics, clip)
+        context.children()
+    }
+}

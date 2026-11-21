@@ -1,0 +1,55 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class DetailSource(public override val count: Long): TableSource<Long> {
+    var reads = 0L
+    var lookups = 0L
+    var onLookup: (() -> Unit)? = None
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun rowAt(index: Long): Long {
+        reads += 1L
+        return index
+    }
+    public override fun indexOfKey(key: ViewKey): Long? {
+        lookups += 1L
+        val action = onLookup
+        onLookup = None
+        action?.invoke()
+        return when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(value)
+            else
+                None
+            else -> None
+        }
+    }
+}
+
+internal fun detailColumns(): Array<GridColumn<Long>> =
+    [
+        gridColumn<Long, Long>(
+            GridColumnId("id"),
+            "ID",
+            { value -> value },
+            gridLongValues(),
+            cell = Some { _ -> fail(Some("detail model built a cell")) },
+            aggregations = [gridSumLongAggregation()]
+        ),
+        gridColumn<Long, String>(
+            GridColumnId("text"),
+            "Text",
+            { value -> f"记录 ${value}" },
+            gridTextValues()
+        )
+    ]
+
+internal fun <Row> detailDefinition(): GridDetails<Row> =
+    GridDetails({ _ -> fail(Some("detail model built its content")) }, label = "Record details")
+
+internal fun detailAddress(value: Long): GridCellAddress =
+    GridCellAddress(ViewKey.Number(value), GridColumnId("id"))
+
+internal fun detailKey(value: Long): GridRowKey = GridRowKey.Detail(ViewKey.Number(value))

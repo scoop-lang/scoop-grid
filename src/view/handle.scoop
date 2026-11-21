@@ -1,0 +1,285 @@
+package scoop.grid
+
+import scoop.platform.concurrent.currentThreadId
+import scoop.ui.*
+
+public enum GridColumnActionResult {
+    Applied, Rejected(String)
+}
+
+public enum GridRowActionResult {
+    Applied, Rejected(String)
+}
+
+public enum GridCopyResult {
+    Copied, Rejected(String), Unavailable(GridDataUnavailableException)
+}
+
+public struct GridCellAddress(val row: GridRowKey, val column: GridColumnId): Equals<
+    GridCellAddress
+>, Hash {
+    public constructor(row: ViewKey, column: GridColumnId): this(GridRowKey.Data(row), column) {}
+    public override operator fun equals(other: GridCellAddress): Boolean =
+        row == other.row && column == other.column
+    public override fun hash(): Long = row.hash() xor column.hash()
+}
+
+public class DataGridHandle public constructor() {
+    private val thread = currentThreadId()
+    private val guard = state(Unit)
+    private val binding = state<GridMount?>(None)
+    private var target: GridMount?
+    get() = binding.value
+    set(value) {
+        binding.value = value
+    }
+    private fun checkThread() {
+        if (currentThreadId() != thread)
+            throw IllegalStateException(Some("grid handle used from another thread"))
+    }
+    public val isAttached: Boolean get() {
+        checkThread();
+        return target?.active ?: false
+    }
+    public val isPending: Boolean get() {
+        checkThread();
+        return target?.pending ?: false
+    }
+    public val focusedCell: GridCellAddress? get() {
+        checkThread();
+        return target?.focused ?: None
+    }
+    public val pendingCell: GridCellAddress? get() {
+        checkThread();
+        return target?.requested ?: None
+    }
+    public val pendingPosition: GridPositionTarget? get() {
+        checkThread()
+        return target?.pendingPosition ?: None
+    }
+    public val searchesLoadedRows: Boolean get() {
+        checkThread()
+        return target?.searchesLoadedRows ?: false
+    }
+    public fun focusPosition(position: GridExternalPosition, column: GridColumnId): Boolean {
+        guard.checkMutation()
+        return target?.focusPosition(position, column) ?: false
+    }
+    public val editingCell: GridCellAddress? get() {
+        checkThread()
+        return target?.editingCell ?: None
+    }
+    public val editError: String? get() {
+        checkThread()
+        return target?.editError ?: None
+    }
+    public val isSubmitting: Boolean get() {
+        checkThread()
+        return target?.submitting ?: false
+    }
+    public val cellRange: GridCellRange? get() {
+        checkThread()
+        return target?.cellRange ?: None
+    }
+    public fun setCellRange(value: GridCellRange?): Boolean {
+        guard.checkMutation()
+        return target?.setCellRange(value) ?: false
+    }
+    public fun clearCellRange(): Boolean = setCellRange(None)
+    public fun saveViewState(
+        includePosition: Boolean = true,
+        includeFocus: Boolean = true
+    ): GridViewState? {
+        checkThread()
+        return target?.saveViewState(includePosition, includeFocus) ?: None
+    }
+    public fun restoreViewState(
+        value: GridViewState,
+        restoreFocus: Boolean = false
+    ): GridRestoreResult {
+        guard.checkMutation()
+        return target?.restoreViewState(value, restoreFocus) ?: GridRestoreResult.Rejected("网格未挂载")
+    }
+    public fun copyCells(
+        fallback: GridCellAddress? = None,
+        includeHeaders: Boolean = false
+    ): GridCopyResult {
+        guard.checkMutation()
+        return target?.copyCells(fallback, includeHeaders) ?: GridCopyResult.Rejected("网格未挂载")
+    }
+    public fun findCell(
+        text: String,
+        after: GridCellAddress? = None,
+        backwards: Boolean = false,
+        matchCase: Boolean = false,
+        wrap: Boolean = true
+    ): GridFindResult {
+        guard.checkMutation()
+        return target?.findCell(text, after, backwards, matchCase, wrap) ?:
+            GridFindResult.Rejected("网格未挂载")
+    }
+    public fun beginEdit(address: GridCellAddress): Boolean {
+        guard.checkMutation()
+        gridRequire(
+            address.row.dataKey != Some(ViewKey.Position),
+            "grid editing requires an explicit row key"
+        )
+        return target?.beginEdit(address) ?: false
+    }
+    public fun commitEdit(): GridEditAttempt {
+        guard.checkMutation()
+        return target?.commitEdit() ?: GridEditAttempt.NoEdit
+    }
+    public fun cancelEdit(): Boolean {
+        guard.checkMutation()
+        return target?.cancelEdit() ?: false
+    }
+    public fun pasteCell(address: GridCellAddress, text: String): GridPasteResult {
+        guard.checkMutation()
+        gridRequire(
+            address.row.dataKey != Some(ViewKey.Position),
+            "grid pasting requires an explicit row key"
+        )
+        return target?.pasteCell(address, text) ?: GridPasteResult.Rejected("网格未挂载")
+    }
+    public fun focusCell(address: GridCellAddress): Boolean {
+        guard.checkMutation()
+        gridRequire(
+            address.row.dataKey != Some(ViewKey.Position),
+            "grid focus requires an explicit row key"
+        )
+        return target?.focus(address) ?: false
+    }
+    public fun cancelFocus() {
+        guard.checkMutation()
+        target?.cancel()
+    }
+    public fun setRowSelected(
+        key: ViewKey,
+        value: Boolean,
+        extend: Boolean = false
+    ): GridRowActionResult {
+        guard.checkMutation()
+        gridRequire(key != ViewKey.Position, "row selection requires an explicit key")
+        return target?.setRowSelected(key, value, extend) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun setExpanded(key: GridRowKey, value: Boolean): GridRowActionResult {
+        guard.checkMutation()
+        return target?.setExpanded(key, value) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun setDetailExpanded(key: ViewKey, value: Boolean): GridRowActionResult {
+        guard.checkMutation()
+        return target?.setDetailExpanded(key, value) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun focusDetail(key: ViewKey): Boolean {
+        guard.checkMutation()
+        return target?.focusDetail(key) ?: false
+    }
+    public fun selectGroupRows(path: GridGroupPath, value: Boolean): GridRowActionResult {
+        guard.checkMutation()
+        return target?.selectGroupRows(path, value) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun selectPageRows(value: Boolean): GridRowActionResult {
+        guard.checkMutation()
+        return target?.selectPageRows(value) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun clearRowSelection(): GridRowActionResult {
+        guard.checkMutation()
+        return target?.clearRowSelection() ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun pinRow(key: ViewKey, pin: GridRowPin): GridRowActionResult {
+        guard.checkMutation()
+        return target?.pinRow(key, pin) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun setColumnState(value: GridColumnState): GridColumnActionResult {
+        guard.checkMutation()
+        return target?.setColumnState(value) ?: GridColumnActionResult.Rejected("网格未挂载")
+    }
+    public fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult {
+        guard.checkMutation()
+        return target?.moveColumn(id, index) ?: GridColumnActionResult.Rejected("网格未挂载")
+    }
+    public fun moveColumnGroup(id: GridColumnGroupId, index: Long): GridColumnActionResult {
+        guard.checkMutation()
+        return target?.moveColumnGroup(id, index) ?: GridColumnActionResult.Rejected("网格未挂载")
+    }
+    public fun fitColumns(): GridColumnActionResult {
+        guard.checkMutation()
+        return target?.fitColumns() ?: GridColumnActionResult.Rejected("网格未挂载")
+    }
+    public fun fitColumnToContent(id: GridColumnId): GridColumnFit {
+        guard.checkMutation()
+        return target?.fitColumnToContent(id) ?: gridRejectedColumnFit("网格未挂载")
+    }
+    internal fun usesColumns(values: Array<GridColumnState>): Boolean {
+        checkThread()
+        return when (val current = target?.columnStates ?: None) {
+            case Some(val states) -> states === values
+            case None -> false
+        }
+    }
+    internal fun bind(value: GridMount) {
+        checkThread()
+        when (target) {
+            case Some(val old) -> gridRequire(
+                old === value || !old.active,
+                "grid handle already has a mount"
+            )
+            case None -> {}
+        }
+        target = Some(value)
+    }
+    internal fun unbind(value: GridMount) {
+        checkThread()
+        when (target) {
+            case Some(val old) -> if (old === value)
+                target = None
+            case None -> {}
+        }
+    }
+}
+
+internal interface GridMount {
+    val active: Boolean
+    val pending: Boolean
+    val focused: GridCellAddress?
+    val requested: GridCellAddress?
+    val pendingPosition: GridPositionTarget?
+    val searchesLoadedRows: Boolean
+    val editingCell: GridCellAddress?
+    val editError: String?
+    val submitting: Boolean
+    val cellRange: GridCellRange?
+    val columnStates: Array<GridColumnState>?
+    fun focus(address: GridCellAddress): Boolean
+    fun focusPosition(position: GridExternalPosition, column: GridColumnId): Boolean
+    fun cancel()
+    fun beginEdit(address: GridCellAddress): Boolean
+    fun commitEdit(): GridEditAttempt
+    fun cancelEdit(): Boolean
+    fun pasteCell(address: GridCellAddress, text: String): GridPasteResult
+    fun setCellRange(value: GridCellRange?): Boolean
+    fun saveViewState(includePosition: Boolean, includeFocus: Boolean): GridViewState?
+    fun restoreViewState(value: GridViewState, restoreFocus: Boolean): GridRestoreResult
+    fun copyCells(fallback: GridCellAddress?, includeHeaders: Boolean): GridCopyResult
+    fun findCell(
+        text: String,
+        after: GridCellAddress?,
+        backwards: Boolean,
+        matchCase: Boolean,
+        wrap: Boolean
+    ): GridFindResult
+    fun setColumnState(value: GridColumnState): GridColumnActionResult
+    fun moveColumn(id: GridColumnId, index: Long): GridColumnActionResult
+    fun moveColumnGroup(id: GridColumnGroupId, index: Long): GridColumnActionResult
+    fun fitColumns(): GridColumnActionResult
+    fun fitColumnToContent(id: GridColumnId): GridColumnFit
+    fun pinRow(key: ViewKey, pin: GridRowPin): GridRowActionResult
+    fun setRowSelected(key: ViewKey, value: Boolean, extend: Boolean): GridRowActionResult
+    fun setExpanded(key: GridRowKey, value: Boolean): GridRowActionResult
+    fun setDetailExpanded(key: ViewKey, value: Boolean): GridRowActionResult
+    fun focusDetail(key: ViewKey): Boolean
+    fun selectGroupRows(path: GridGroupPath, value: Boolean): GridRowActionResult
+    fun selectPageRows(value: Boolean): GridRowActionResult
+    fun clearRowSelection(): GridRowActionResult
+}

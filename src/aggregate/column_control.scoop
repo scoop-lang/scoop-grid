@@ -1,0 +1,66 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.ThemeSource
+
+private enum GridAggregationChoice: Equals<GridAggregationChoice> {
+    Off, Operation(GridAggregateId)
+    public override operator fun equals(other: GridAggregationChoice): Boolean =
+        when ((this, other)) {
+            case(Off, Off) -> true
+            case(Operation(val a), Operation(val b)) -> a == b
+            else -> false
+        }
+}
+
+internal fun <Row> gridColumnAggregationControl(
+    model: DataGridState<Row>,
+    column: GridColumn<Row>,
+    enabled: Boolean,
+    labels: GridColumnsLabels,
+    fonts: FontCollection?,
+    theme: ThemeSource?,
+    choose: (GridAggregateId?) -> Unit
+): View {
+    val choices = ArrayList<Choice<GridAggregationChoice>>()
+    choices.add(Choice(ViewKey.Number(0L), GridAggregationChoice.Off, labels.noAggregation))
+    for (operation in column.aggregations)
+        choices.add(
+            Choice(
+                ViewKey.Text(operation.id.value),
+                GridAggregationChoice.Operation(operation.id),
+                operation.title
+            )
+        )
+    return select(
+        binding<GridAggregationChoice?>(
+            {
+                -> Some(
+                    when (model.aggregation(column.id)) {
+                        case Some(val id) -> GridAggregationChoice.Operation(id)
+                        case None -> GridAggregationChoice.Off
+                    }
+                )
+            },
+            {
+                value -> when (value) {
+                    case Some(val choice) -> when (choice) {
+                        case Off -> choose(None)
+                        case Operation(val id) -> choose(Some(id))
+                    }
+                    case None -> {}
+                }
+            }
+        ),
+        choices.toArray()
+    ) {
+        key = ViewKey.Text(f"grid-columns-aggregation-${column.id.value}")
+        this.enabled = enabled
+        this.fonts = fonts
+        this.theme = theme
+        semantics =
+            gridColumnControl(column.id, "aggregation", labels.aggregationName(column.title))
+    }
+}

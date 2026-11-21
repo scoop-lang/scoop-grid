@@ -1,0 +1,165 @@
+package scoop.grid
+
+import scoop.surface.*
+import scoop.ui.*
+import scoop.window.*
+
+/** Orthogonal candidates share the cell area; the first claim cancels its click. */
+internal class GridCellDrag<Row>(
+    private val scope: ComponentScope,
+    private val area: InputArea,
+    private val focus: FocusHandle,
+    private val value: () -> GridCellProps<Row>
+) {
+    private var direct = false
+    private var contact = false
+    private var anchor: GridCellAddress? = None
+    private var move: GridRangeMove<Row>? = None
+    private val moving: Boolean get() =
+        when (move) {
+            case Some(_) -> true
+            case None -> false
+        }
+    // Observe the press before either drag candidate, including a direct target.
+    private val presses =
+        scope.resource {
+            area.scope.addEventHandler {
+                context,
+                event -> when (event) {
+                    case Pointer(
+                        InputPointerEvent.Button(
+                            val pointer,
+                            MouseButton.Left,
+                            ElementState.Pressed,
+                            _
+                        )
+                    ) ->
+                    pressed(context, pointer.state.modifiers, false)
+                    case Contact(InputContactEvent.Began(val input)) -> pressed(
+                        context,
+                        input.pointer.modifiers,
+                        true
+                    )
+                    else -> {}
+                }
+            }
+        }
+    private val horizontal =
+        scope.drag(
+            area,
+            options(DragAxis.Horizontal),
+            { _ -> accepts() },
+            { event -> receive(event) }
+        )
+    private val vertical =
+        scope.drag(
+            area,
+            options(DragAxis.Vertical),
+            { _ -> accepts() },
+            { event -> receive(event) }
+        )
+
+    init {
+        scope.resource {
+            area.scope.addEventHandler {
+                context,
+                event -> if (context.phase == RoutedPhase.Notification) {
+                    when (event) {
+                        case FocusChanged(false) -> cancel()
+                        else -> {}
+                    }
+                }
+            }
+        }
+        scope.resource {
+            area.scope.addDefaultAction {
+                context,
+                event -> when (event) {
+                    case Keyboard(val key) -> {
+                        if (
+                            moving &&
+                                key.state ==
+                                ElementState.Pressed &&
+                                !key.synthetic &&
+                                key.logicalKey ==
+                                LogicalKey.Named(NamedKey.Escape)
+                        ) {
+                            cancel()
+                            value().session?.setCellRange(None)
+                            context.consume()
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
+    private fun pressed(context: RoutedEventContext, modifiers: Modifiers, touching: Boolean) {
+        direct = context.target === area.scope
+        contact = touching
+        val session = value().session
+        anchor =
+            if (modifiers.shift)
+                when (val range = session?.cellRange ?: None) {
+                    case Some(val current) -> Some(current.anchor)
+                    case None -> session?.focused ?: None
+                }
+            else
+                None
+    }
+
+    private fun accepts(): Boolean =
+        direct &&
+            value().enabled &&
+            !value().submitting &&
+            (!contact || (value().session?.touchCellSelection ?: false))
+
+    private fun options(axis: DragAxis): DragOptions =
+        DragOptions(axis, 6.0 * value().appearance.density, value().enabled && !value().submitting)
+
+    fun update() {
+        horizontal.update(
+            options(DragAxis.Horizontal),
+            { _ -> accepts() },
+            { event -> receive(event) }
+        )
+        vertical.update(options(DragAxis.Vertical), { _ -> accepts() }, { event -> receive(event) })
+    }
+
+    private fun receive(event: DragEvent) {
+        val input = value()
+        val selection = input.session!!.rangeDrag
+        when (event) {
+            case Started(val sample) -> {
+                move = selection.begin(input.address!!, anchor, sample.position, { cancel() })
+                if (!moving || !focus.requestFocus(FocusOrigin.Pointer))
+                    cancel()
+            }
+            case Moved(val sample) -> when (move) {
+                case Some(val current) -> selection.position(current, sample.position)
+                case None -> {}
+            }
+            case Ended(val sample) -> {
+                val current = move
+                move = None
+                when (current) {
+                    case Some(val active) -> selection.finish(active, sample.position)
+                    case None -> {}
+                }
+            }
+            case Cancelled(_, _) -> cancel()
+        }
+    }
+
+    fun cancel() {
+        val current = move
+        move = None
+        when (current) {
+            case Some(val active) -> value().session?.rangeDrag?.cancel(active)
+            case None -> {}
+        }
+        horizontal.cancel()
+        vertical.cancel()
+    }
+}

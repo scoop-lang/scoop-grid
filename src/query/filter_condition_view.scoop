@@ -1,0 +1,337 @@
+package scoop.grid
+
+import scoop.datetime.LocalDate
+import scoop.text.trim
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.row as filterRow
+import scoop.ui.component.column as filterColumn
+import scoop.ui.component.select as filterSelect
+import scoop.ui.component.button as filterButton
+import scoop.ui.component.input as filterInput
+import scoop.ui.component.datePicker as filterDatePicker
+import scoop.ui.component.checkbox as filterCheckbox
+import scoop.ui.component.fieldLabel as filterFieldLabel
+
+internal fun <Row> gridFilterConditionView(
+    node: GridFilterConditionDraft,
+    ui: GridFilterUi<Row>,
+    path: String,
+    remove: () -> Unit
+): View {
+    val column = ui.input.state.findColumn(node.column.value)
+    val kind: GridValueKind? =
+        when (column) {
+            case Some(val value) -> if (ui.input.state.canFilter(value.id))
+                value.valueKind
+            else
+                None
+            case None -> None
+        }
+    val title = ui.labels.conditionTitle(path, column?.title ?: node.column.value.value)
+    val density = ui.appearance.density
+    return filterColumn {
+        key = node.key
+        add(
+            filterRow {
+                item(
+                    filterSelect(
+                        binding<GridColumnId?>(
+                            { Some(node.column.value) },
+                            {
+                                next -> if (ui.active() && !node.composing)
+                                    when (next) {
+                                        case Some(val id) -> node.setColumn(
+                                            id,
+                                            gridFilterDefault(
+                                                gridFilterKind(ui.input.state, id, ui.labels),
+                                                ui.referenceDate
+                                            ),
+                                            ui.input.state.firstFilterOperation(id)
+                                        )
+                                        case None -> {}
+                                    }
+                            }
+                        ),
+                        ui.columnChoices()
+                    ) {
+                        enabled = ui.structural
+                        width = Some(140.0 * density)
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        unavailableText = ui.labels.unavailableColumn
+                        semantics =
+                            gridFilterControl(node.key, "column", ui.labels.columnName(title))
+                    }
+                ) { grow = 1.0 }
+                item(
+                    filterSelect(
+                        binding<GridFilterOperator?>(
+                            { Some(node.operation.value) },
+                            {
+                                next -> if (ui.active() && !node.composing)
+                                    when (next) {
+                                        case Some(val value) -> node.operation.value = value;
+                                        case None -> {}
+                                    }
+                            }
+                        ),
+                        gridFilterOperators(
+                            kind,
+                            node.operation.value,
+                            ui.labels,
+                            ui.input.state.filterOperations(node.column.value)
+                        )
+                    ) {
+                        enabled = ui.structural && kind != None
+                        width = Some(132.0 * density)
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        semantics =
+                            gridFilterControl(node.key, "operator", ui.labels.operatorName(title))
+                    }
+                ) { grow = 1.0 }
+                add(
+                    filterButton(ui.labels.removeCondition, remove) {
+                        enabled = ui.structural
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        variant = ButtonVariant.Outline
+                        semantics =
+                            gridFilterControl(
+                                node.key,
+                                "remove",
+                                ui.labels.removeConditionName(path)
+                            )
+                    }
+                )
+                spacing = 8.0 * density
+                alignment = CrossAlignment.Center
+            }
+        )
+        when (kind) {
+            case None -> add(ui.message(ui.labels.unavailableColumnHelp))
+            case Some(val valueKind) -> when (node.operation.value) {
+                case Missing -> {}
+                case Present -> {}
+                case In -> add(gridFilterSetView(node, ui, title))
+                case Between -> add(
+                    filterRow {
+                        item(
+                            gridFilterScalarView(
+                                node.first,
+                                valueKind,
+                                ui,
+                                node.key,
+                                "value",
+                                ui.labels.lowerName(title)
+                            )
+                        ) { grow = 1.0 }
+                        add(ui.message(ui.labels.betweenSeparator))
+                        item(
+                            gridFilterScalarView(
+                                node.second,
+                                valueKind,
+                                ui,
+                                node.key,
+                                "upper",
+                                ui.labels.upperName(title)
+                            )
+                        ) { grow = 1.0 }
+                        spacing = 8.0 * density
+                        alignment = CrossAlignment.Center
+                    }
+                )
+                else -> add(
+                    gridFilterScalarView(
+                        node.first,
+                        valueKind,
+                        ui,
+                        node.key,
+                        "value",
+                        ui.labels.valueName(title)
+                    )
+                )
+            }
+        }
+        when (node.operation.value) {
+            case Contains -> add(gridFilterCaseView(node, ui, title))
+            case StartsWith -> add(gridFilterCaseView(node, ui, title))
+            case EndsWith -> add(gridFilterCaseView(node, ui, title))
+            else -> {}
+        }
+        spacing = 6.0 * density
+        alignment = CrossAlignment.Stretch
+    }
+}
+
+private fun <Row> gridFilterCaseView(
+    node: GridFilterConditionDraft,
+    ui: GridFilterUi<Row>,
+    title: String
+): View =
+    filterRow {
+        add(
+            filterCheckbox(
+                binding(
+                    { node.caseSensitive.value },
+                    {
+                        value -> if (ui.active())
+                            node.caseSensitive.value = value
+                    }
+                )
+            ) {
+                enabled = ui.enabled
+                theme = ui.input.theme
+                labelTarget = Some(node.caseTarget)
+                semantics = gridFilterControl(node.key, "case", ui.labels.caseName(title))
+            }
+        )
+        add(
+            filterFieldLabel(ui.labels.caseSensitive, node.caseTarget) {
+                fonts = ui.input.fonts;
+                theme = ui.input.theme
+            }
+        )
+        spacing = 4.0 * ui.appearance.density
+        alignment = CrossAlignment.Center
+    }
+
+private fun <Row> gridFilterScalarView(
+    value: GridFilterScalar,
+    kind: GridValueKind,
+    ui: GridFilterUi<Row>,
+    nodeKey: ViewKey,
+    part: String,
+    title: String
+): View =
+    when (kind) {
+        case BooleanValue -> filterSelect(
+            binding<Boolean?>(
+                { Some(value.boolean.value) },
+                {
+                    next -> if (ui.active())
+                        when (next) {
+                            case Some(val selected) -> value.boolean.value = selected;
+                            case None -> {}
+                        }
+                }
+            ),
+            [
+                Choice(ViewKey.Text("true"), true, ui.labels.yes),
+                Choice(ViewKey.Text("false"), false, ui.labels.no)
+            ]
+        ) {
+            enabled = ui.enabled
+            fonts = ui.input.fonts
+            theme = ui.input.theme
+            semantics = gridFilterControl(nodeKey, part, title)
+        }
+        case Date -> filterDatePicker(
+            binding(
+                { value.date.value },
+                {
+                    next -> if (ui.active())
+                        value.setDate(next)
+                }
+            ),
+            value.date.value ?: ui.referenceDate
+        ) {
+            draft = Some(value.dateDraft)
+            enabled = ui.enabled
+            fonts = ui.input.fonts
+            theme = ui.input.theme
+            referenceDate = Some(ui.referenceDate)
+            placeholder = ui.labels.datePlaceholder
+            calendar = calendarOptions { locale = ui.labels.calendarLocale }
+            semantics = gridFilterControl(nodeKey, part, title)
+            calendarButtonSemantics =
+                gridFilterControl(nodeKey, f"${part}-calendar", ui.labels.calendarName(title))
+            parser =
+                Some {
+                    text,
+                    _,
+                    _ -> when (LocalDate.parseOrNone(text.trim())) {
+                        case Some(val date) -> DatePickerParse.Date(date)
+                        case None -> DatePickerParse.Invalid(ui.labels.invalidDate)
+                    }
+                }
+            format =
+                Some {
+                    selected,
+                    _ -> when (selected) {
+                        case Single(val date) -> date?.toString() ?: ""
+                        else -> throw IllegalArgumentException(
+                            Some("filter date requires a single date")
+                        )
+                    }
+                }
+        }
+        else -> filterInput(value.text) {
+            enabled = ui.enabled
+            fonts = ui.input.fonts
+            theme = ui.input.theme
+            placeholder =
+                when (kind) {
+                    case Integer -> ui.labels.integerPlaceholder
+                    case Number -> ui.labels.numberPlaceholder
+                    else -> ui.labels.textPlaceholder
+                }
+            semantics = gridFilterControl(nodeKey, part, title)
+        }
+    }
+
+private fun gridFilterOperators(
+    kind: GridValueKind?,
+    current: GridFilterOperator,
+    labels: GridFilterLabels,
+    allowed: Array<GridFilterOperator>?
+): Array<Choice<GridFilterOperator>> {
+    val choices =
+        [
+            Choice(ViewKey.Text("eq"), GridFilterOperator.Equal, labels.equal),
+            Choice(ViewKey.Text("ne"), GridFilterOperator.NotEqual, labels.notEqual),
+            Choice(ViewKey.Text("lt"), GridFilterOperator.Less, labels.less),
+            Choice(ViewKey.Text("le"), GridFilterOperator.LessOrEqual, labels.lessOrEqual),
+            Choice(ViewKey.Text("gt"), GridFilterOperator.Greater, labels.greater),
+            Choice(ViewKey.Text("ge"), GridFilterOperator.GreaterOrEqual, labels.greaterOrEqual),
+            Choice(ViewKey.Text("between"), GridFilterOperator.Between, labels.between),
+            Choice(ViewKey.Text("contains"), GridFilterOperator.Contains, labels.contains),
+            Choice(ViewKey.Text("starts"), GridFilterOperator.StartsWith, labels.startsWith),
+            Choice(ViewKey.Text("ends"), GridFilterOperator.EndsWith, labels.endsWith),
+            Choice(ViewKey.Text("missing"), GridFilterOperator.Missing, labels.missing),
+            Choice(ViewKey.Text("present"), GridFilterOperator.Present, labels.present),
+            Choice(ViewKey.Text("in"), GridFilterOperator.In, labels.inSet)
+        ]
+    val result = ArrayList<Choice<GridFilterOperator>>()
+    for (choice in choices) {
+        val available =
+            when (choice.value) {
+                case Contains -> kind == Some(GridValueKind.Text)
+                case StartsWith -> kind == Some(GridValueKind.Text)
+                case EndsWith -> kind == Some(GridValueKind.Text)
+                case Less -> gridFilterOrderedKind(kind)
+                case LessOrEqual -> gridFilterOrderedKind(kind)
+                case Greater -> gridFilterOrderedKind(kind)
+                case GreaterOrEqual -> gridFilterOrderedKind(kind)
+                case Between -> gridFilterOrderedKind(kind)
+                else -> true
+            }
+        val declared =
+            when (allowed) {
+                case Some(val operations) -> gridAllowsFilter(operations, choice.value);
+                case None -> true
+            }
+        if (declared && (available || choice.value == current))
+            result.add(choice)
+    }
+    return result.toArray()
+}
+
+private fun gridFilterOrderedKind(kind: GridValueKind?): Boolean =
+    kind ==
+        Some(GridValueKind.Integer) ||
+        kind ==
+        Some(GridValueKind.Number) ||
+        kind ==
+        Some(GridValueKind.Date)

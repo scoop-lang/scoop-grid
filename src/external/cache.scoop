@@ -1,0 +1,501 @@
+package scoop.grid
+
+import scoop.collections.*
+import scoop.comparisons.comparatorOf
+import scoop.math.min
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+internal class GridExternalEpoch {}
+
+internal struct GridExternalFailure(val range: GridExternalRange, val message: String)
+
+/** Only loaded positions and real request ranges occupy storage. */
+internal class GridExternalBranchData<Row>(
+    val items: HashMap<Long, GridExternalItem<Row>> = HashMap<Long, GridExternalItem<Row>>(),
+    val total: Long? = None,
+    val tail: Long = 0L,
+    val loading: Array<GridExternalRange> = [],
+    val failures: Array<GridExternalFailure> = [],
+    orderedIndices: Array<Long>? = None
+) {
+    val indices: Array<Long> = orderedIndices ?: gridExternalIndices(items)
+    val extent: Long get() = total ?: (tail + 1L)
+    fun lowerBound(offset: Long): Long {
+        var left = 0L
+        var right = indices.size
+        while (left < right) {
+            val middle = left + (right - left) / 2L
+            if (indices[middle] < offset)
+                left = middle + 1L
+            else
+                right = middle
+        }
+        return left
+    }
+    fun state(position: GridExternalPosition): GridLoadState {
+        for (failure in failures)
+            if (failure.range.contains(position))
+                return GridLoadState.Failed(failure.message)
+        for (range in loading)
+            if (range.contains(position))
+                return GridLoadState.Loading
+        return GridLoadState.Unloaded
+    }
+    fun missing(range: GridExternalRange): Array<GridExternalRange> {
+        val result = ArrayList<GridExternalRange>()
+        var start = range.offset
+        var at = lowerBound(start)
+        while (at < indices.size && indices[at] < range.end) {
+            val offset = indices[at]
+            if (offset > start)
+                result.add(GridExternalRange(range.branch, start, offset - start))
+            start = offset + 1L
+            at += 1L
+        }
+        if (start < range.end)
+            result.add(GridExternalRange(range.branch, start, range.end - start))
+        return result.toArray()
+    }
+    fun marking(
+        range: GridExternalRange,
+        message: String? = None,
+        loading: Boolean = false
+    ): GridExternalBranchData<Row> {
+        val pending = ArrayList<GridExternalRange>()
+        val errors = ArrayList<GridExternalFailure>()
+        for (old in this.loading)
+            for (part in gridExternalSubtract([old], range))
+                pending.add(part)
+        for (old in failures)
+            for (part in gridExternalSubtract([old.range], range))
+                errors.add(GridExternalFailure(part, old.message))
+        if (loading)
+            pending.add(range)
+        when (message) {
+            case Some(val value) -> errors.add(GridExternalFailure(range, value));
+            case None -> {}
+        }
+        return GridExternalBranchData(
+            items,
+            total,
+            tail,
+            pending.toArray(),
+            errors.toArray(),
+            Some(indices)
+        )
+    }
+    fun received(range: GridExternalRange, page: GridExternalPage<Row>): GridExternalBranchData<
+        Row
+    > {
+        gridRequire(page.items.size <= range.count, "external reply exceeds requested range")
+        gridRequire(
+            page.end || page.items.size == range.count,
+            "nonterminal external reply must fill the request"
+        )
+        val end = range.offset + page.items.size
+        when (page.total) {
+            case Some(val count) -> {
+                gridRequire(count >= 0L, "negative external sibling count")
+                gridRequire(
+                    page.items.size == 0L || end <= count,
+                    "external reply exceeds sibling count"
+                )
+                gridRequire(
+                    !page.end || count == end || (page.items.size == 0L && count < range.offset),
+                    "external end contradicts sibling count"
+                )
+                gridRequire(
+                    total == None || total == Some(count),
+                    "external count changed; refresh the query"
+                )
+            }
+            case None -> {}
+        }
+        val count: Long? =
+            when (page.total) {
+                case Some(_) -> page.total
+                case None -> if (total != None)
+                    total
+                else
+                    if (page.end)
+                        Some(end)
+                    else
+                        None
+            }
+        when (count) {
+            case Some(val value) -> {
+                gridRequire(
+                    page.items.size == 0L || end <= value,
+                    "external reply exceeds known end"
+                )
+                gridRequire(
+                    !page.end || end == value || (page.items.size == 0L && range.offset >= value),
+                    "external end contradicts known count"
+                )
+            }
+            case None -> gridRequire(end < Long.MAX_VALUE, "unknown external tail overflows")
+        }
+        val next = HashMap<Long, GridExternalItem<Row>>()
+        for ((offset, item) in items)
+            if (
+                (offset < range.offset || offset >= range.end) &&
+                    (count == None || offset < count!!)
+            )
+                next.put(offset, item)
+        for (at in 0L ..< page.items.size)
+            next.put(range.offset + at, page.items[at])
+        val cleared = marking(range)
+        return GridExternalBranchData(
+            next,
+            count,
+            if (end > tail)
+                end
+            else
+                tail,
+            cleared.loading,
+            cleared.failures
+        )
+    }
+    fun settled(): GridExternalBranchData<Row> =
+        GridExternalBranchData(items, total, tail, orderedIndices = Some(indices))
+}
+
+private fun <Row> gridExternalIndices(items: HashMap<Long, GridExternalItem<Row>>): Array<Long> {
+    val indices = ArrayList<Long>()
+    for ((offset, _) in items)
+        indices.add(offset)
+    indices.sortWith(comparatorOf<Long> { a, b -> a.compareTo(b) })
+    return indices.toArray()
+}
+
+internal class GridExternalSnapshot<Row>(
+    val source: GridExternalSource<Row>,
+    val query: GridQuery,
+    val epoch: GridExternalEpoch = GridExternalEpoch(),
+    val branches: HashMap<GridExternalBranch, GridExternalBranchData<Row>> =
+        HashMap<GridExternalBranch, GridExternalBranchData<Row>>(),
+    val schema: GridExternalColumns<Row>? = None,
+    val aggregates: GridAggregations = gridProvidedAggregations(),
+    val recordTotal: Long? = None,
+    val pinned: TableSource<Row> = GridExternalRecords<Row>([]),
+    unchangedRows: GridExternalSnapshot<Row>? = None
+) {
+    private val empty = GridExternalBranchData<Row>()
+    val locations: HashMap<GridRowKey, GridExternalPosition> =
+        unchangedRows?.locations ?: HashMap<GridRowKey, GridExternalPosition>()
+    val children: HashMap<GridExternalBranch, GridExternalBranch> =
+        unchangedRows?.children ?: HashMap<GridExternalBranch, GridExternalBranch>()
+    init {
+        when (unchangedRows) {
+            case Some(_) -> {}
+            case None -> {
+                for ((branch, data) in branches) {
+                    for (offset in data.indices) {
+                        val item = data.items[offset]!!
+                        gridRequire(
+                            !locations.containsKey(item.row.key),
+                            "duplicate external result identity"
+                        )
+                        locations.put(item.row.key, GridExternalPosition(branch, offset))
+                        when (item.branch) {
+                            case Some(val child) -> {
+                                gridRequire(
+                                    child != branch,
+                                    "external branch contains its own parent"
+                                )
+                                children.put(child, branch)
+                            }
+                            case None -> {}
+                        }
+                    }
+                }
+                for ((branch, _) in children) {
+                    var at = branch
+                    val seen = HashSet<GridExternalBranch>()
+                    while (at != GridExternalBranch.Root) {
+                        gridRequire(seen.add(at), "cyclic external branch relation")
+                        at = children[at] ?: break
+                    }
+                }
+            }
+        }
+    }
+    fun data(branch: GridExternalBranch): GridExternalBranchData<Row> = branches[branch] ?: empty
+    fun sameRows(other: GridExternalSnapshot<Row>): Boolean {
+        if (pinned !== other.pinned || branches.size != other.branches.size)
+            return false
+        for ((branch, data) in branches) {
+            val previous = other.branches[branch] ?: return false
+            if (data.items !== previous.items)
+                return false
+        }
+        return true
+    }
+    fun item(key: GridRowKey): GridExternalItem<Row>? {
+        val at = locations[key] ?: return None
+        return data(at.branch).items[at.offset]
+    }
+    fun open(branch: GridExternalBranch, expanded: GridExpandedRows): Boolean {
+        var at = branch
+        while (at != GridExternalBranch.Root) {
+            val parent = at.parent ?: return false
+            if (!expanded.contains(parent))
+                return false
+            at = children[at] ?: return false
+        }
+        return true
+    }
+    private fun withBranch(branch: GridExternalBranch, data: GridExternalBranchData<Row>): HashMap<
+        GridExternalBranch,
+        GridExternalBranchData<Row>
+    > {
+        val next = HashMap<GridExternalBranch, GridExternalBranchData<Row>>()
+        for ((key, value) in branches)
+            next.put(key, value)
+        next.put(branch, data)
+        return next
+    }
+    fun marking(
+        range: GridExternalRange,
+        message: String? = None,
+        loading: Boolean = false
+    ): GridExternalSnapshot<Row> =
+        GridExternalSnapshot(
+            source,
+            query,
+            epoch,
+            withBranch(range.branch, data(range.branch).marking(range, message, loading)),
+            schema,
+            aggregates,
+            recordTotal,
+            pinned,
+            Some(this)
+        )
+    fun received(
+        range: GridExternalRange,
+        page: GridExternalPage<Row>,
+        columns: GridColumns<Row>
+    ): GridExternalSnapshot<Row> {
+        val root = range.branch == GridExternalBranch.Root
+        if (!root) {
+            gridRequire(
+                page.columns?.columns?.size ==
+                    None &&
+                    page.recordCount ==
+                    None &&
+                    page.pinned?.count ==
+                    None &&
+                    page.aggregates?.selections?.size ==
+                    None,
+                "root metadata cannot be replaced by a child reply"
+            )
+        }
+        val nextSchema: GridExternalColumns<Row>? =
+            when (page.columns) {
+                case Some(_) -> page.columns;
+                case None -> schema
+            }
+        gridRequire(
+            query.pivot == None || nextSchema?.columns?.size != None,
+            "external pivot requires result columns with its first root reply"
+        )
+        when (page.recordCount) {
+            case Some(val count) -> gridRequire(count >= 0L, "negative external record count");
+            case None -> {}
+        }
+        val definitions = nextSchema?.definitions ?: columns
+        for (item in page.items) {
+            when (item.row) {
+                case Group(val group) -> {
+                    gridRequire(
+                        group.path.matches(query.grouping),
+                        "external group path does not match the query"
+                    )
+                    val expected =
+                        when (range.branch) {
+                            case Root -> None
+                            case Group(val path) -> Some(path)
+                            case Tree(_) -> throw IllegalArgumentException(
+                                Some("tree branches contain records")
+                            )
+                        }
+                    gridRequire(
+                        group.path.parent == expected,
+                        "external group parent does not match the requested branch"
+                    )
+                    checkAggregates(group.aggregates, definitions)
+                }
+                case Total(val total) -> checkAggregates(total.aggregates, definitions)
+                case Data(_, _) -> {
+                    gridRequire(query.pivot == None, "pivot replies contain logical result rows")
+                    gridRequire(
+                        !item.hasChildren || source.treeColumn != None,
+                        "record children require an external tree column"
+                    )
+                }
+                else -> {}
+            }
+        }
+        when (page.aggregates) {
+            case Some(val values) -> checkAggregates(values, definitions);
+            case None -> {}
+        }
+        val nextPins = page.pinned ?: pinned
+        gridRequire(nextPins.count >= 0L, "negative external pinned count")
+        val pinKeys = HashSet<ViewKey>()
+        for (at in 0L ..< nextPins.count) {
+            val key = nextPins.keyAt(at)
+            gridRequire(
+                key != ViewKey.Position && pinKeys.add(key),
+                "invalid external pinned identity"
+            )
+        }
+        return GridExternalSnapshot(
+            source,
+            query,
+            epoch,
+            withBranch(range.branch, data(range.branch).received(range, page)),
+            nextSchema,
+            page.aggregates ?: aggregates,
+            when (page.recordCount) {
+                case Some(_) -> page.recordCount;
+                case None -> recordTotal
+            },
+            nextPins
+        )
+    }
+    fun forQuery(value: GridQuery, preserve: Boolean): GridExternalSnapshot<Row> {
+        if (query == value)
+            return this
+        if (!preserve)
+            return GridExternalSnapshot(source, value)
+        val next = HashMap<GridExternalBranch, GridExternalBranchData<Row>>()
+        for ((branch, data) in branches)
+            next.put(branch, data.settled())
+        return GridExternalSnapshot(
+            source,
+            value,
+            GridExternalEpoch(),
+            next,
+            schema,
+            aggregates,
+            recordTotal,
+            pinned,
+            Some(this)
+        )
+    }
+    fun replacing(key: ViewKey, row: Row): GridExternalSnapshot<Row> {
+        val position = locations[GridRowKey.Data(key)]
+        val next = HashMap<GridExternalBranch, GridExternalBranchData<Row>>()
+        for ((branch, value) in branches)
+            next.put(branch, value)
+        when (position) {
+            case Some(val at) -> {
+                val before = data(at.branch)
+                val items = HashMap<Long, GridExternalItem<Row>>()
+                for ((offset, item) in before.items)
+                    items.put(offset, item)
+                val old = items[at.offset]!!
+                items.put(
+                    at.offset,
+                    GridExternalItem(GridRow.Data(row, key), old.hasChildren, old.contextOnly)
+                )
+                next.put(
+                    at.branch,
+                    GridExternalBranchData(
+                        items,
+                        before.total,
+                        before.tail,
+                        before.loading,
+                        before.failures,
+                        Some(before.indices)
+                    )
+                )
+            }
+            case None -> gridRequire(
+                pinned.indexOfKey(key) != None,
+                "external edit record is absent"
+            )
+        }
+        val pinRows = ArrayList<(ViewKey, Row)>()
+        for (at in 0L ..< pinned.count)
+            pinRows.add(
+                (
+                    pinned.keyAt(at),
+                    if (pinned.keyAt(at) == key)
+                        row
+                    else
+                        pinned.rowAt(at)
+                )
+            )
+        return GridExternalSnapshot(
+            source,
+            query,
+            epoch,
+            next,
+            schema,
+            aggregates,
+            recordTotal,
+            GridExternalRecords(pinRows.toArray()),
+            Some(this)
+        )
+    }
+    fun evicting(range: GridExternalRange, retained: HashSet<GridRowKey>): GridExternalSnapshot<
+        Row
+    > {
+        val before = data(range.branch)
+        val items = HashMap<Long, GridExternalItem<Row>>()
+        for ((offset, item) in before.items) {
+            val preserve = retained.contains(item.row.key)
+            if (offset < range.offset || offset >= range.end || preserve)
+                items.put(offset, item)
+        }
+        return GridExternalSnapshot(
+            source,
+            query,
+            epoch,
+            withBranch(
+                range.branch,
+                GridExternalBranchData(
+                    items,
+                    before.total,
+                    before.tail,
+                    before.loading,
+                    before.failures
+                )
+            ),
+            schema,
+            aggregates,
+            recordTotal,
+            pinned
+        )
+    }
+}
+
+private fun <Row> checkAggregates(values: GridAggregations, columns: GridColumns<Row>) {
+    for (selection in values.selections)
+        columns.get(selection.column)
+}
+
+internal class GridExternalRecords<Row>(private val values: Array<(ViewKey, Row)>): TableSource<
+    Row
+> {
+    private val positions = HashMap<ViewKey, Long>()
+    init {
+        for (at in 0L ..< values.size) {
+            val(key, _) = values[at];
+            positions.put(key, at)
+        }
+    }
+    public override val count: Long get() = values.size
+    public override fun keyAt(index: Long): ViewKey {
+        val(key, _) = values[index];
+        return key
+    }
+    public override fun rowAt(index: Long): Row {
+        val(_, row) = values[index];
+        return row
+    }
+    public override fun indexOfKey(key: ViewKey): Long? = positions[key]
+}

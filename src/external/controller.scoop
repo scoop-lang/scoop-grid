@@ -1,0 +1,307 @@
+package scoop.grid
+
+import scoop.collections.*
+import scoop.math.min
+import scoop.ui.ViewKey
+
+private class GridExternalFlight<Row>(val epoch: GridExternalEpoch, val range: GridExternalRange) {
+    var request: GridExternalRequest<Row>? = None
+}
+
+internal class GridExternalConsumer(
+    private val remove: (GridExternalConsumer) -> Unit,
+    val retained: () -> Array<GridRowKey>
+): Closeable {
+    var closed = false
+    public override fun close() {
+        if (closed)
+            return
+        closed = true
+        remove(this)
+    }
+}
+
+/** Normal owner-thread request coordination; no request is started by a read operation. */
+internal class GridExternalController<Row>(
+    private val read: () -> GridComputed<Row>,
+    private val install: (GridExternalSnapshot<Row>) -> Unit
+) {
+    private val consumers = ArrayList<GridExternalConsumer>()
+    private val flights = ArrayList<GridExternalFlight<Row>>()
+    private var observed: GridExternalEpoch? = None
+    private var requestedPins: GridPinnedRows? = None
+    private var synchronizing = false
+    private var synchronizeAgain = false
+    fun attach(retained: () -> Array<GridRowKey>): Closeable {
+        val consumer = GridExternalConsumer({ value -> detach(value) }, retained)
+        consumers.add(consumer)
+        synchronize()
+        return consumer
+    }
+    private fun detach(consumer: GridExternalConsumer) {
+        for (at in 0L ..< consumers.size)
+            if (consumers[at] === consumer) {
+                consumers.removeAt(at)
+                break
+            }
+        if (consumers.size == 0L) {
+            for (flight in flights.toArray())
+                cancel(flight)
+            observed = None
+            requestedPins = None
+        }
+    }
+    private fun remove(flight: GridExternalFlight<Row>) {
+        for (at in 0L ..< flights.size)
+            if (flights[at] === flight) {
+                flights.removeAt(at);
+                return
+            }
+    }
+    private fun cancel(flight: GridExternalFlight<Row>) {
+        remove(flight)
+        flight.request?.cancel()
+        val current = read().external ?: return
+        if (current.epoch === flight.epoch)
+            install(current.marking(flight.range))
+    }
+    private fun owns(flight: GridExternalFlight<Row>): Boolean {
+        if (consumers.size == 0L)
+            return false
+        val value = read()
+        val current = value.external ?: return false
+        if (current.epoch !== flight.epoch || !current.open(flight.range.branch, value.expanded))
+            return false
+        for (active in flights)
+            if (active === flight)
+                return true
+        return false
+    }
+    fun synchronize() {
+        if (consumers.size == 0L)
+            return
+        if (synchronizing) {
+            synchronizeAgain = true;
+            return
+        }
+        synchronizing = true
+        try {
+            do {
+                synchronizeAgain = false
+                synchronizeCurrent()
+            } while (synchronizeAgain && consumers.size > 0L)
+        } finally {
+            synchronizing = false
+        }
+    }
+    private fun synchronizeCurrent() {
+        val value = read()
+        val snapshot = value.external ?: return
+        for (flight in flights.toArray())
+            if (
+                flight.epoch !==
+                    snapshot.epoch ||
+                    !snapshot.open(flight.range.branch, value.expanded)
+            )
+                cancel(flight)
+        val current = read()
+        val active = current.external ?: return
+        val changed =
+            when (observed) {
+                case Some(val old) -> old !== active.epoch;
+                case None -> true
+            }
+        if (changed) {
+            observed = Some(active.epoch);
+            requestedPins = None
+        }
+        val pinsChanged = !(requestedPins?.same(current.pins) ?: false)
+        requestedPins = Some(current.pins)
+        if (!changed && !pinsChanged)
+            return
+        when (initialRange(current)) {
+            case Some(val range) -> request(range, force = pinsChanged && missingPins(current))
+            case None -> {}
+        }
+    }
+    private fun missingPins(value: GridComputed<Row>): Boolean {
+        for (keys in [value.pins.top, value.pins.bottom])
+            for (key in keys)
+                if (value.source.indexOfKey(key) == None)
+                    return true
+        return false
+    }
+    private fun initialRange(value: GridComputed<Row>): GridExternalRange? {
+        val snapshot = value.external ?: return None
+        val root = snapshot.data(GridExternalBranch.Root)
+        val(offset, count) =
+            when (value.query.pagination) {
+                case Page(val index, val size) -> (index * size, size)
+                case Disabled -> (0L, snapshot.source.blockSize)
+            }
+        val length =
+            when (root.total) {
+                case Some(val total) -> if (offset >= total)
+                    0L
+                else
+                    min(count, total - offset)
+                case None -> count
+            }
+        return if (length == 0L) {
+            if (missingPins(value))
+                Some(GridExternalRange(GridExternalBranch.Root, 0L, snapshot.source.blockSize))
+            else
+                None
+        } else
+            Some(GridExternalRange(GridExternalBranch.Root, offset, length))
+    }
+    fun load(position: GridExternalPosition, retry: Boolean = false): Boolean {
+        val value = read()
+        val snapshot = value.external ?: return false
+        if (consumers.size == 0L || !snapshot.open(position.branch, value.expanded))
+            return false
+        val data = snapshot.data(position.branch)
+        if (position.offset >= data.extent)
+            return false
+        val size = snapshot.source.blockSize
+        val offset =
+            if (data.total == None)
+                min(position.offset / size * size, data.tail)
+            else
+                position.offset / size * size
+        val count =
+            when (data.total) {
+                case Some(val total) -> min(size, total - offset)
+                case None -> min(size, Long.MAX_VALUE - offset)
+            }
+        if (count == 0L)
+            return false
+        return request(GridExternalRange(position.branch, offset, count), retry)
+    }
+    fun request(range: GridExternalRange, retry: Boolean = false, force: Boolean = false): Boolean {
+        val value = read()
+        val snapshot = value.external ?: return false
+        if (consumers.size == 0L || !snapshot.open(range.branch, value.expanded))
+            return false
+        val data = snapshot.data(range.branch)
+        val candidates =
+            if (force)
+                [range]
+            else
+                data.missing(range)
+        var ranges = candidates
+        for (flight in flights)
+            if (flight.epoch === snapshot.epoch)
+                ranges = gridExternalSubtract(ranges, flight.range)
+        if (!retry)
+            for (failure in data.failures)
+                ranges = gridExternalSubtract(ranges, failure.range)
+        for (missing in ranges) {
+            val current = read().external ?: return false
+            if (current.epoch !== snapshot.epoch)
+                return false
+            start(current, missing)
+        }
+        return true
+    }
+    private fun start(snapshot: GridExternalSnapshot<Row>, range: GridExternalRange) {
+        val flight = GridExternalFlight<Row>(snapshot.epoch, range)
+        val request =
+            GridExternalRequest<Row>(
+                snapshot.query,
+                range,
+                read().pins,
+                { owns(flight) },
+                { page -> complete(flight, page) },
+                { message -> fail(flight, message) }
+            )
+        flight.request = Some(request)
+        flights.add(flight)
+        install(snapshot.marking(range, loading = true))
+        if (!owns(flight)) {
+            request.cancel();
+            return
+        }
+        try {
+            request.started(snapshot.source.load(request))
+        } catch (error: Exception) {
+            if (owns(flight))
+                request.fail(error.message ?: "外部数据加载失败")
+            else
+                throw error
+        }
+    }
+    private fun complete(flight: GridExternalFlight<Row>, page: GridExternalPage<Row>): Boolean {
+        if (!owns(flight))
+            return false
+        val value = read()
+        val current = value.external!!
+        val next = current.received(flight.range, page, value.columns)
+        if (!owns(flight) || read() !== value)
+            return false
+        remove(flight)
+        install(next)
+        return true
+    }
+    private fun fail(flight: GridExternalFlight<Row>, message: String): Boolean {
+        if (!owns(flight))
+            return false
+        val snapshot = read().external!!
+        remove(flight)
+        install(snapshot.marking(flight.range, Some(message)))
+        return true
+    }
+    private fun retained(): HashSet<GridRowKey> {
+        val result = HashSet<GridRowKey>()
+        for (consumer in consumers)
+            if (!consumer.closed)
+                for (key in consumer.retained())
+                    result.add(key)
+        val value = read()
+        for (keys in [value.pins.top, value.pins.bottom, value.details.keys])
+            for (key in keys)
+                result.add(GridRowKey.Data(key))
+        val snapshot = value.external ?: return result
+        val origins = ArrayList<GridRowKey>()
+        for (key in result)
+            origins.add(key)
+        for (key in origins) {
+            val position = snapshot.locations[key] ?: continue
+            var branch = position.branch
+            while (branch != GridExternalBranch.Root) {
+                val parent = branch.parent ?: break
+                result.add(parent)
+                branch = snapshot.children[branch] ?: break
+            }
+        }
+        return result
+    }
+    fun evict(range: GridExternalRange): Boolean {
+        val value = read().external ?: return false
+        for (flight in flights)
+            if (flight.range.overlaps(range))
+                return false
+        install(value.evicting(range, retained()))
+        return true
+    }
+}
+
+internal fun gridExternalSubtract(
+    values: Array<GridExternalRange>,
+    occupied: GridExternalRange
+): Array<GridExternalRange> {
+    val result = ArrayList<GridExternalRange>()
+    for (value in values) {
+        if (!value.overlaps(occupied)) {
+            result.add(value);
+            continue
+        }
+        if (value.offset < occupied.offset)
+            result.add(
+                GridExternalRange(value.branch, value.offset, occupied.offset - value.offset)
+            )
+        if (occupied.end < value.end)
+            result.add(GridExternalRange(value.branch, occupied.end, value.end - occupied.end))
+    }
+    return result.toArray()
+}

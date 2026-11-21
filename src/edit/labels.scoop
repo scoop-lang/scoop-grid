@@ -1,0 +1,22 @@
+package scoop.grid
+
+import scoop.ui.component.CalendarLocale
+
+/** Labels captured by one typed draft; parsing rules remain explicit and unchanged. */
+public class GridEditorLabels public constructor(
+    public val finishComposing: String = "请先完成组合输入",
+    public val invalidInteger: String = "请输入有效整数",
+    public val invalidNumber: String = "请输入有效数值",
+    public val nonfiniteNumber: String = "请输入有限数值",
+    public val invalidBoolean: String = "请输入 true／false、1／0 或是／否",
+    public val yes: String = "是",
+    public val no: String = "否",
+    public val invalidDate: String = "请输入有效日期（YYYY-MM-DD）",
+    public val datePlaceholder: String = "YYYY-MM-DD",
+    public val calendarName: String = "Open calendar",
+    public val calendarLocale: CalendarLocale = CalendarLocale(),
+    public val invalidChoice: String = "请选择一个可用选项",
+    public val ambiguousChoice: String = "多个选项名称相同，请使用列表选择",
+    public val choicePlaceholder: String = "Select an option",
+    public val unavailableChoice: String = "Unavailable selection"
+)

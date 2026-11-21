@@ -1,0 +1,305 @@
+package scoop.grid.tests.columns
+
+import scoop.graphics.Point
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridColumnsWindowTest {
+    @Test
+    fun `native column tools preserve identities queries and edit transactions`() {
+        val probe = ColumnsProbe()
+        try {
+            context(probe.theme) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(3, probe.submissions)
+            assertEquals(0, probe.queryEvents)
+        } catch (error: Throwable) {
+            println(probe.diagnostic);
+            reportColumnsFailure(error)
+            throw error
+        }
+        finally {
+            probe.close()
+        }
+    }
+}
+
+private fun reportColumnsFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        reportColumnsFailure(error.primaryFailure)
+        reportColumnsFailure(error.cleanupFailure)
+    } else
+        if (error is AssertionFailure) {
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        } else
+            if (error is Exception) {
+                println(error.message ?: "column window failure")
+                error.printStackTrace()
+            }
+}
+
+internal class ColumnsProbe: Closeable {
+    var rows = columnRows()
+    var queryEvents = 0
+    val original =
+        DataGridState(rows, columnDefinitions(this), columnQuery(), Some { _ -> queryEvents += 1 })
+    val originalResult = original.result
+    val selected = state(original)
+    val model: DataGridState<Long> get() = selected.value
+    val handle = DataGridHandle()
+    val theme = ThemeSource(shadcnTheme())
+    val direction = state(LayoutDirection.Ltr)
+    val scroll = ScrollState()
+    val enabled = state(true)
+    val localized = state(false)
+    var localizedColumns: Array<GridColumnState>? = None
+    val width = state(500.0)
+    var frame: ComponentScope? = None
+    var editor: GridTextEditor<Long>? = None
+    var submissions = 0
+    var finished = false
+    val address = GridCellAddress(ViewKey.Number(0L), GridColumnId("c1"))
+    var pending: GridCommit<Long>? = None
+    var pendingRows: TableRows<Long>? = None
+    var phase = 0
+    var waiting = false
+    var waitingInput = false
+    var retry = false
+    val diagnostic: String get() =
+        f"columns phase=${phase}, waiting=${waiting}, retry=${retry}, queryEvents=${
+            queryEvents
+        }, scroll=${scroll.offset.x}"
+    var active: ActiveApplication? = None
+    var uiHost: UiHost? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var calls: NativeCalls? = None
+    var root: NativeNode? = None
+    var view: ViewProbe? = None
+    var frames: FrameProbe? = None
+    var idleDeadline: WindowDeadline? = None
+    var grid: NativeNode? = None
+    var collection: NativeNode? = None
+    var cell: NativeNode? = None
+    var field: NativeNode? = None
+    var apply: NativeNode? = None
+    var restore: NativeNode? = None
+    var fit: NativeNode? = None
+    var pin: NativeNode? = None
+    var visible: NativeNode? = None
+    var control: NativeNode? = None
+    var option: NativeNode? = None
+    var last: NativeNode? = None
+    var resizeStart: NativeNode? = None
+    var resizeCenter: NativeNode? = None
+    var resizeEnd: NativeNode? = None
+    var resizeResult: GridResult<Long>? = None
+    var resizeExternal: Array<GridColumnState>? = None
+    var resizePrevious: DataGridState<Long>? = None
+    var dragX = 0.0
+    var dragY = 0.0
+    var dragDelta = 0.0
+    var movePointer = Point(0.0, 0.0)
+    var moveSnapshot: Array<GridColumnState>? = None
+    var moveResult: GridResult<Long>? = None
+    var moveHeader: NativeNode? = None
+    var moveCell: NativeNode? = None
+    var movePinned: NativeNode? = None
+    var moveEnd: NativeNode? = None
+    var movePrevious: DataGridState<Long>? = None
+    var moveWaitFrames = 0
+    var idlePass = 0
+    var idleFrames = 0L
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(30L)
+    private val held = ArrayList<NativeNode>()
+    init {
+        original.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))
+        original.setColumnState(GridColumnState(GridColumnId("c299"), pin = GridPin.End))
+    }
+    fun save(change: GridChange<Long, Long>, completion: GridCommit<Long>) {
+        submissions += 1
+        pending = Some(completion)
+        val before = rows
+        pendingRows =
+            Some(
+                TableRows(
+                    Array<TableRecord<Long>>(before.count) {
+                        index -> TableRecord(
+                            before.keyAt(index),
+                            if (before.keyAt(index) == change.address.row.dataKey!!)
+                                change.value
+                            else
+                                before.rowAt(index)
+                        )
+                    }
+                )
+            )
+    }
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                active = Some(application)
+                uiHost = Some(host)
+                application.setControlFlow(ControlFlow.WaitUntil(timeout))
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid column tools";
+                            size = LogicalSize(960.0, 660.0)
+                        }
+                    )
+                window = Some(native)
+                frames = Some(observeFrames(native))
+                idleDeadline = Some(native.createDeadline { moveIdleTick() })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> view = Some(ViewProbe(pointer))
+                            }
+                        }
+                    }
+                }
+                ui = host.attach(native, { mount -> ColumnsScene(this, mount) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(application.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> {
+                if (MonotonicTimeSource.now() >= timeout)
+                    fail(Some(f"${diagnostic}, nativeFocus=${window?.isFocused ?: false}"))
+            }
+            else -> {}
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        held.add(node);
+        return node
+    }
+    fun identified(id: String): NativeNode =
+        keep(root!!.find(id) ?: fail(Some(f"missing id ${id} at ${phase}")))
+    fun find(
+        node: NativeNode,
+        name: String,
+        value: Boolean = false,
+        role: String? = None
+    ): NativeNode? {
+        if (
+            node.flag(0) &&
+                node.text(
+                    if (value)
+                        1
+                    else
+                        0,
+                    Some(name)
+                ) &&
+                (role == None || node.text(2, role))
+        )
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val found = find(keep(node.child(index)), name, value, role)
+            when (found) {
+                case Some(_) -> return found;
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun named(name: String): NativeNode =
+        find(root!!, name) ?: fail(Some(f"missing ${name} at ${phase}"))
+    fun menu(name: String): NativeNode =
+        find(root!!, name, role = Some("AXMenuItem")) ?:
+            fail(Some(f"missing menu ${name} at ${phase}"))
+    fun caption(text: String) {
+        when (find(root!!, text, true)) {
+            case Some(_) -> {};
+            case None -> {
+                named(text);
+                Unit
+            }
+        }
+    }
+    fun value(text: String) {
+        assertTrue(field!!.text(1, Some(text)), Some(f"width draft at ${phase}: ${text}"))
+    }
+    fun entry(id: String): GridColumnState {
+        for (entry in model.columnState)
+            if (entry.id.value == id)
+                return entry
+        return fail(Some(f"missing state ${id}"))
+    }
+    fun controls(id: String) {
+        field = Some(identified(f"grid-columns-${id}-width"))
+        apply = Some(identified(f"grid-columns-${id}-apply"))
+        restore = Some(identified(f"grid-columns-${id}-restore"))
+        pin = Some(identified(f"grid-columns-${id}-pin"))
+    }
+    fun key(code: Int, text: String) {
+        assertEquals(0, columnKey(window!!, code, text))
+        inputQueued()
+    }
+    fun inputQueued() {
+        waitingInput = true
+        // Input dispatch precedes the next owner mailbox batch.
+        assertTrue(
+            active!!.proxy().post {
+                _ ->
+                waitingInput = false
+                if (!finished)
+                    frame?.requestFrame()
+            }
+        )
+    }
+    public override fun close() {
+        idleDeadline?.close()
+        calls?.close();
+        for (node in held)
+            node.close();
+        view?.close()
+        frames?.close()
+    }
+}
+
+internal fun <Row> nativeGridData(row: GridRow<Row>): Row =
+    when (row) {
+        case Data(val value, _) -> value
+        else -> fail(Some("expected a business record"))
+    }

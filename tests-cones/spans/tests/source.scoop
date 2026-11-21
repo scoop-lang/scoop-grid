@@ -1,0 +1,148 @@
+package scoop.grid.tests.spans
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class SpanRow(val key: Long, val merged: Boolean)
+
+internal class SpanReads {
+    var count = 0L
+}
+
+internal class SpanRows(
+    val reads: SpanReads,
+    val total: Long = 100000000L,
+    val merged: Boolean = true,
+    val removed: Long? = None
+): TableSource<SpanRow> {
+    public override val count: Long get() =
+        total -
+            if (removed == None)
+                0L
+            else
+                1L
+    private fun number(index: Long): Long =
+        if (removed != None && index >= removed!!)
+            index + 1L
+        else
+            index
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(number(index))
+    public override fun rowAt(index: Long): SpanRow {
+        reads.count += 1L
+        val key = number(index)
+        return SpanRow(key, merged && key % 2L == 0L)
+    }
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value < 0L || value >= total || removed == Some(value))
+                None
+            else
+                Some(
+                    if (removed != None && value > removed!!)
+                        value - 1L
+                    else
+                        value
+                )
+            else -> None
+        }
+}
+
+internal fun spanId(column: Long): GridColumnId = GridColumnId(f"c${column}")
+
+internal fun spanAddress(row: Long, column: Long): GridCellAddress =
+    GridCellAddress(ViewKey.Number(row), spanId(column))
+
+internal fun spanRanges(row: SpanRow): Array<GridColumnSpan> =
+    if (row.merged)
+        [
+            GridColumnSpan([spanId(0L), spanId(1L)]),
+            GridColumnSpan([spanId(20L), spanId(21L), spanId(22L)]),
+            GridColumnSpan([spanId(28L), spanId(29L)])
+        ]
+    else
+        []
+
+internal fun spanColumns(probe: SpanProbe): Array<GridColumn<SpanRow>> =
+    Array<GridColumn<SpanRow>>(30L) {
+        column -> gridColumn<SpanRow, String>(
+            spanId(column),
+            f"Column ${column}",
+            { row -> f"${row.key}:${column}" },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(80.0), minimum = 0.0),
+            cell =
+                Some {
+                    row -> element(
+                        SpanBoxProps(probe, row, column),
+                        { props, scope -> SpanBox(props, scope) }
+                    )
+                },
+            edit =
+                if (column == 20L || column == 21L)
+                    Some(
+                        gridEdit<SpanRow, String>(
+                            {
+                                value ->
+                                val editor = gridTextEditor(value)
+                                probe.editor = Some(editor)
+                                editor
+                            },
+                            {
+                                _, completion ->
+                                probe.submissions += 1
+                                probe.pending = Some(completion)
+                            }
+                        )
+                    )
+                else
+                    None
+        )
+    }
+
+private class SpanBoxProps(val probe: SpanProbe, val row: SpanRow, val column: Long)
+
+private class SpanBox(private val props: Props<SpanBoxProps>, scope: ComponentScope): Element<Unit>(
+    scope
+) {
+    private val address = spanAddress(props.value.row.key, props.value.column)
+    public override fun onMount() {
+        assertTrue(props.value.probe.live.add(address), Some("duplicate spanning cell"))
+        props.value.probe.created += 1L
+    }
+    public override fun onUnmount() {
+        assertTrue(props.value.probe.live.remove(address))
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val input = props.value
+        if (constraints.maxWidth == None)
+            input.probe.widthSamples.add(address)
+        if (constraints.maxHeight == None)
+            input.probe.heightSamples.put(address, constraints.maxWidth ?: 0.0)
+        return LayoutResult(
+            LayoutMetrics(
+                constraints.constrain(
+                    Size(
+                        if (input.column == 20L)
+                            600.0
+                        else
+                            120.0,
+                        if ((constraints.maxWidth ?: 1000.0) >= 200.0)
+                            24.0
+                        else
+                            64.0
+                    )
+                )
+            ),
+            Unit
+        )
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val bounds = Rect(0.0, 0.0, context.size.width, context.size.height)
+        context.draw { paint -> paint.canvas.drawRect(bounds, Paint(Color(0.3, 0.55, 0.75, 1.0))) }
+    }
+}

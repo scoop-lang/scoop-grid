@@ -1,0 +1,274 @@
+package scoop.grid.tests.window
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.surface.FrameSubmission
+import scoop.test.*
+import scoop.tests.surface.sendSurfaceScroll
+import scoop.tests.window.saveNativeClipboard
+import scoop.tests.window.restoreNativeClipboard
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+
+@Test
+private class GridWindowTest {
+    @Test
+    fun `wide native grid virtualizes both axes and focuses exact keyed cells with one frozen instance`() {
+        val probe = GridWindowProbe()
+        @Unsafe
+        {
+            val clipboard = saveNativeClipboard() ?: fail(Some("cannot save clipboard"))
+            try {
+                context(ThemeSource(shadcnTheme())) {
+                    UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                        host -> Application().run(host)
+                    }
+                }
+            } finally {
+                try {
+                    try {
+                        probe.editing.ime.close()
+                    } finally {
+                        probe.editing.direct.close()
+                    }
+                } finally {
+                    assertEquals(0, restoreNativeClipboard(clipboard))
+                }
+            }
+        }
+        assertEquals(9, probe.phase)
+        assertTrue(probe.navigation.finished)
+        assertTrue(probe.editing.finished)
+        assertFalse(probe.navigation.handle.isAttached)
+        assertFalse(probe.navigation.first.isAttached)
+        assertFalse(probe.navigation.second.isAttached)
+        assertFalse(probe.handle.isAttached)
+        assertFalse(probe.scroll.isAttached)
+        assertEquals(0L, probe.cells.live.size)
+        assertTrue(probe.cells.all.size < 1600L)
+        assertTrue(probe.rows.reads < 300L)
+        for (record in probe.cells.all)
+            if (record.mounts > 0)
+                assertEquals(record.mounts, record.closes)
+    }
+}
+
+internal class GridWindowProbe {
+    val editing = GridEditingProbe()
+    val navigation = GridNavigationProbe(editing)
+    val rows = WindowRows()
+    val cells = WindowCells()
+    val model = DataGridState(rows, cells.columns())
+    val scroll = ScrollState()
+    val handle = DataGridHandle()
+    val outside = FocusHandle()
+    val direction = state(LayoutDirection.Ltr)
+    val width = state(640.0)
+    val show = state(true)
+    val target = address(5000L, 200L)
+    var targetRecord: CellRecord? = None
+    var phase = -1
+    var window: Window? = None
+    init {
+        model.setColumnState(GridColumnState(GridColumnId("column-0"), pin = GridPin.Start))
+        model.setColumnState(GridColumnState(GridColumnId("column-299"), pin = GridPin.End))
+    }
+    fun address(row: Long, column: Long): GridCellAddress =
+        GridCellAddress(ViewKey.Number(row), GridColumnId(f"column-${column}"))
+    fun event(host: UiHost, active: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                val window =
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid native viewport";
+                            size = LogicalSize(640.0, 360.0)
+                        }
+                    )
+                this.window = Some(window)
+                window.requestFocus()
+                host.attach(window, { scope -> WindowScene(this, active, scope) })
+                active.setControlFlow(
+                    ControlFlow.WaitUntil(MonotonicTimeSource.now() + Duration.seconds(20L))
+                )
+            }
+            case NewEvents(StartCause.Deadline) -> fail(
+                Some(
+                    f"grid timeout at phase ${phase}, navigation=${navigation.phase}, editing=${
+                        editing.phase
+                    }, cells=${cells.live.size}, pending=${handle.isPending}, nativeFocus=${
+                        window?.isFocused ?: false
+                    }, navigationFocus=${navigation.focusDescription}, navigationPending=${
+                        navigation.handle.isPending
+                    }, lastKey=${navigation.lastKey}"
+                )
+            )
+            case Window(
+                _,
+                WindowEvent.TextInput(TextInputEvent.Enabled(val value))
+            ) -> editing.connection = value
+            case Window(
+                _,
+                WindowEvent.TextInput(TextInputEvent.Disabled(_))
+            ) -> editing.connection = None
+            else -> {}
+        }
+    }
+    fun advance(active: ActiveApplication, frame: ComponentScope) {
+        when (phase) {
+            case - 1 -> {
+                phase = -2
+                assertTrue(
+                    active.proxy().post {
+                        _ ->
+                        assertTrue(sendSurfaceScroll(window!!, 240.0, 150.0, -4, 0))
+                        assertTrue(
+                            active.proxy().post {
+                                _ ->
+                                phase = 0
+                                frame.requestFrame()
+                            }
+                        )
+                    }
+                )
+            }
+            case 0 -> {
+                assertEquals(Point(160.0, 0.0), scroll.offset)
+                assertTrue(cells.live.size > 0L && cells.live.size < 150L)
+                assertTrue(rows.reads < 40L)
+                assertTrue(handle.focusCell(target))
+                assertEquals(None, handle.focusedCell)
+                assertEquals(Some(target), handle.pendingCell)
+                phase = 1
+            }
+            case 1 -> {
+                if (handle.focusedCell == Some(target)) {
+                    assertTrue(scroll.offset.x > 17000.0 && scroll.offset.y > 139000.0)
+                    targetRecord = cells.live[target]
+                    assertTrue(cells.live.containsKey(address(5000L, 0L)))
+                    assertTrue(cells.live.containsKey(address(5000L, 299L)))
+                    scroll.scrollTo(Point(0.0, 0.0))
+                    phase = 2
+                }
+            }
+            case 2 -> {
+                assertEquals(Some(target), handle.focusedCell)
+                assertEquals(Point(0.0, 0.0), scroll.offset)
+                assertTrue(cells.live[target]!! === targetRecord!!)
+                assertTrue(cells.live.size < 250L)
+                assertTrue(handle.focusCell(address(99999999L, 299L)))
+                phase = 3
+            }
+            case 3 -> {
+                if (handle.focusedCell == Some(address(99999999L, 299L))) {
+                    assertFalse(handle.focusCell(address(100000000L, 1L)))
+                    model.setColumnState(
+                        GridColumnState(GridColumnId("column-150"), visible = false)
+                    )
+                    phase = 4
+                }
+            }
+            case 4 -> {
+                assertFalse(handle.focusCell(address(3L, 150L)))
+                assertTrue(handle.focusCell(address(7000L, 180L)))
+                assertTrue(outside.requestFocus())
+                phase = 5
+            }
+            case 5 -> {
+                if (outside.hasFocus) {
+                    assertFalse(handle.isPending)
+                    assertFalse(cells.live.containsKey(address(7000L, 180L)))
+                    direction.value = LayoutDirection.Rtl
+                    scroll.scrollTo(Point(0.0, 0.0))
+                    phase = 6
+                }
+            }
+            case 6 -> {
+                assertTrue(handle.focusCell(address(123L, 10L)))
+                phase = 7
+            }
+            case 7 -> {
+                if (handle.focusedCell == Some(address(123L, 10L))) {
+                    assertTrue(scroll.offset.x > 24000.0)
+                    width.value = 80.0
+                    phase = 8
+                }
+            }
+            case 8 -> {
+                assertTrue(cells.live.size < 70L)
+                show.value = false
+                phase = 9
+            }
+            case 9 -> {
+                assertFalse(handle.isAttached)
+                assertEquals(0L, cells.live.size)
+                navigation.start(window!!)
+            }
+            else -> {}
+        }
+    }
+}
+
+private class WindowScene(
+    private val probe: GridWindowProbe,
+    private val active: ActiveApplication,
+    scope: ComponentScope
+): Component(scope) {
+    public override fun render(): View {
+        val probe = this.probe
+        val active = this.active
+        if (probe.editing.visible.value)
+            return component({ scope -> EditingScene(probe.editing, active, scope) })
+        if (probe.navigation.visible.value)
+            return component({ scope -> NavigationScene(probe.navigation, active, scope) })
+        return element(
+            { scope -> WindowFrame(probe, active, scope) },
+            [
+                if (probe.show.value)
+                    direction(
+                        dataGrid(probe.model) {
+                            height = 320.0
+                            width = Some(probe.width.value)
+                            rowHeight = 28.0
+                            headerHeight = 32.0
+                            scroll = Some(probe.scroll)
+                            handle = Some(probe.handle)
+                        },
+                        probe.direction.value
+                    )
+                else
+                    empty(),
+                button("Outside grid", onClick = {}) { focus = FocusOptions(Some(probe.outside)) }
+            ]
+        )
+    }
+}
+
+private class WindowFrame(
+    private val probe: GridWindowProbe,
+    private val active: ActiveApplication,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        val size = constraints.constrain(Size(640.0, 360.0))
+        context.measureChild(0L, Constraints(maxWidth = Some(size.width), maxHeight = Some(320.0)))
+        context.placeChild(0L, Point(0.0, 0.0))
+        context.measureChild(1L, Constraints.tight(Size(180.0, 40.0)))
+        context.placeChild(1L, Point(0.0, 320.0))
+        return LayoutResult(LayoutMetrics(size), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        context.children()
+        context.onFrameComplete {
+            frame -> if (frame.submission == FrameSubmission.Accepted)
+                probe.advance(active, scope)
+        }
+    }
+}

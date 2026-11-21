@@ -1,0 +1,25 @@
+package scoop.grid.tests.filters
+
+import scoop.tests.window.nativeEditorKey
+import scoop.window.Window
+import scoop.window.native.*
+
+internal fun filterKey(window: Window, code: Int, text: String): Int {
+    @Unsafe
+    {
+        return window.acquireNativeWindow().use {
+            lease -> @Unsafe
+            {
+                return@use when (lease.handle) {
+                    case AppKit(_, val view) -> text.withUtf8Bytes {
+                        bytes,
+                        length -> @Unsafe
+                        {
+                            return@withUtf8Bytes nativeEditorKey(view, code, bytes, length, 0)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

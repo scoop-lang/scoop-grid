@@ -1,0 +1,290 @@
+package scoop.grid.tests.heights
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.style.shadcn.shadcnTheme
+
+internal fun HeightProbe.advance() {
+    when (phase) {
+        case 1 -> scroll.scrollTo(Point(0.0, 40.0))
+        case 2 -> replace(extra = 32.0)
+        case 3 -> {
+            beforeDiscard = scroll.offset;
+            discardNext = true;
+            replace(extra = 64.0)
+        }
+        case 4 -> replace(extra = 64.0, swapped = true)
+        case 5 -> {
+            replace();
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 6 -> mode.value = GridRowSizing.Content([GridColumnId("c24")])
+        case 7 -> scroll.scrollTo(Point(1700.0, 0.0))
+        case 8 -> model.setColumnState(GridColumnState(GridColumnId("c24"), width = Some(180.0)))
+        case 9 -> model.setColumnState(
+            GridColumnState(GridColumnId("c24"), visible = false, width = Some(180.0))
+        )
+        case 10 -> model.setColumnState(GridColumnState(GridColumnId("c24"), width = Some(180.0)))
+        case 11 -> scroll.scrollTo(Point(0.0, 42.0))
+        case 12 -> theme.current.value =
+            shadcnTheme() { tokens { typography { body { fontSize = 21.0 } } } }
+        case 13 -> {
+            direction.value = LayoutDirection.Rtl;
+            scroll.scrollTo(Point(100000000.0, 60.0))
+        }
+        case 14 -> {
+            theme.current.value = shadcnTheme();
+            direction.value = LayoutDirection.Ltr;
+            scroll.scrollTo(Point(0.0, 42.0))
+        }
+        case 15 -> assertTrue(handle.focusCell(heightAddress(50000000L, 24L)))
+        case 16 -> assertTrue(handle.focusCell(heightAddress(1L, 1L)))
+        case 17 -> {
+            priorHeight = rowHeights[1L]!!;
+            assertTrue(handle.beginEdit(heightAddress(1L, 24L)))
+        }
+        case 18 -> {
+            editor!!.state.replaceAll("bad");
+            assertEquals(GridEditAttempt.Rejected, handle.commitEdit())
+        }
+        case 19 -> assertTrue(handle.cancelEdit())
+        case 20 -> {
+            widthSamples.clear();
+            fit = Some(handle.fitColumnToContent(GridColumnId("c24")));
+            assertTrue(fit!!.isPending)
+        }
+        case 21 -> height.value = 0.0
+        case 22 -> height.value = 224.0
+        case 23 -> model.setColumnStates(
+            Array<GridColumnState>(model.columnState.size) {
+                index ->
+                val old = model.columnState[index];
+                GridColumnState(old.id, false, old.width, old.pin)
+            }
+        )
+        case 24 -> resetColumns()
+        case 25 -> replace(0L)
+        case 26 -> replace(12L)
+        case 27 -> {
+            mode.value = GridRowSizing.Fixed;
+            baseHeight.value = 64.0
+        }
+        case 28 -> {
+            mode.value = GridRowSizing.Explicit(::explicitHeight);
+            baseHeight.value = 32.0
+            assertTrue(outside.requestFocus());
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 29 -> {}
+        case 30 -> {}
+        case 31 -> {}
+        case 32 -> {
+            mode.value = GridRowSizing.Content([GridColumnId("c23")]);
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 33 -> {
+            priorHeight = rowHeights[0L]!!;
+            model.setColumnState(GridColumnState(GridColumnId("c23"), width = Some(400.0)))
+        }
+        case 34 -> {
+            mode.value = GridRowSizing.Explicit(::explicitHeight);
+            resetColumns();
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 35 -> assertTrue(handle.focusCell(heightAddress(2L, 1L)))
+        case 36 -> key(121, "\uf72d")
+        case 37 -> {}
+        case 38 -> enabled.value = false
+        case 39 -> enabled.value = true
+        case 40 -> assertTrue(handle.focusCell(heightAddress(11L, 24L)))
+        case 41 -> {
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+        }
+        case 42 -> {
+            finished = true;
+            active!!.requestExit()
+        }
+        else -> fail(Some("unexpected height phase"))
+    }
+}
+
+internal fun HeightProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            table = Some(findTable(root!!) ?: fail(Some("missing height table")))
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 32.0))
+            bounds(cell(1L, 0L), Rect(0.0, 64.0, 80.0, 64.0))
+            bounds(cell(2L, 0L), Rect(0.0, 128.0, 80.0, 48.0))
+            bounds(cell(3L, 29L), Rect(440.0, 176.0, 60.0, 96.0))
+            assertFalse(live.contains(heightAddress(0L, 24L)))
+            assertTrue(reads.count < 100L)
+        }
+        case 1 -> {
+            assertEquals(40.0, scroll.offset.y);
+            bounds(cell(1L, 0L), Rect(0.0, 24.0, 80.0, 64.0))
+        }
+        case 2 -> {
+            assertEquals(72.0, scroll.offset.y);
+            bounds(cell(1L, 0L), Rect(0.0, 24.0, 80.0, 64.0))
+        }
+        case 3 -> {
+            assertEquals(1, discarded);
+            assertEquals(104.0, scroll.offset.y);
+            bounds(cell(1L, 0L), Rect(0.0, 24.0, 80.0, 64.0))
+        }
+        case 4 -> {
+            assertEquals(8.0, scroll.offset.y);
+            bounds(cell(0L, 0L), Rect(0.0, 24.0, 80.0, 64.0))
+        }
+        case 5 -> assertEquals(0.0, scroll.offset.y)
+        case 6 -> {
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 56.0))
+            bounds(cell(1L, 0L), Rect(0.0, 88.0, 80.0, 76.0))
+            bounds(cell(2L, 0L), Rect(0.0, 164.0, 80.0, 96.0))
+            assertTrue(live.contains(heightAddress(0L, 24L)))
+            assertFalse(live.contains(heightAddress(0L, 22L)))
+        }
+        case 7 -> {
+            assertEquals(1700.0, scroll.offset.x);
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 56.0));
+            assertTrue(live.contains(heightAddress(0L, 24L)))
+        }
+        case 8 -> {
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 36.0));
+            bounds(cell(1L, 0L), Rect(0.0, 68.0, 80.0, 46.0))
+        }
+        case 9 -> {
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 32.0));
+            assertFalse(live.contains(heightAddress(0L, 24L)))
+        }
+        case 10 -> bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 36.0))
+        case 11 -> bounds(cell(1L, 0L), Rect(0.0, 26.0, 80.0, 46.0))
+        case 12 -> {
+            assertEquals(60.0, scroll.offset.y);
+            bounds(cell(1L, 0L), Rect(0.0, 42.0, 120.0, 69.0))
+        }
+        case 13 -> bounds(cell(1L, 0L), Rect(380.0, 42.0, 120.0, 69.0))
+        case 14 -> bounds(cell(1L, 0L), Rect(0.0, 26.0, 80.0, 46.0))
+        case 15 -> {
+            retry = handle.isPending || handle.focusedCell != Some(heightAddress(50000000L, 24L))
+            if (!retry)
+                bounds(cell(50000000L, 24L), Rect(260.0, 168.0, 180.0, 56.0))
+        }
+        case 16 -> {
+            retry = handle.isPending || handle.focusedCell != Some(heightAddress(1L, 1L))
+            if (!retry) {
+                bounds(cell(1L, 0L), Rect(0.0, 32.0, 80.0, 46.0));
+                retained = Some(cell(1L, 24L))
+            }
+        }
+        case 17 -> {
+            retry = handle.isPending || handle.focusedCell != Some(heightAddress(1L, 24L))
+            if (!retry) {
+                assertEquals(Some(heightAddress(1L, 24L)), handle.editingCell)
+                assertTrue(rowHeights[1L]!! >= priorHeight)
+                priorHeight = rowHeights[1L]!!
+                assertTrue(retained!!.same(cell(1L, 24L)))
+                assertFalse(live.contains(heightAddress(1L, 24L)))
+                assertTrue(editorNode(retained!!)!!.flag(1))
+                assertTrue(editorNode(retained!!)!!.text(5, None))
+            }
+        }
+        case 18 -> {
+            assertTrue(handle.editError != None);
+            assertEquals(priorHeight, rowHeights[1L]!!);
+            assertTrue(retained!!.same(cell(1L, 24L)));
+            assertTrue(editorNode(retained!!)!!.text(5, handle.editError))
+        }
+        case 19 -> {
+            assertEquals(None, handle.editingCell);
+            assertEquals(46.0, rowHeights[1L]!!);
+            assertTrue(live.contains(heightAddress(1L, 24L)))
+        }
+        case 20 -> when (fit!!.result) {
+            case Pending -> retry = true
+            case Applied(val width) -> {
+                assertEquals(176.0, width)
+                assertFalse(widthSamples.contains(heightAddress(0L, 24L)))
+                assertTrue(widthSamples.contains(heightAddress(1L, 24L)))
+                assertTrue(widthSamples.contains(heightAddress(2L, 24L)))
+                assertTrue(widthSamples.size <= 6L)
+            }
+            else -> fail(Some("height content fit failed"))
+        }
+        case 21 -> assertEquals(0.0, scroll.viewport.height)
+        case 22 -> assertEquals(224.0, scroll.viewport.height)
+        case 23 -> {
+            assertEquals(0L, live.size);
+            assertEquals(None, handle.focusedCell)
+        }
+        case 24 -> assertTrue(live.size > 0L)
+        case 25 -> {
+            assertEquals(0L, live.size);
+            assertEquals(Point(0.0, 0.0), scroll.offset);
+            assertEquals(None, table!!.cell(0L, 0L)?.numericValue)
+        }
+        case 26 -> bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 56.0))
+        case 27 -> {
+            bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 64.0));
+            assertFalse(live.contains(heightAddress(0L, 24L)))
+        }
+        case 28 -> {
+            bounds(cell(1L, 0L), Rect(0.0, 64.0, 80.0, 64.0))
+            priorCreated = created
+            offscreen = Some(cell(10L, 24L))
+            assertTrue(offscreen!!.text(1, Some("10")))
+            assertFalse(live.contains(heightAddress(10L, 24L)))
+            assertEquals(priorCreated, created)
+        }
+        case 29 -> {
+            assertTrue(live.contains(heightAddress(10L, 24L)));
+            assertEquals(Point(0.0, 0.0), scroll.offset);
+            assertTrue(outside.hasFocus)
+        }
+        case 30 -> assertTrue(outside.hasFocus)
+        case 31 -> {
+            revealed = matchesBounds(cell(10L, 24L), Rect(340.0, 176.0, 100.0, 48.0));
+            assertTrue(outside.hasFocus);
+            assertFalse(handle.isPending)
+        }
+        case 32 -> assertTrue(
+            rowHeights[0L]!! > 48.0,
+            Some("default text must wrap in an automatic height column")
+        )
+        case 33 -> assertTrue(rowHeights[0L]!! < priorHeight)
+        case 34 -> bounds(cell(0L, 0L), Rect(0.0, 32.0, 80.0, 32.0))
+        case 35 -> retry = handle.isPending || handle.focusedCell != Some(heightAddress(2L, 1L))
+        case 36 -> {}
+        case 37 -> {
+            retry = handle.isPending || handle.focusedCell != Some(heightAddress(5L, 1L));
+            if (!retry)
+                bounds(cell(5L, 0L), Rect(0.0, 160.0, 80.0, 64.0))
+        }
+        case 38 -> {
+            assertFalse(cell(5L, 0L).flag(1));
+            assertFalse(cell(5L, 1L).flag(1));
+            assertFalse(cell(5L, 29L).flag(1));
+            assertFalse(cell(0L, 24L).flag(1));
+            assertFalse(handle.focusCell(heightAddress(2L, 1L)))
+        }
+        case 39 -> {
+            assertTrue(cell(5L, 0L).flag(1));
+            assertTrue(cell(5L, 1L).flag(1));
+            assertTrue(cell(5L, 29L).flag(1));
+            assertTrue(cell(0L, 24L).flag(1))
+        }
+        case 40 -> retry = handle.isPending || handle.focusedCell != Some(heightAddress(11L, 24L))
+        case 41 -> {
+            assertFalse(handle.isAttached);
+            assertFalse(handle.isPending);
+            assertEquals(0L, live.size);
+            assertFalse(offscreen!!.flag(0))
+        }
+        else -> fail(Some("unexpected height inspection"))
+    }
+}

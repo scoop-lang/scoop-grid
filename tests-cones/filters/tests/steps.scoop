@@ -1,0 +1,212 @@
+package scoop.grid.tests.filters
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+
+internal fun FilterProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    assertEquals(expected, model.query, Some(f"query at ${phase}"))
+    assertEquals(expectedEvents, queryEvents, Some(f"query notifications at ${phase}"))
+    when (phase) {
+        case 0 -> {
+            apply = Some(identified("grid-filter-apply"))
+            clear = Some(identified("grid-filter-clear"))
+            revert = Some(identified("grid-filter-revert"))
+            control = Some(identified("grid-filter-1-load"))
+            assertEquals(0L, encodings)
+            count(0L)
+        }
+        case 2 -> {
+            assertEquals(10000L, encodings)
+            collection = Some(identified("grid-filter-1-values"))
+            assertEquals(10000L, collection!!.count)
+            firstChoice = Some(identified("grid-filter-1-choice-0"))
+            control = Some(identified("grid-filter-1-choice-1"))
+            assertFalse(firstChoice!!.same(control!!))
+            assertTrue(firstChoice!!.text(0, Some("同名")))
+            assertTrue(control!!.text(0, Some("同名")))
+            assertTrue(collection!!.roleCount("AXCheckBox") <= 32L)
+            val last = keep(collection!!.child(9999L))
+            assertTrue(last.text(0, Some("值 9999")))
+            assertEquals(0L, last.count)
+            assertEquals(10000L, encodings)
+        }
+        case 4 -> {
+            assertEquals(1L, firstChoice!!.numericValue)
+            assertTrue(firstChoice!!.same(identified("grid-filter-1-choice-0")))
+            assertTrue(collection!!.same(identified("grid-filter-1-values")))
+            assertTrue(collection!!.text(0, Some("Rule 1 Tag candidates")))
+            assertTrue(apply!!.text(0, Some("Apply conditions")))
+            assertEquals(10000L, encodings)
+            caption("chosen:1; shown:10000")
+        }
+        case 6 -> {
+            assertEquals(1L, control!!.numericValue)
+            assertEquals(2L, collection!!.trait(4))
+            count(0L)
+        }
+        case 8 -> {
+            count(2L)
+            assertEquals(10000L, encodings)
+            field = Some(identified("grid-filter-1-search"))
+            control = Some(identified("grid-filter-1-search-apply"))
+        }
+        case 10 -> value(field, "值 9999")
+        case 12 -> {
+            assertEquals(1L, collection!!.count)
+            assertFalse(firstChoice!!.flag(0))
+            caption("已选 2 项 · 当前列表 1 项")
+            lastChoice = Some(identified("grid-filter-1-choice-9999"))
+        }
+        case 14 -> assertEquals(1L, lastChoice!!.numericValue)
+        case 16 -> {
+            count(3L);
+            assertEquals(10000L, encodings)
+        }
+        case 17 -> {
+            caption("候选已过期，请重新加载；已选值仍保留")
+            assertFalse(collection!!.flag(0))
+            assertFalse(lastChoice!!.flag(0))
+            assertEquals(10000L, encodings)
+            control = Some(identified("grid-filter-1-load"))
+        }
+        case 19 -> {
+            assertEquals(20000L, encodings)
+            val replacement = identified("grid-filter-1-choice-9999")
+            assertFalse(replacement.same(lastChoice!!))
+            assertEquals(1L, replacement.numericValue)
+            caption("已选 3 项 · 当前列表 1 项")
+        }
+        case 21 -> {
+            count(10000L);
+            control = Some(named("筛选条件 添加条件"))
+        }
+        case 23 -> {
+            field = Some(named("条件 1 Name 筛选值"))
+            control = Some(named("条件 1 Name 筛选列"))
+        }
+        case 25 -> retry = !field!!.flag(4)
+        case 26 -> {
+            if (!field!!.text(0, Some("Rule 1 Name value"))) {
+                retry = true
+                return
+            }
+            assertTrue(field!!.flag(4))
+            assertTrue(field!!.same(named("Rule 1 Name value")))
+            value(field, "中😀");
+            assertFalse(apply!!.flag(1));
+            assertFalse(control!!.flag(1))
+        }
+        case 28 -> {
+            if (!field!!.text(0, Some("条件 1 Name 筛选值"))) {
+                retry = true
+                return
+            }
+            assertTrue(field!!.flag(4))
+            value(field, "");
+            assertTrue(apply!!.flag(1))
+        }
+        case 30 -> option = Some(menu("Amount"))
+        case 32 -> {
+            field = Some(named("条件 1 Amount 筛选值"))
+            value(field, "0")
+            control = Some(named("条件 1 Amount 筛选方式"))
+        }
+        case 34 -> option = Some(menu("Within range"))
+        case 36 -> {
+            field = Some(named("条件 1 Amount 下限"))
+            upper = Some(named("条件 1 Amount 上限"))
+        }
+        case 38 -> value(field, "9007199254740993")
+        case 40 -> value(upper, "9007199254740992")
+        case 42 -> {
+            caption("区间下限不能大于上限")
+            value(field, "9007199254740993")
+            value(upper, "9007199254740992")
+            assertTrue(field!!.same(named("条件 1 Amount 下限")))
+            count(10000L)
+        }
+        case 44 -> value(upper, "9007199254740994")
+        case 46 -> {
+            count(2L);
+            control = Some(named("筛选条件 添加条件组"))
+        }
+        case 50 -> {
+            caption("请为嵌套条件组添加条件，或删除该组")
+            control = Some(named("条件组 2 组合方式"))
+        }
+        case 52 -> option = Some(menu("任一条件（OR）"))
+        case 54 -> {
+            value(control, "任一条件（OR）")
+            control = Some(named("条件组 2 添加条件"))
+        }
+        case 56 -> field = Some(named("条件 2.1 Name 筛选值"))
+        case 58 -> value(field, "row alpha 1")
+        case 60 -> field = Some(named("条件 2.2 Name 筛选值"))
+        case 62 -> value(field, "row beta 1")
+        case 64 -> count(2L)
+        case 65 -> {
+            field = Some(named("条件 1 Enabled 筛选值"));
+            value(field, "是")
+        }
+        case 67 -> option = Some(menu("否"))
+        case 69 -> value(field, "否")
+        case 71 -> count(6666L)
+        case 72 -> {
+            field = Some(named("条件 1 Date 下限"))
+            upper = Some(named("条件 1 Date 上限"))
+            value(field, "2026-11-01")
+            value(upper, "2026-11-02")
+        }
+        case 74 -> value(upper, "2026-11-31")
+        case 76 -> {
+            caption("Problem:Use an ISO date");
+            value(upper, "2026-11-31")
+        }
+        case 78 -> value(upper, "2026-11-03")
+        case 80 -> {
+            count(1074L);
+            control = Some(named("条件 1 Date 下限 日历"))
+        }
+        case 82 -> {
+            assertEquals(1L, control!!.trait(1))
+            assertTrue(named("Earlier month").flag(1))
+            assertTrue(named("Later month").flag(1))
+        }
+        case 84 -> {
+            value(field, "2026-11-02");
+            assertEquals(0L, control!!.trait(1))
+        }
+        case 86 -> count(716L)
+        case 87 -> retry = handle.focusedCell != Some(address) || handle.isPending
+        case 89 -> {
+            assertEquals(Some(address), handle.editingCell)
+            assertTrue(handle.editError != None)
+            assertEquals(0, submissions)
+        }
+        case 91 -> {
+            assertTrue(handle.isSubmitting)
+            assertEquals(1, submissions)
+            assertFalse(apply!!.flag(1))
+            assertFalse(clear!!.flag(1))
+        }
+        case 93 -> {
+            assertEquals(None, handle.editingCell);
+            assertEquals(9007199254741025L, rows.rowAt(1L).amount)
+        }
+        case 95 -> count(10000L)
+        case 96 -> {
+            field = Some(named("条件 1 Name 筛选值"))
+            value(field, "row alpha")
+            assertEquals(GridFilter.All, original.query.filter)
+            count(5000L)
+        }
+        case 97 -> {
+            assertFalse(apply!!.flag(1));
+            assertFalse(field!!.flag(1))
+        }
+        case 100 -> retry = !apply!!.flag(4)
+        else -> {}
+    }
+}

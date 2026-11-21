@@ -1,0 +1,103 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.ui.component.TableSource
+
+internal class GridGrouped<Row>(
+    val topology: GridGroupTopology<Row>,
+    val aggregates: GridAggregations,
+    val order: GridGroupOrder<Row>,
+    val query: GridQuery
+) {
+    val descriptions: Array<GridGroupRow> =
+        Array<GridGroupRow>(topology.nodes.size) {
+            index ->
+            val node = topology.nodes[index]
+            GridGroupRow(node.path, node.label, node.count, aggregates.atGroup(index + 1L))
+        }
+}
+
+internal fun <Row> gridComputeGroups(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    previous: GridGrouped<Row>?
+): GridGrouped<Row> {
+    gridCheckGroupSorting(query)
+    val topology =
+        when (previous) {
+            case Some(val old) -> if (
+                old.topology.source ===
+                    source &&
+                    old.topology.columns ===
+                    columns &&
+                    gridArrayEqual(old.query.grouping, query.grouping)
+            )
+                old.topology
+            else
+                gridGroupTopology(source, columns, query.grouping)
+            case None -> gridGroupTopology(source, columns, query.grouping)
+        }
+    val aggregates =
+        when (previous) {
+            case Some(val old) -> if (
+                old.topology ===
+                    topology &&
+                    gridArrayEqual(old.query.aggregations, query.aggregations)
+            )
+                old.aggregates
+            else
+                gridGroupAggregate(topology, query.aggregations)
+            case None -> gridGroupAggregate(topology, query.aggregations)
+        }
+    val order =
+        when (previous) {
+            case Some(val old) -> if (
+                old.topology ===
+                    topology &&
+                    old.aggregates ===
+                    aggregates &&
+                    gridArrayEqual(old.query.sorting, query.sorting) &&
+                    gridArrayEqual(old.query.groupSorting, query.groupSorting)
+            )
+                old.order
+            else
+                gridOrderGroups(topology, aggregates, query)
+            case None -> gridOrderGroups(topology, aggregates, query)
+        }
+    when (previous) {
+        case Some(val old) -> if (
+            old.topology === topology && old.aggregates === aggregates && old.order === order
+        )
+            return old
+        case None -> {}
+    }
+    return GridGrouped(topology, aggregates, order, query)
+}
+
+internal fun gridCheckGroupSorting(query: GridQuery) {
+    val dimensions = HashSet<GridColumnId>()
+    for (column in query.grouping)
+        gridRequire(dimensions.add(column), "duplicate grouping column")
+    val metrics = HashSet<GridColumnId>()
+    for (selection in query.aggregations)
+        metrics.add(selection.column)
+    for (index in 0L ..< query.groupSorting.size) {
+        val sort = query.groupSorting[index]
+        gridRequire(dimensions.contains(sort.column), "group sort requires a grouping dimension")
+        when (sort.by) {
+            case Value -> {}
+            case Aggregate(val column) -> gridRequire(
+                metrics.contains(column),
+                "group sort requires an active aggregation"
+            )
+        }
+        for (prior in 0L ..< index) {
+            val old = query.groupSorting[prior]
+            gridRequire(
+                old.column != sort.column || old.by != sort.by,
+                "duplicate group sort target"
+            )
+        }
+    }
+}

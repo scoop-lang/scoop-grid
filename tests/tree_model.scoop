@@ -1,0 +1,245 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+@Test
+private class GridTreeModelTest {
+    @Test
+    fun `tree topology keeps business values distinct from typed subtree aggregates`() {
+        val source = TreeSource(treeRecords())
+        val model = treeModel(source)
+        treeAssertRows(model, [10L, 11L, 12L, 13L, 20L, 21L, 30L])
+        assertEquals(7L, source.reads.parents)
+        assertEquals(7L, source.reads.values)
+        assertEquals(3L, model.result.rootCount)
+        assertEquals(GridPageUnit.TreeRoots, model.result.pageUnit)
+        treeTotal(model, 10L, "115")
+        treeTotal(model, 12L, "12")
+        treeTotal(model, 20L, "200")
+        assertEquals(
+            Some(GridAggregateDisplay.Value("317")),
+            model.result.aggregates.total(GridColumnId("amount"))
+        )
+        assertEquals(
+            Some(GridAggregateDisplay.Value("ABCDEFG")),
+            model.result.aggregates.total(GridColumnId("note"))
+        )
+        assertEquals(
+            Some(GridAggregateDisplay.Value("ABDE")),
+            model.treeAggregations(ViewKey.Number(10L))!!.total(GridColumnId("note"))
+        )
+        assertEquals(
+            Some("100"),
+            model.copyText(Some(GridCellAddress(ViewKey.Number(10L), GridColumnId("amount"))))
+        )
+        val child = model.result.rows.hierarchyAt(3L)!!
+        assertEquals(2L, child.level)
+        assertEquals(Some(treeKey(12L)), child.parent)
+        assertEquals(None, child.expanded)
+        assertFalse(child.contextOnly)
+        val identities = HashSet<ViewKey>()
+        for (
+            key in [
+                GridRowKey.Data(ViewKey.Text("t:tree:n10")),
+                treeKey(10L),
+                GridRowKey.Total(GridTotalKey.Tree(ViewKey.Number(10L))),
+                GridRowKey.Total(GridTotalKey.Tree(ViewKey.Text("10"))),
+                GridRowKey.Total(GridTotalKey.AllFiltered)
+            ]
+        )
+            assertTrue(identities.add(key.viewKey))
+    }
+
+    @Test
+    fun `tree duplicate missing and cyclic parents fail before publishing a replacement`() {
+        val model = treeModel()
+        val before = model.result
+        val bad =
+            [
+                [TreeRecord(1L, None, "a", None), TreeRecord(1L, None, "b", None)],
+                [TreeRecord(1L, Some(9L), "a", None)],
+                [TreeRecord(1L, Some(1L), "a", None)],
+                [
+                    TreeRecord(1L, None, "ok", None),
+                    TreeRecord(2L, Some(3L), "a", None),
+                    TreeRecord(3L, Some(2L), "b", None)
+                ]
+            ]
+        for (records in bad) {
+            assertFailsWith<IllegalArgumentException> { model.replaceData(TreeSource(records)) }
+            assertTrue(model.result === before)
+        }
+        val definition = model.treeData!!
+        assertFailsWith<IllegalStateException> {
+            model.setTreeData(
+                Some(
+                    GridTreeData<TreeRecord>(
+                        { _ -> throw IllegalStateException(Some("parent failure")) }
+                    )
+                )
+            )
+        }
+        assertTrue(model.treeData!! === definition)
+        assertTrue(model.result === before)
+        assertFailsWith<IllegalArgumentException> { model.setGrouping([GridColumnId("name")]) }
+        assertTrue(model.result === before)
+    }
+
+    @Test
+    fun `tree deep ancestry and filtered paths are iterative and reuse validated parents`() {
+        val reads = TreeReads()
+        val records =
+            Array<TreeRecord>(10000L) {
+                index -> TreeRecord(
+                    index,
+                    if (index == 0L)
+                        None
+                    else
+                        Some(index - 1L),
+                    if (index == 9999L)
+                        "hit"
+                    else
+                        "path",
+                    Some(index)
+                )
+            }
+        val model = treeModel(TreeSource(records, reads), GridQuery())
+        assertEquals(10000L, model.result.rows.count)
+        assertEquals(9999L, model.result.rows.hierarchyAt(9999L)!!.level)
+        assertEquals(10000L, reads.parents)
+        reads.forbidden = true
+        assertTrue(model.setExpanded(treeKey(0L), false))
+        assertEquals(1L, model.result.rows.count)
+        assertTrue(model.setExpanded(treeKey(0L), true))
+        assertEquals(10000L, model.result.rows.count)
+        reads.forbidden = false
+        model.setQuery(model.query.withFilter(treeOnlyHit()))
+        assertEquals(1L, model.result.totalRows)
+        assertEquals(10000L, model.result.rows.count)
+        assertTrue(model.result.rows.hierarchyAt(9998L)!!.contextOnly)
+        assertFalse(model.result.rows.hierarchyAt(9999L)!!.contextOnly)
+        assertEquals(10000L, reads.parents)
+    }
+
+    @Test
+    fun `tree sort orders siblings by original values while equal names keep source order`() {
+        val source = TreeSource(treeRecords())
+        val model = treeModel(source)
+        model.setQuery(
+            model.query.withSorting(
+                [GridSort(GridColumnId("amount"), GridSortDirection.Descending)]
+            )
+        )
+        treeAssertRows(model, [20L, 21L, 10L, 12L, 13L, 11L, 30L])
+        model.setQuery(model.query.withSorting([GridSort(GridColumnId("name"))]))
+        treeAssertRows(model, [30L, 10L, 12L, 13L, 11L, 20L, 21L])
+        model.setQuery(
+            model.query.withFilter(
+                GridFilter.Column(
+                    GridColumnId("name"),
+                    GridCondition.Compare(GridComparison.Equal, GridLiteral.Text("same"))
+                )
+            )
+        )
+        treeAssertRows(model, [10L, 20L])
+        assertEquals(None, model.result.rows.hierarchyAt(0L)!!.expanded)
+        assertEquals(2L, model.result.totalRows)
+        assertEquals(7L, source.reads.parents)
+    }
+
+    @Test
+    fun `tree path context stays visible but only matching nodes enter page selection and totals`() {
+        val model = treeModel()
+        assertTrue(model.setRowSelected(ViewKey.Number(10L), true))
+        model.setQuery(model.query.withFilter(treeOnlyHit()))
+        treeAssertRows(model, [10L, 12L, 13L])
+        assertEquals(1L, model.result.pageRows.count)
+        assertEquals(1L, model.result.ordered.count)
+        assertEquals(ViewKey.Number(13L), model.result.ordered.keyAt(0L))
+        assertTrue(model.isContextRow(ViewKey.Number(10L)))
+        assertFalse(model.isContextRow(ViewKey.Number(13L)))
+        assertFalse(model.isRowSelectable(ViewKey.Number(10L)))
+        assertFalse(model.setRowSelected(ViewKey.Number(12L), true))
+        assertTrue(model.isRowSelected(ViewKey.Number(10L)))
+        assertEquals(1L, model.pageSelectableRows)
+        assertEquals(CheckState.Unchecked, model.pageRowSelection)
+        assertTrue(model.selectPageRows(true))
+        groupingAssertKeys(model.selectedRowKeys, [10L, 13L])
+        assertEquals(CheckState.Checked, model.pageRowSelection)
+        treeTotal(model, 10L, "7")
+        treeTotal(model, 12L, "7")
+        assertEquals(
+            Some(GridAggregateDisplay.Value("7")),
+            model.result.aggregates.total(GridColumnId("amount"))
+        )
+        model.pinRow(ViewKey.Number(12L), GridRowPin.Top)
+        treeAssertRows(model, [12L, 10L, 13L])
+        assertTrue(model.result.rows.hierarchyAt(0L)!!.contextOnly)
+        assertEquals(Some(treeKey(10L)), model.result.rows.hierarchyAt(0L)!!.parent)
+    }
+
+    @Test
+    fun `tree root pages retain whole branches subtotals and unique fixed records`() {
+        val source = TreeSource(treeRecords())
+        val model =
+            treeModel(
+                source,
+                treeQuery().withPagination(GridPagination.Page(0L, 1L))
+                .withTreeTotals(GridTotals(GridTotalPlacement.After, "Sub"))
+            )
+        assertEquals(3L, model.result.pageCount)
+        assertEquals(4L, model.result.pageRows.count)
+        assertEquals(6L, model.result.rows.count)
+        assertEquals(
+            GridRowKey.Total(GridTotalKey.Tree(ViewKey.Number(12L))),
+            model.result.rows.rowKeyAt(4L)
+        )
+        assertEquals(
+            GridRowKey.Total(GridTotalKey.Tree(ViewKey.Number(10L))),
+            model.result.rows.rowKeyAt(5L)
+        )
+        val page = model.result.pageRows
+        val aggregate = model.result.aggregates
+        source.reads.forbidden = true
+        model.pinRow(ViewKey.Number(12L), GridRowPin.Top)
+        model.pinRow(ViewKey.Number(21L), GridRowPin.Bottom)
+        assertEquals(1L, model.result.topCount)
+        assertEquals(1L, model.result.bottomCount)
+        assertTrue(page === model.result.pageRows)
+        assertTrue(aggregate === model.result.aggregates)
+        assertTrue(model.setExpanded(treeKey(10L), false))
+        treeAssertRows(model, [12L, 10L, 21L])
+        assertTrue(page === model.result.pageRows)
+        model.setQuery(model.query.withTreeTotals(GridTotals(GridTotalPlacement.Before)))
+        model.setPage(1L)
+        treeAssertRows(model, [12L, 20L, 21L])
+        assertEquals(2L, model.result.pageRows.count)
+        assertEquals(3L, model.result.rootCount)
+        assertTrue(aggregate === model.result.aggregates)
+        source.reads.forbidden = false
+    }
+
+    @Test
+    fun `tree empty matches preserve only explicit all filtered totals`() {
+        val model = treeModel(query = treeQuery().withTotals(GridTotals(GridTotalPlacement.Before)))
+        model.setQuery(model.query.withQuickFilter("absent"))
+        assertEquals(0L, model.result.totalRows)
+        assertEquals(0L, model.result.rootCount)
+        assertEquals(0L, model.result.pageRows.count)
+        assertEquals(1L, model.result.rows.count)
+        assertEquals(GridRowKey.Total(GridTotalKey.AllFiltered), model.result.rows.rowKeyAt(0L))
+        assertEquals(
+            Some(GridAggregateDisplay.Missing),
+            model.result.aggregates.total(GridColumnId("amount"))
+        )
+        assertTrue(
+            when (model.treeAggregations(ViewKey.Number(10L))) {
+                case None -> true;
+                case Some(_) -> false
+            }
+        )
+    }
+}

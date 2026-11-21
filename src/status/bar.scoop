@@ -1,0 +1,216 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.ThemeSource
+import scoop.ui.component.button as statusButton
+import scoop.ui.component.label as statusLabel
+import scoop.ui.component.row as statusRow
+
+public class GridStatusLabels public constructor(
+    public val rows: (Long) -> String = { count -> f"结果 ${count} 条" },
+    public val selected: (Long) -> String = { count -> f"已选 ${count} 条" },
+    public val calculate: String = "统计选区",
+    public val summary: (GridRangeStatistics) -> String =
+        {
+            value -> f"数值 ${value.count} 个  合计 ${value.sum}  最小 ${
+                value.minimum?.toString() ?: "—"
+            }  最大 ${value.maximum?.toString() ?: "—"}  平均 ${value.average?.toString() ?: "—"}"
+        },
+    public val unavailable: String = "无法统计当前选区",
+    public val changed: String = "统计期间选区已更新，请重新计算",
+    public val error: (String) -> String = { message -> message },
+    public val loaded: (GridExternalAvailability) -> String =
+        {
+            value -> when (value.recordTotal) {
+                case Some(val total) -> f"已加载 ${value.loadedRows} 条 / 共 ${total} 条"
+                case None -> f"已加载 ${value.loadedRows} 条 / 总数未知"
+            }
+        }
+)
+
+public class GridStatusBarProps<Row> public constructor(
+    public val state: DataGridState<Row>,
+    public val enabled: Boolean = true,
+    public val showStatistics: Boolean = true,
+    public val labels: GridStatusLabels = GridStatusLabels(),
+    public val content: View? = None,
+    public val fonts: FontCollection? = None,
+    public val theme: ThemeSource? = None,
+    public val focus: FocusOptions = FocusOptions()
+)
+
+private class GridStatisticsInput<Row>(val model: DataGridState<Row>) {
+    val rows = model.result.rows
+    val definitions = model.columns
+    val columns = model.columnState
+    val range = model.cellRange
+    fun current(value: DataGridState<Row>): Boolean =
+        model ===
+            value &&
+            rows ===
+            value.result.rows &&
+            definitions ===
+            value.columns &&
+            range ==
+            value.cellRange &&
+            gridSameCellColumns(columns, value.columnState)
+}
+
+public class GridStatusBar<Row> public constructor(
+    private val props: Props<GridStatusBarProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private var captured: GridStatisticsInput<Row>? = None
+    private var statistics: GridRangeStatistics? = None
+    private var error: String? = None
+    private val revision = state(0L)
+
+    private fun calculate() {
+        val input = props.value
+        if (
+            !scope.isMounted ||
+                !input.enabled ||
+                !input.showStatistics ||
+                input.state.cellRange ==
+                None
+        )
+            return
+        val snapshot = GridStatisticsInput(input.state)
+        var message: String? = None
+        val result =
+            try {
+                input.state.rangeStatistics()
+            } catch (failure: Exception) {
+                message = Some(failure.message ?: input.labels.unavailable)
+                None
+            }
+        if (!scope.isMounted)
+            return
+        if (!snapshot.current(props.value.state)) {
+            captured = Some(GridStatisticsInput(props.value.state))
+            statistics = None
+            error = Some(input.labels.changed)
+        } else {
+            captured = Some(snapshot)
+            statistics = result
+            error = message
+        }
+        revision.value += 1L
+    }
+    public override fun render(): View {
+        revision.value
+        val input = props.value
+        val bar = this
+        val current = captured?.current(input.state) ?: false
+        val message =
+            if (current && input.showStatistics)
+                error
+            else
+                None
+        val value =
+            if (current && input.showStatistics)
+                statistics
+            else
+                None
+        val range = input.state.cellRange
+        val labels = input.labels
+        return column {
+            add(
+                statusRow {
+                    alignment = CrossAlignment.Center
+                    spacing = 12.0
+                    add(
+                        statusLabel(
+                            when (input.state.result.external) {
+                                case Some(val value) -> labels.loaded(value);
+                                case None -> labels.rows(input.state.result.totalRows)
+                            }
+                        ) {
+                            fonts = input.fonts;
+                            theme = input.theme
+                            semantics = ComponentSemantics(automationId = Some("grid-status-rows"))
+                        }
+                    )
+                    add(
+                        statusLabel(labels.selected(input.state.selectedRowKeys.size)) {
+                            fonts = input.fonts;
+                            theme = input.theme
+                            semantics =
+                                ComponentSemantics(automationId = Some("grid-status-selected"))
+                        }
+                    )
+                    if (input.showStatistics)
+                        add(
+                            statusButton(labels.calculate, { bar.calculate() }) {
+                                enabled = input.enabled && range != None
+                                fonts = input.fonts;
+                                theme = input.theme;
+                                focus = input.focus
+                                semantics =
+                                    ComponentSemantics(automationId = Some("grid-status-calculate"))
+                            }
+                        )
+                    when (input.content) {
+                        case Some(val content) -> add(content)
+                        case None -> {}
+                    }
+                }
+            )
+            when (message) {
+                case Some(val text) -> add(
+                    statusLabel(labels.error(text)) {
+                        fonts = input.fonts;
+                        theme = input.theme
+                        semantics = ComponentSemantics(automationId = Some("grid-status-values"))
+                    }
+                )
+                case None -> when (value) {
+                    case Some(val statistics) -> add(
+                        statusLabel(labels.summary(statistics)) {
+                            fonts = input.fonts;
+                            theme = input.theme
+                            semantics =
+                                ComponentSemantics(automationId = Some("grid-status-values"))
+                        }
+                    )
+                    case None -> {}
+                }
+            }
+        }
+    }
+}
+
+public class GridStatusBarBuilder<Row> internal constructor() {
+    public var enabled: Boolean = true
+    public var showStatistics: Boolean = true
+    public var labels: GridStatusLabels = GridStatusLabels()
+    public var content: View? = None
+    public var fonts: FontCollection? = None
+    public var theme: ThemeSource? = None
+    public var focus: FocusOptions = FocusOptions()
+    public var key: ViewKey = ViewKey.Position
+}
+
+public fun <Row> gridStatusBar(
+    state: DataGridState<Row>,
+    configure: GridStatusBarBuilder<Row>.() -> Unit = {}
+): View {
+    val builder = GridStatusBarBuilder<Row>()
+    builder.configure()
+    return component(
+        GridStatusBarProps(
+            state,
+            builder.enabled,
+            builder.showStatistics,
+            builder.labels,
+            builder.content,
+            builder.fonts,
+            builder.theme,
+            builder.focus
+        ),
+        { props, scope -> GridStatusBar(props, scope) },
+        builder.key
+    )
+}

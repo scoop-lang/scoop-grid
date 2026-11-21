@@ -1,0 +1,54 @@
+package scoop.grid.tests.querycontrols
+
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class QueryToolRow(val group: String, val amount: Long)
+
+internal fun toolRows(): TableRows<QueryToolRow> {
+    val groups = ["B", "A", "A", "B", "A"]
+    val amounts = [2L, 2L, 1L, 1L, 1L]
+    return TableRows(
+        Array<TableRecord<QueryToolRow>>(5L) {
+            index -> TableRecord(ViewKey.Number(index), QueryToolRow(groups[index], amounts[index]))
+        }
+    )
+}
+
+internal fun toolQuery(): GridQuery =
+    GridQuery(
+        [GridSort(GridColumnId("amount"))],
+        GridFilter.Column(GridColumnId("group"), GridCondition.Missing(false)),
+        pagination = GridPagination.Page(0L, 2L)
+    )
+
+internal fun toolColumns(probe: QueryToolProbe): Array<GridColumn<QueryToolRow>> =
+    [
+        gridColumn<QueryToolRow, String>(
+            GridColumnId("group"),
+            "Group",
+            { row -> row.group },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fraction(1.0))
+        ),
+        gridColumn<QueryToolRow, Long>(
+            GridColumnId("amount"),
+            "Amount",
+            { row -> row.amount },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fraction(1.0)),
+            edit =
+                Some(
+                    gridEdit<QueryToolRow, Long>(
+                        {
+                            value ->
+                            val editor = gridLongEditor(value)
+                            probe.editor = Some(editor)
+                            editor
+                        },
+                        { change, completion -> probe.save(change, completion) }
+                    )
+                )
+        )
+    ]

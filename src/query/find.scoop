@@ -1,0 +1,142 @@
+package scoop.grid
+
+import scoop.text.*
+import scoop.ui.component.TableSource
+
+public struct GridFindMatch(val address: GridCellAddress, val wrapped: Boolean)
+
+public enum GridFindResult {
+    Found(GridFindMatch), NotFound, Rejected(String)
+}
+
+internal struct GridFindPosition(val row: Long, val column: Long)
+
+private struct GridFindStep(val position: GridFindPosition, val wrapped: Boolean)
+
+/** Advances indices independently so even huge sources never multiply row and column counts. */
+private fun gridFindStep(
+    at: GridFindPosition,
+    rows: Long,
+    columns: Long,
+    backwards: Boolean,
+    wrap: Boolean
+): GridFindStep? {
+    if (backwards) {
+        if (at.column > 0L)
+            return Some(GridFindStep(GridFindPosition(at.row, at.column - 1L), false))
+        if (at.row > 0L)
+            return Some(GridFindStep(GridFindPosition(at.row - 1L, columns - 1L), false))
+        return if (wrap)
+            Some(GridFindStep(GridFindPosition(rows - 1L, columns - 1L), true))
+        else
+            None
+    }
+    if (at.column < columns - 1L)
+        return Some(GridFindStep(GridFindPosition(at.row, at.column + 1L), false))
+    if (at.row < rows - 1L)
+        return Some(GridFindStep(GridFindPosition(at.row + 1L, 0L), false))
+    return if (wrap)
+        Some(GridFindStep(GridFindPosition(0L, 0L), true))
+    else
+        None
+}
+
+internal fun <Row> gridFindCell(
+    rows: GridRowSource<Row>,
+    definitions: GridColumns<Row>,
+    states: Array<GridColumnState>,
+    text: String,
+    after: GridCellAddress?,
+    backwards: Boolean,
+    matchCase: Boolean,
+    wrap: Boolean
+): GridFindMatch? {
+    if (text == "" || rows.count == 0L)
+        return None
+    val columns = ArrayList<GridColumn<Row>>()
+    var afterColumn: Long? = None
+    for (entry in gridOrderedColumnStates(states)) {
+        if (entry.visible) {
+            if (after?.column == Some(entry.id))
+                afterColumn = Some(columns.size)
+            columns.add(definitions.get(entry.id))
+        }
+    }
+    if (columns.size == 0L)
+        return None
+    var searchable = false
+    for (column in columns)
+        if (column.exportable)
+            searchable = true
+    if (!searchable)
+        return None
+    val afterRow =
+        when (after) {
+            case Some(val address) -> if (address.row.hasCells)
+                rows.indexOfKey(address.row)
+            else
+                None
+            case None -> None
+        }
+    val beginning =
+        when ((afterRow, afterColumn)) {
+            case(Some(val row), Some(val column)) ->
+            gridFindStep(
+                GridFindPosition(row, column),
+                rows.count,
+                columns.size,
+                backwards,
+                wrap
+            ) ?:
+                return None
+            else -> GridFindStep(
+                if (backwards)
+                    GridFindPosition(rows.count - 1L, columns.size - 1L)
+                else
+                    GridFindPosition(0L, 0L),
+                false
+            )
+        }
+    val needle =
+        if (matchCase)
+            text
+        else
+            text.lowercaseAscii()
+    var at = beginning.position
+    var wrapped = beginning.wrapped
+    var cachedIndex = -1L
+    var cachedRow: GridRow<Row>? = None
+    var labelColumn: GridColumnId? = None
+    while (true) {
+        val column = columns[at.column]
+        if (column.exportable && rows.rowKeyAt(at.row).hasCells) {
+            if (cachedIndex != at.row) {
+                cachedRow = Some(rows.rowAt(at.row))
+                cachedIndex = at.row
+                labelColumn = cachedRow!!.labelColumn(columns.toArray())
+            }
+            when (cachedRow!!.text(column, labelColumn)) {
+                case Some(val value) -> {
+                    val candidate =
+                        if (matchCase)
+                            value
+                        else
+                            value.lowercaseAscii()
+                    if (candidate.contains(needle))
+                        return Some(
+                            GridFindMatch(
+                                GridCellAddress(rows.rowKeyAt(at.row), column.id),
+                                wrapped
+                            )
+                        )
+                }
+                case None -> {}
+            }
+        }
+        val next = gridFindStep(at, rows.count, columns.size, backwards, wrap) ?: return None
+        at = next.position
+        wrapped = wrapped || next.wrapped
+        if (at == beginning.position)
+            return None
+    }
+}

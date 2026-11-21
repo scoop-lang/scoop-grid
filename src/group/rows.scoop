@@ -1,0 +1,196 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+private enum GridGroupSegment {
+    Header(Long), Subtotal(GridTotalRow), Records(Long, Long, Long)
+}
+
+private enum GridGroupVisit {
+    Group(Long), Subtotal(Long)
+}
+
+private struct GridGroupRecordRange(val start: Long, val count: Long, val position: Long)
+
+/** Visible leaf blocks stay as ranges; expanding a large group does not copy every row key. */
+internal class GridGroupedRows<Row>(
+    private val groups: GridGrouped<Row>,
+    roots: Array<Long>,
+    private val expanded: GridExpandedRows,
+    private val totals: GridTotals,
+    includeGroups: Boolean = true,
+    private val includeRecords: Boolean = true
+): GridRowSource<Row> {
+    private val segments = ArrayList<GridGroupSegment>()
+    private val ends = ArrayList<Long>()
+    private val positions = HashMap<ViewKey, Long>()
+    private val records = ArrayList<GridGroupRecordRange>()
+    private var length = 0L
+    init {
+        val pending = ArrayList<GridGroupVisit>()
+        for (at in 0L ..< roots.size)
+            pending.add(GridGroupVisit.Group(roots[roots.size - at - 1L]))
+        while (pending.size > 0L)
+            when (pending.removeAt(pending.size - 1L)) {
+                case Subtotal(val index) -> appendTotal(index)
+                case Group(val index) -> {
+                    val group = groups.descriptions[index]
+                    val key = GridRowKey.Group(group.path)
+                    if (includeGroups) {
+                        positions.put(key.viewKey, length)
+                        append(GridGroupSegment.Header(index), 1L)
+                    }
+                    if (
+                        (!includeRecords && groups.order.children[index].size == 0L) ||
+                            !expanded.contains(key)
+                    )
+                        continue
+                    if (totals.placement == GridTotalPlacement.Before)
+                        appendTotal(index)
+                    if (totals.placement == GridTotalPlacement.After)
+                        pending.add(GridGroupVisit.Subtotal(index))
+                    val children = groups.order.children[index]
+                    if (children.size == 0L) {
+                        val start = groups.order.starts[index]
+                        records.add(GridGroupRecordRange(start, group.count, length))
+                        append(GridGroupSegment.Records(index, start, group.count), group.count)
+                    } else
+                        for (at in 0L ..< children.size)
+                            pending.add(GridGroupVisit.Group(children[children.size - at - 1L]))
+                }
+            }
+    }
+    public override val count: Long get() = length
+    private fun append(segment: GridGroupSegment, count: Long) {
+        gridRequire(count <= Long.MAX_VALUE - length, "grid result row count overflow")
+        length += count
+        segments.add(segment)
+        ends.add(length)
+    }
+    private fun appendTotal(index: Long) {
+        val group = groups.descriptions[index]
+        val total =
+            GridTotalRow(
+                GridTotalKey.Group(group.path),
+                f"${group.label} ${totals.label}",
+                group.aggregates
+            )
+        positions.put(GridRowKey.Total(total.key).viewKey, length)
+        append(GridGroupSegment.Subtotal(total), 1L)
+    }
+    private fun at(index: Long): (GridGroupSegment, Long) {
+        gridRequire(index >= 0L && index < count, "grid row index is out of range")
+        var left = 0L
+        var right = ends.size
+        while (left < right) {
+            val middle = left + (right - left) / 2L
+            if (ends[middle] <= index)
+                left = middle + 1L
+            else
+                right = middle
+        }
+        val start =
+            if (left == 0L)
+                0L
+            else
+                ends[left - 1L]
+        return (segments[left], index - start)
+    }
+    public override fun infoAt(index: Long): GridRowInfo {
+        val(segment, offset) = at(index)
+        return when (segment) {
+            case Header(val group) -> GridRowInfo.Group(groups.descriptions[group])
+            case Subtotal(val total) -> GridRowInfo.Total(total)
+            case Records(_, val start, _) -> GridRowInfo.Data(
+                groups.order.rows.keyAt(start + offset)
+            )
+        }
+    }
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? {
+        val(segment, _) = at(index)
+        return when (segment) {
+            case Header(val group) -> {
+                val node = groups.topology.nodes[group]
+                Some(
+                    GridRowHierarchy(
+                        node.path.parts.size - 1L,
+                        if (node.parent < 0L)
+                            None
+                        else
+                            Some(GridRowKey.Group(groups.descriptions[node.parent].path)),
+                        if (includeRecords || groups.order.children[group].size > 0L)
+                            Some(expanded.contains(GridRowKey.Group(node.path)))
+                        else
+                            None
+                    )
+                )
+            }
+            case Subtotal(val total) -> when (total.key) {
+                case Group(val path) -> Some(
+                    GridRowHierarchy(path.parts.size, Some(GridRowKey.Group(path)))
+                )
+                else -> None
+            }
+            case Records(val group, _, _) -> Some(
+                gridGroupMemberHierarchy(groups.descriptions[group])
+            )
+        }
+    }
+    public override fun keyAt(index: Long): ViewKey = rowKeyAt(index).viewKey
+    public override fun rowAt(index: Long): GridRow<Row> {
+        val(segment, offset) = at(index)
+        return when (segment) {
+            case Header(val group) -> GridRow.Group(groups.descriptions[group])
+            case Subtotal(val total) -> GridRow.Total(total)
+            case Records(_, val start, _) -> GridRow.Data(
+                groups.order.rows.rowAt(start + offset),
+                groups.order.rows.keyAt(start + offset)
+            )
+        }
+    }
+    public override fun indexOfKey(key: ViewKey): Long? {
+        when (val position = positions[key]) {
+            case Some(_) -> return position
+            case None -> {}
+        }
+        val data = gridBusinessKey(key) ?: return None
+        val index = groups.order.rows.indexOfKey(data) ?: return None
+        var left = 0L
+        var right = records.size
+        while (left < right) {
+            val middle = left + (right - left) / 2L
+            if (records[middle].start <= index)
+                left = middle + 1L
+            else
+                right = middle
+        }
+        if (left == 0L)
+            return None
+        val range = records[left - 1L]
+        return if (index - range.start < range.count)
+            Some(range.position + (index - range.start))
+        else
+            None
+    }
+}
+
+private fun gridGroupMemberHierarchy(group: GridGroupRow): GridRowHierarchy =
+    GridRowHierarchy(group.path.parts.size, Some(GridRowKey.Group(group.path)))
+
+internal class GridGroupedDataRows<Row>(
+    private val source: TableSource<Row>,
+    private val groups: GridGrouped<Row>
+): GridRowSource<Row> {
+    private val data = GridDataRows(source)
+    public override val count: Long get() = source.count
+    public override fun keyAt(index: Long): ViewKey = data.keyAt(index)
+    public override fun rowAt(index: Long): GridRow<Row> = data.rowAt(index)
+    public override fun infoAt(index: Long): GridRowInfo = data.infoAt(index)
+    public override fun indexOfKey(key: ViewKey): Long? = data.indexOfKey(key)
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? {
+        val group = groups.topology.records[source.keyAt(index)] ?: return None
+        return Some(gridGroupMemberHierarchy(groups.descriptions[group]))
+    }
+}

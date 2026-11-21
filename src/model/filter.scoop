@@ -1,0 +1,70 @@
+package scoop.grid
+
+import scoop.datetime.LocalDate
+
+/** Query data only; cell values stay in their concrete typed column. */
+public enum GridLiteral: Equals<GridLiteral>, Hash {
+    Text(String), Integer(Long), Number(Double), BooleanValue(Boolean), Date(LocalDate), Empty
+    public override operator fun equals(other: GridLiteral): Boolean =
+        when ((this, other)) {
+            case(Text(val a), Text(val b)) -> a == b
+            case(Integer(val a), Integer(val b)) -> a == b
+            case(Number(val a), Number(val b)) -> a == b
+            case(BooleanValue(val a), BooleanValue(val b)) -> a == b
+            case(Date(val a), Date(val b)) -> a == b
+            case(Empty, Empty) -> true
+            else -> false
+        }
+    public override fun hash(): Long =
+        when (this) {
+            case Text(val value) -> value.hash()
+            case Integer(val value) -> value.hash()
+            case Number(val value) -> if (value == 0.0)
+                0L
+            else
+                value.toBits().hash()
+            case BooleanValue(val value) -> if (value)
+                1L
+            else
+                0L
+            case Date(val value) -> value.hash()
+            case Empty -> 0L
+        }
+}
+
+public enum GridComparison {
+    Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual
+}
+
+public enum GridTextMatch {
+    Contains, StartsWith, EndsWith
+}
+
+public enum GridCondition: Equals<GridCondition> {
+    Compare(GridComparison, GridLiteral), Between(GridLiteral, GridLiteral),
+    In(Array<GridLiteral>), Missing(Boolean),
+    Text(GridTextMatch, String, Boolean)
+
+    public override operator fun equals(other: GridCondition): Boolean =
+        when ((this, other)) {
+            case(Compare(val a, val b), Compare(val c, val d)) -> a == c && b == d
+            case(Between(val a, val b), Between(val c, val d)) -> a == c && b == d
+            case(In(val a), In(val b)) -> gridArrayEqual(a, b)
+            case(Missing(val a), Missing(val b)) -> a == b
+            case(Text(val a, val b, val c), Text(val d, val e, val f)) -> a == d && b == e && c == f
+            else -> false
+        }
+}
+
+public enum GridFilter: Equals<GridFilter> {
+    All, Column(GridColumnId, GridCondition), And(Array<GridFilter>), Or(Array<GridFilter>)
+
+    public override operator fun equals(other: GridFilter): Boolean =
+        when ((this, other)) {
+            case(All, All) -> true
+            case(Column(val a, val b), Column(val c, val d)) -> a == c && b == d
+            case(And(val a), And(val b)) -> gridArrayEqual(a, b)
+            case(Or(val a), Or(val b)) -> gridArrayEqual(a, b)
+            else -> false
+        }
+}

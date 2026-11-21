@@ -1,0 +1,89 @@
+package scoop.grid
+
+import scoop.text.*
+import scoop.ui.component.TableSource
+
+/** The caller chooses the data scope; exporting never builds views or fetches rows. */
+public fun <Row> gridCsv(
+    rows: TableSource<Row>,
+    columns: Array<GridColumn<Row>>,
+    includeHeaders: Boolean = true
+): String = gridDelimited(GridDataRows(rows), columns, ',', "\r\n", includeHeaders, true)
+
+public fun <Row> gridTsv(rows: TableSource<Row>, columns: Array<GridColumn<Row>>): String =
+    gridDelimited(GridDataRows(rows), columns, '\t', "\n", false, false)
+
+public fun <Row> gridCsv(
+    rows: GridRowSource<Row>,
+    columns: Array<GridColumn<Row>>,
+    includeHeaders: Boolean = true
+): String = gridDelimited(rows, columns, ',', "\r\n", includeHeaders, true)
+
+public fun <Row> gridTsv(rows: GridRowSource<Row>, columns: Array<GridColumn<Row>>): String =
+    gridDelimited(rows, columns, '\t', "\n", false, false)
+
+private fun <Row> gridDelimited(
+    rows: GridRowSource<Row>,
+    columns: Array<GridColumn<Row>>,
+    delimiter: Char,
+    newline: String,
+    headers: Boolean,
+    terminalNewline: Boolean
+): String {
+    val unavailable = rows.unavailable(0L, rows.count)
+    if (unavailable.size > 0L)
+        throw GridDataUnavailableException(unavailable)
+    val exported = ArrayList<GridColumn<Row>>()
+    for (column in columns)
+        if (column.exportable)
+            exported.add(column)
+    gridRequire(exported.size > 0L, "grid export requires an exportable column")
+    gridRequire(rows.count >= 0L, "negative grid source count")
+    val output = StringBuilder()
+    if (headers) {
+        for (index in 0L ..< exported.size) {
+            if (index > 0L)
+                output.append(delimiter)
+            appendGridField(output, exported[index].title, delimiter)
+        }
+    }
+    val exportedColumns = exported.toArray()
+    var written = false
+    for (rowIndex in 0L ..< rows.count) {
+        if (!rows.rowKeyAt(rowIndex).hasCells)
+            continue
+        if (headers || written)
+            output.append(newline)
+        val row = rows.rowAt(rowIndex)
+        val labelColumn = row.labelColumn(exportedColumns)
+        for (columnIndex in 0L ..< exported.size) {
+            if (columnIndex > 0L)
+                output.append(delimiter)
+            val column = exported[columnIndex]
+            val text =
+                row.text(column, labelColumn) ?:
+                    throw IllegalArgumentException(
+                        Some(f"export column has no data text: ${column.id.value}")
+                    )
+            appendGridField(output, text, delimiter)
+        }
+        written = true
+    }
+    if (terminalNewline && (headers || written))
+        output.append(newline)
+    return output.toString()
+}
+
+internal fun appendGridField(output: StringBuilder, text: String, delimiter: Char) {
+    val quoted =
+        text.contains(delimiter) || text.contains('"') || text.contains('\r') || text.contains('\n')
+    if (quoted)
+        output.append('"')
+    for (character in text) {
+        if (quoted && character == '"')
+            output.append('"')
+        output.append(character)
+    }
+    if (quoted)
+        output.append('"')
+}

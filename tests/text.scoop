@@ -1,0 +1,97 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class ExportRecord(val name: String, val count: Long)
+
+private fun exportColumns(): Array<GridColumn<ExportRecord>> =
+    [
+        gridColumn<ExportRecord, String>(
+            GridColumnId("name"),
+            "商,品",
+            { row -> row.name },
+            gridTextValues(),
+            cell = Some { _ -> throw IllegalStateException(Some("export must not create a view")) }
+        ),
+        gridColumn<ExportRecord, Long>(
+            GridColumnId("count"),
+            "Count",
+            { row -> row.count },
+            gridLongValues()
+        ),
+        gridActionColumn<ExportRecord>(GridColumnId("actions"), "Actions", { _ -> empty() })
+    ]
+
+private fun exportRows(): TableRows<ExportRecord> =
+    TableRows(
+        [
+            TableRecord(ViewKey.Number(1L), ExportRecord("苹果,红", 9007199254740993L)),
+            TableRecord(ViewKey.Number(2L), ExportRecord("\"绿\"\r\n梨", 2L))
+        ]
+    )
+
+private fun pasted(text: String): String =
+    when (parseGridCellPaste(text)) {
+        case Value(val value) -> value
+        case Rejected(val message) -> throw IllegalArgumentException(Some(message))
+    }
+
+@Test
+private class GridTextTest {
+    @Test
+    fun `CSV quotes delimiters line breaks and quotes while preserving integer text`() {
+        assertEquals(
+            "\"商,品\",Count\r\n\"苹果,红\",9007199254740993\r\n\"\"\"绿\"\"\r\n梨\",2\r\n",
+            gridCsv(exportRows(), exportColumns())
+        )
+        val columns = exportColumns()
+        assertEquals(
+            "9007199254740993,\"苹果,红\"\r\n2,\"\"\"绿\"\"\r\n梨\"\r\n",
+            gridCsv(exportRows(), [columns[1L], columns[0L]], false)
+        )
+    }
+
+    @Test
+    fun `the supplied page controls export scope and empty data has explicit header behavior`() {
+        val model =
+            DataGridState(
+                exportRows(),
+                exportColumns(),
+                GridQuery(pagination = GridPagination.Page(1L, 1L))
+            )
+        assertEquals("\"\"\"绿\"\"\r\n梨\",2\r\n", gridCsv(model.result.rows, model.columns, false))
+        assertEquals("\"商,品\",Count\r\n", gridCsv(TableRows<ExportRecord>([]), model.columns))
+        assertEquals("", gridCsv(TableRows<ExportRecord>([]), model.columns, false))
+        assertFailsWith<IllegalArgumentException> { gridCsv(exportRows(), [model.columns[2L]]) }
+    }
+
+    @Test
+    fun `single quoted cells round trip tabs unicode quotes and embedded newlines`() {
+        val values = ["", "汉字🙂", "left\tright", "line\r\nnext", "a\"b", "\"", "\n"]
+        for (text in values) {
+            val source = TableRows([TableRecord(ViewKey.Text("one"), ExportRecord(text, 0L))])
+            val encoded = gridTsv(source, [exportColumns()[0L]])
+            assertEquals(text, pasted(encoded))
+            assertEquals(text, pasted(encoded + "\r\n"))
+        }
+        assertEquals("a\"b", pasted("a\"b"))
+    }
+
+    @Test
+    fun `multiple cells and malformed quoting are rejected without taking the first cell`() {
+        for (
+            text in ["a\tb", "a\nb", "a\r\nb", "\t", "\n\n", "\"a\"\tb", "\"a\"x", "\"a", "\"\"\""]
+        ) {
+            when (parseGridCellPaste(text)) {
+                case Rejected(_) -> {}
+                case Value(_) -> fail(Some(f"unexpected single cell: ${text}"))
+            }
+        }
+        when (parseGridCellPaste(gridTsv(exportRows(), exportColumns()))) {
+            case Rejected(val message) -> assertEquals("一次只能粘贴到一个单元格", message)
+            case Value(_) -> fail(Some("multiple rows and columns were accepted"))
+        }
+    }
+}

@@ -1,0 +1,194 @@
+package scoop.grid
+
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class GridDataCellProps<Row>(
+    val row: GridRow<Row>,
+    val key: GridRowKey,
+    val rowIndex: Long,
+    val columnIndex: Long,
+    val column: GridColumn<Row>,
+    val appearance: GridAppearance,
+    val headers: GridHeadersPlan,
+    val session: GridSession<Row>,
+    val wraps: Boolean,
+    val enabled: Boolean,
+    val columnSpan: Long,
+    val selection: GridSelectionView<Row>?,
+    val range: GridCellRangeBounds?,
+    val labels: GridLabels,
+    val labelColumn: GridColumnId?,
+    val hierarchy: GridRowHierarchy?,
+    val details: GridDetails<Row>? = None
+)
+
+/** One stable cell element hosts either its display content or its actual editor. */
+internal class GridDataCell<Row>(
+    private val props: Props<GridDataCellProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private val content = GridContentHandle()
+    private val focus = FocusHandle()
+    public override fun render(): View {
+        val input = props.value
+        val appearance = input.appearance
+        val address = GridCellAddress(input.key, input.column.id)
+        val edit = input.session.editing.cell(address)
+        val browsing =
+            when (edit) {
+                case Some(_) -> false
+                case None -> true
+            }
+        val error =
+            when (val message = edit?.error ?: None) {
+                case Some(val text) -> Some(input.labels.error(text))
+                case None -> None
+            }
+        val child =
+            when (edit) {
+                case Some(val active) -> gridEditorMessage(
+                    active.draft.view(
+                        GridEditorOptions(
+                            active.focus,
+                            appearance.fonts,
+                            input.session.theme!!,
+                            error,
+                            active.submitting,
+                            { input.session.editing.submitFrom(active) },
+                            { input.session.editing.cancelFrom(active) },
+                            { input.session.editing.clearError(active) },
+                            { key -> input.session.editing.navigateFrom(active, key) },
+                            { input.session.editing.focusSettled(active) },
+                            input.labels.saving
+                        )
+                    ),
+                    appearance,
+                    if (active.submitting)
+                        Some(input.labels.saving)
+                    else
+                        error
+                )
+                case None -> when (input.row) {
+                    case Data(val row, _) -> input.column.cell(
+                        row,
+                        Some(appearance.fonts),
+                        Some(appearance.body),
+                        Some(
+                            if (input.wraps)
+                                appearance.wrapping
+                            else
+                                appearance.paragraph
+                        )
+                    )
+                    else -> component(
+                        LabelProps(
+                            LabelText.Plain(
+                                input.row.text(input.column, input.labelColumn) ?: "",
+                                None
+                            ),
+                            Some(appearance.fonts),
+                            Some(
+                                if (input.wraps)
+                                    appearance.wrapping
+                                else
+                                    appearance.paragraph
+                            ),
+                            baseStyle = Some(appearance.body)
+                        ),
+                        { props, scope -> Label(props, scope) }
+                    )
+                }
+            }
+        val editable =
+            input.columnSpan ==
+                1L &&
+                when (input.row) {
+                    case Data(val row, _) -> input.column.editing?.editable(row) ?: false
+                    else -> false
+                }
+        val cell =
+            element(
+                GridCellProps(
+                    Some(address),
+                    input.rowIndex,
+                    input.columnIndex,
+                    input.column.id,
+                    input.row.text(input.column, input.labelColumn),
+                    appearance,
+                    Some(input.session),
+                    content = Some(content),
+                    editable = editable,
+                    error = error,
+                    submitting = edit?.submitting ?: false,
+                    headers =
+                        input.session.headerSemantics.headers(
+                            input.headers,
+                            input.columnIndex,
+                            true,
+                            input.columnSpan
+                        ),
+                    enabled = input.enabled,
+                    columnSpan = input.columnSpan,
+                    selectedRow =
+                        !(input.hierarchy?.contextOnly ?: false) &&
+                            (input.selection?.selected?.contains(input.key) ?: false),
+                    range = input.range,
+                    focusHandle = Some(focus)
+                ),
+                { props, scope -> GridCell(props, scope) },
+                [
+                    element(
+                        content,
+                        { props, scope -> GridContent(props, scope) },
+                        [
+                            when (input.row) {
+                                case Data(val row, val key) -> {
+                                    val selected =
+                                        input.selection?.cell(
+                                            key,
+                                            row,
+                                            input.rowIndex,
+                                            input.columnIndex,
+                                            child
+                                        ) ?:
+                                            child
+                                    val content =
+                                        if (browsing)
+                                            gridDetailCell(input, selected)
+                                        else
+                                            selected
+                                    if (input.labelColumn == Some(input.column.id) && browsing)
+                                        gridTreeCell(input, content)
+                                    else
+                                        content
+                                }
+                                case Group(val group) -> if (
+                                    input.labelColumn == Some(input.column.id)
+                                )
+                                    gridGroupCell(input, group, child)
+                                else
+                                    child
+                                case Total(_) -> child
+                                case Detail(_, _) -> throw IllegalStateException(
+                                    Some("detail content cannot be mounted as a cell")
+                                )
+                                case Unloaded(_) -> throw IllegalStateException(
+                                    Some("unloaded positions do not build cells")
+                                )
+                            }
+                        ]
+                    )
+                ]
+            )
+        return gridMenuView(
+            input.session,
+            GridMenuTarget.Cell(address),
+            cell,
+            input.enabled && input.session.editingCell != Some(address),
+            editable,
+            appearance,
+            focus
+        )
+    }
+}

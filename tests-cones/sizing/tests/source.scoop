@@ -1,0 +1,185 @@
+package scoop.grid.tests.sizing
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal class SizingRow(val index: Long, val value: Long)
+
+internal class SizingRows(
+    public override val count: Long = 100000000L,
+    private val edited: Long? = None
+): TableSource<SizingRow> {
+    var reads = 0L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun rowAt(index: Long): SizingRow {
+        reads += 1L
+        return SizingRow(
+            index,
+            if (index == 0L)
+                edited ?: index
+            else
+                index
+        )
+    }
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(value)
+            else
+                None
+            else -> None
+        }
+}
+
+internal fun sizingId(index: Long): String =
+    when (index) {
+        case 0L -> "start"
+        case 1L -> "value"
+        case 2L -> "samples"
+        case 3L -> "small"
+        case 4L -> "max"
+        case 25L -> "remote"
+        case 29L -> "end"
+        else -> f"c${index}"
+    }
+
+internal fun sizingColumns(probe: SizingProbe): Array<GridColumn<SizingRow>> =
+    Array<GridColumn<SizingRow>>(30L) {
+        index ->
+        val id = sizingId(index)
+        val custom =
+            index == 0L || index == 1L || index == 3L || index == 4L || index == 25L || index == 29L
+        gridColumn<SizingRow, Long>(
+            GridColumnId(id),
+            id,
+            { row -> row.value },
+            gridLongValues(),
+            TableColumnSize(
+                GridTrack.Fixed(100.0),
+                minimum =
+                    if (index == 3L)
+                        90.0
+                    else
+                        40.0,
+                maximum =
+                    Some(
+                        if (index == 2L)
+                            260.0
+                        else
+                            if (index == 3L)
+                                110.0
+                            else
+                                if (index == 4L)
+                                    180.0
+                                else
+                                    1000.0
+                    ),
+                samples =
+                    if (index == 2L)
+                        ["MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"]
+                    else
+                        []
+            ),
+            cell =
+                if (custom)
+                    Some {
+                        row ->
+                        val density =
+                            probe.theme.current.value.tokens.typography.body.fontSize / 14.0
+                        val width =
+                            when (index) {
+                                case 0L -> 600.0
+                                case 1L -> if (row.index == 4L)
+                                    900.0
+                                else
+                                    120.0 + row.value.toDouble() * 10.0
+                                case 3L -> 2.0
+                                case 4L -> 400.0
+                                case 25L -> 180.0 + row.index.toDouble() * 10.0
+                                else -> 300.0
+                            }
+                        element(
+                            SizingBoxProps(
+                                probe,
+                                GridCellAddress(ViewKey.Number(row.index), GridColumnId(id)),
+                                width * density
+                            ),
+                            { props, scope -> SizingBox(props, scope) }
+                        )
+                    }
+                else
+                    None,
+            edit =
+                if (index == 1L)
+                    Some(
+                        gridEdit<SizingRow, Long>(
+                            {
+                                value ->
+                                val editor = gridLongEditor(value);
+                                probe.editor = Some(editor);
+                                editor
+                            },
+                            { change, completion -> probe.save(change.value, completion) }
+                        )
+                    )
+                else
+                    None
+        )
+    }
+
+internal fun sizingModel(probe: SizingProbe): DataGridState<SizingRow> {
+    val model = DataGridState(probe.rows, sizingColumns(probe))
+    model.setColumnState(
+        GridColumnState(GridColumnId("start"), width = Some(80.0), pin = GridPin.Start)
+    )
+    model.setColumnState(
+        GridColumnState(GridColumnId("end"), width = Some(60.0), pin = GridPin.End)
+    )
+    return model
+}
+
+private class SizingBoxProps(
+    val probe: SizingProbe,
+    val address: GridCellAddress,
+    val width: Double
+)
+
+private class SizingBox(private val props: Props<SizingBoxProps>, scope: ComponentScope): Element<
+    Unit
+>(scope) {
+    private val address = props.value.address
+    public override fun onMount() {
+        assertFalse(
+            props.value.probe.live.contains(address),
+            Some("a cell must have only one mounted content view")
+        )
+        props.value.probe.live.add(address)
+        props.value.probe.created += 1L
+    }
+    public override fun onUnmount() {
+        assertTrue(props.value.probe.live.contains(address))
+        props.value.probe.live.remove(address)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        if (constraints.maxWidth == None)
+            props.value.probe.natural.add(address)
+        return LayoutResult(
+            LayoutMetrics(constraints.constrain(Size(props.value.width, 12.0))),
+            Unit
+        )
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val size = context.size
+        context.draw {
+            paint -> paint.canvas.drawRect(
+                Rect(0.0, 0.0, size.width, size.height),
+                Paint(Color(0.2, 0.4, 0.6, 1.0))
+            )
+        }
+    }
+}

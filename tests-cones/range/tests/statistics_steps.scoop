@@ -1,0 +1,83 @@
+package scoop.grid.tests.range
+
+import scoop.graphics.Point
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+
+internal fun RangeProbe.postStatistics() {
+    when (phase) {
+        case 187 -> calls!!.post(statisticsButton!!, phase)
+        case 192 -> calls!!.post(statisticsButton!!, phase)
+        case 197 -> {
+            val probe = this
+            onNumberRead = Some { probe.model.replaceData(rangeRows(200L)) }
+            calls!!.post(statisticsButton!!, phase)
+        }
+        case 199 -> calls!!.post(statisticsButton!!, phase)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun RangeProbe.advanceStatistics() {
+    when (phase) {
+        case 186 -> {
+            model.setCellRange(Some(GridCellRange(rangeAddress(1L), rangeAddress(3L, 1L))))
+            assertTrue(outside.requestFocus())
+        }
+        case 189 -> model.setColumnState(GridColumnState(GridColumnId("c1"), width = Some(140.0)))
+        case 190 -> scroll.scrollTo(Point(40.0, 64.0))
+        case 191 -> {
+            records = rangeRows(100L);
+            model.replaceData(records)
+        }
+        case 194 -> model.clearCellRange()
+        case 195 -> {
+            enabled.value = false
+            model.setCellRange(Some(GridCellRange(rangeAddress(2L, 1L), rangeAddress(2L, 1L))))
+        }
+        case 196 -> enabled.value = true
+        else -> {}
+    }
+    frame!!.requestFrame()
+}
+
+internal fun RangeProbe.inspectStatistics() {
+    when (phase) {
+        case 186 -> {
+            statisticsButton = Some(keep(root!!.find("grid-status-calculate")!!))
+            assertTrue(statisticsButton!!.flag(1))
+            val rows = keep(root!!.find("grid-status-rows")!!)
+            assertTrue(rows.text(1, Some("Rows 12")))
+            assertEquals(None, root!!.find("grid-status-values")?.text(1, Some("unused")))
+        }
+        case 188 -> {
+            statisticsValues = Some(keep(root!!.find("grid-status-values")!!))
+            assertTrue(statisticsValues!!.text(1, Some("N 3 Sum 36 Avg 12")))
+            assertTrue(outside.hasFocus)
+        }
+        case 189 -> assertTrue(statisticsValues!!.text(1, Some("N 3 Sum 36 Avg 12")))
+        case 190 -> assertTrue(statisticsValues!!.text(1, Some("N 3 Sum 36 Avg 12")))
+        case 191 -> {
+            assertFalse(statisticsValues!!.flag(0))
+            assertTrue(statisticsButton!!.flag(1))
+        }
+        case 193 -> {
+            statisticsValues = Some(keep(root!!.find("grid-status-values")!!))
+            assertTrue(statisticsValues!!.text(1, Some("N 3 Sum 306 Avg 102")))
+        }
+        case 194 -> {
+            assertFalse(statisticsValues!!.flag(0))
+            assertFalse(statisticsButton!!.flag(1))
+        }
+        case 195 -> assertFalse(statisticsButton!!.flag(1))
+        case 196 -> assertTrue(statisticsButton!!.flag(1))
+        case 198 -> {
+            statisticsValues = Some(keep(root!!.find("grid-status-values")!!))
+            assertTrue(statisticsValues!!.text(1, Some("Problem: Result changed")))
+            assertEquals(202L, nativeGridData(model.result.rows.rowAt(2L)).value)
+        }
+        case 200 -> assertTrue(statisticsValues!!.text(1, Some("N 1 Sum 202 Avg 202")))
+        else -> {}
+    }
+}

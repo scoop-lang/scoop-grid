@@ -1,0 +1,92 @@
+package scoop.grid
+
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.button as groupButton
+import scoop.ui.style.LogicalInsets
+
+internal fun <Row> gridGroupCell(
+    input: GridDataCellProps<Row>,
+    group: GridGroupRow,
+    content: View
+): View {
+    val expanded = input.session.currentModel?.isExpanded(input.key) ?: false
+    val child = input.selection?.group(group.path, group.label, content) ?: content
+    return gridHierarchyCell(
+        input,
+        group.path.parts.size - 1L,
+        if (input.session.currentModel?.canExpand(input.key) ?: false)
+            Some(expanded)
+        else
+            None,
+        if (expanded)
+            input.labels.collapseGroup(group.label)
+        else
+            input.labels.expandGroup(group.label),
+        f"grid-group-expand-${group.path.encoded}",
+        false,
+        child
+    )
+}
+
+internal fun <Row> gridHierarchyCell(
+    input: GridDataCellProps<Row>,
+    level: Long,
+    expanded: Boolean?,
+    name: String,
+    automationId: String,
+    contextOnly: Boolean,
+    content: View
+): View {
+    val session = input.session
+    val model = session.currentModel
+    val appearance = input.appearance
+    return row {
+        logicalPadding =
+            Some(
+                LogicalInsets(
+                    start =
+                        (
+                            level.toDouble() *
+                                14.0 +
+                                if (expanded == None)
+                                    28.0
+                                else
+                                    0.0
+                        ) *
+                            appearance.density
+                )
+            )
+        spacing = 4.0 * appearance.density
+        alignment = CrossAlignment.Center
+        if (expanded != None)
+            add(
+                groupButton(
+                    if (expanded == Some(true))
+                        "▾"
+                    else
+                        "▸",
+                    {
+                        when (model) {
+                            case Some(val current) -> if (session.usesModel(current))
+                                session.setExpanded(input.key, !current.isExpanded(input.key))
+                            case None -> {}
+                        }
+                        Unit
+                    }
+                ) {
+                    key = ViewKey.Text("grid-group-expansion")
+                    enabled = input.enabled && !session.submitting
+                    theme = session.theme
+                    fonts = Some(appearance.fonts)
+                    size = ButtonSize.IconXs
+                    variant = ButtonVariant.Ghost
+                    semantics =
+                        ComponentSemantics(name = Some(name), automationId = Some(automationId))
+                }
+            )
+        item(content) { grow = 1.0 }
+        if (contextOnly)
+            add(appearance.label(input.labels.contextRow))
+    }
+}

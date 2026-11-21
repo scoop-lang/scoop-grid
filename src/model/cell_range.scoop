@@ -1,0 +1,91 @@
+package scoop.grid
+
+import scoop.math.min
+import scoop.math.max
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+/** Stable endpoints of the only rectangular cell range. */
+public class GridCellRange public constructor(
+    public val anchor: GridCellAddress,
+    public val end: GridCellAddress
+): Equals<GridCellRange> {
+    init {
+        gridRequire(
+            anchor.row.dataKey !=
+                Some(ViewKey.Position) &&
+                end.row.dataKey !=
+                Some(ViewKey.Position),
+            "cell ranges require explicit row keys"
+        )
+    }
+    public override operator fun equals(other: GridCellRange): Boolean =
+        anchor == other.anchor && end == other.end
+}
+
+internal struct GridCellRangeBounds(
+    val firstRow: Long,
+    val lastRow: Long,
+    val firstColumn: Long,
+    val lastColumn: Long
+) {
+    fun contains(row: Long, column: Long): Boolean =
+        row >= firstRow && row <= lastRow && column >= firstColumn && column <= lastColumn
+    fun intersects(row: Long, column: Long, span: Long): Boolean =
+        row >=
+            firstRow &&
+            row <=
+            lastRow &&
+            column <=
+            lastColumn &&
+            (column >= firstColumn || firstColumn - column < span)
+}
+
+internal fun <Row> gridCellRangeBounds(
+    range: GridCellRange,
+    rows: GridRowSource<Row>,
+    columns: GridSpanColumns
+): GridCellRangeBounds? {
+    if (!range.anchor.row.hasCells || !range.end.row.hasCells)
+        return None
+    val firstRow = rows.indexOfKey(range.anchor.row) ?: return None
+    val lastRow = rows.indexOfKey(range.end.row) ?: return None
+    val firstColumn = columns.indexOf(range.anchor.column) ?: return None
+    val lastColumn = columns.indexOf(range.end.column) ?: return None
+    return Some(
+        GridCellRangeBounds(
+            min(firstRow, lastRow),
+            max(firstRow, lastRow),
+            min(firstColumn, lastColumn),
+            max(firstColumn, lastColumn)
+        )
+    )
+}
+
+/** Only needed when an active range must survive a new immutable result. */
+internal fun <Row> gridSameCellRows(left: TableSource<Row>, right: TableSource<Row>): Boolean {
+    if (left === right)
+        return true
+    if (left.count != right.count)
+        return false
+    for (index in 0L ..< left.count)
+        if (left.keyAt(index) != right.keyAt(index))
+            return false
+    return true
+}
+
+internal fun gridSameCellColumns(
+    left: Array<GridColumnState>,
+    right: Array<GridColumnState>
+): Boolean {
+    if (left === right)
+        return true
+    val before = GridSpanColumns(left)
+    val after = GridSpanColumns(right)
+    if (before.count != after.count)
+        return false
+    for (index in 0L ..< before.count)
+        if (before.idAt(index) != after.idAt(index))
+            return false
+    return true
+}

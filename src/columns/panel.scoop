@@ -1,0 +1,565 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.text.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.text.TextEditorState
+import scoop.ui.component.button as columnsButton
+import scoop.ui.component.input as columnsInput
+import scoop.ui.component.select as columnsSelect
+import scoop.ui.component.virtualList as columnsList
+
+public class GridColumnsPanelProps<Row> public constructor(
+    public val state: DataGridState<Row>,
+    public val handle: DataGridHandle,
+    public val height: Double = 256.0,
+    public val enabled: Boolean = true,
+    public val fonts: FontCollection? = None,
+    public val theme: ThemeSource? = None,
+    public val labels: GridColumnsLabels = GridColumnsLabels()
+) {
+    init {
+        gridRequire(height.isFinite() && height > 0.0, "invalid columns panel height")
+    }
+}
+
+public class GridColumnsPanel<Row> public constructor(
+    private val props: Props<GridColumnsPanelProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    private var selected = props.value.state.columnState[0L].id
+    private var model = props.value.state
+    private var shown = selected
+    private var appliedWidth = props.value.state.columnState[0L].width
+    private var draft = TextEditorState(gridColumnWidthText(appliedWidth))
+    private val revision = state(0L)
+    private var message: String? = None
+    private var contentFit: GridColumnFit? = None
+    private var fittedColumn: GridColumnId? = None
+    private var fittingModel: DataGridState<Row>? = None
+    private var ambient: ThemeSource? = None
+    public override fun onMount() {
+        when (props.value.theme) {
+            case None -> ambient = Some(currentThemeSource())
+            case Some(_) -> {}
+        }
+    }
+    private fun available(): Boolean =
+        scope.isMounted &&
+            props.value.enabled &&
+            props.value.handle.usesColumns(props.value.state.columnState) &&
+            !props.value.handle.isSubmitting &&
+            !draft.isComposing
+    private fun report(value: GridColumnActionResult) {
+        if (!scope.isMounted)
+            return
+        clearContentFit()
+        message =
+            when (value) {
+                case Applied -> None
+                case Rejected(val text) -> Some(text)
+            }
+        revision.value += 1L
+    }
+    private fun choose(id: GridColumnId): Boolean {
+        if (!available() || gridColumnStateIndex(props.value.state.columnState, id) == None)
+            return false
+        selected = id
+        clearContentFit()
+        message = None
+        revision.value += 1L
+        return true
+    }
+    private fun entry(id: GridColumnId): GridColumnState? {
+        val states = props.value.state.columnState
+        return when (val index = gridColumnStateIndex(states, id)) {
+            case Some(val at) -> Some(states[at])
+            case None -> None
+        }
+    }
+    private fun show(id: GridColumnId, visible: Boolean) {
+        if (!available())
+            return
+        val current = entry(id) ?: return
+        report(
+            props.value.handle.setColumnState(
+                GridColumnState(id, visible, current.width, current.pin)
+            )
+        )
+    }
+    private fun pin(id: GridColumnId, value: GridPin) {
+        if (!available() || selected != id)
+            return
+        val current = entry(id) ?: return
+        report(
+            props.value.handle.setColumnState(
+                GridColumnState(id, current.visible, current.width, value)
+            )
+        )
+    }
+    private fun setWidth(restore: Boolean = false) {
+        if (!available())
+            return
+        val current = entry(selected) ?: return
+        val text =
+            if (restore)
+                ""
+            else
+                draft.committedText.trim()
+        val width =
+            if (text == "")
+                None
+            else {
+                val number = text.toDoubleOrNone()
+                when (number) {
+                    case Some(val value) -> if (value.isFinite() && value >= 0.0)
+                        Some(value)
+                    else {
+                        report(GridColumnActionResult.Rejected(props.value.labels.invalidWidth));
+                        return
+                    }
+                    case None -> {
+                        report(GridColumnActionResult.Rejected(props.value.labels.invalidWidth));
+                        return
+                    }
+                }
+            }
+        val result =
+            props.value.handle.setColumnState(
+                GridColumnState(selected, current.visible, width, current.pin)
+            )
+        report(result)
+        when (result) {
+            case Applied -> if (restore && scope.isMounted) {
+                draft = TextEditorState()
+                revision.value += 1L
+            }
+            case Rejected(_) -> {}
+        }
+    }
+    private fun move(forward: Boolean) {
+        if (!available())
+            return
+        val states = props.value.state.columnState
+        val current = entry(selected) ?: return
+        val target =
+            props.value.state.headerTree.adjacentIndex(
+                states,
+                GridHeaderKey.Column(selected),
+                forward,
+                Some(current.pin)
+            ) ?:
+                return
+        report(props.value.handle.moveColumn(selected, target))
+    }
+    private fun moveGroup(id: GridColumnGroupId, forward: Boolean) {
+        if (!available())
+            return
+        val model = props.value.state
+        val key = GridHeaderKey.Group(id)
+        when (model.headerTree.find(key)) {
+            case None -> return
+            case Some(_) -> {}
+        }
+        val target = model.headerTree.adjacentIndex(model.columnState, key, forward) ?: return
+        report(props.value.handle.moveColumnGroup(id, target))
+    }
+    private fun fit() {
+        if (available())
+            report(props.value.handle.fitColumns())
+    }
+    private fun aggregate(id: GridColumnId, operation: GridAggregateId?) {
+        val input = props.value
+        if (!available() || selected != id)
+            return
+        if (!gridQueryReady(Some(input.handle))) {
+            report(
+                GridColumnActionResult.Rejected(
+                    input.handle.editError ?: input.labels.finishEditing
+                )
+            )
+            return
+        }
+        if (!scope.isMounted || props.value.state !== input.state || selected != id)
+            return
+        input.state.setAggregation(id, operation)
+        report(GridColumnActionResult.Applied)
+    }
+    private fun groupQuery(id: GridColumnId, query: GridQuery) {
+        val input = props.value
+        if (!available() || selected != id)
+            return
+        val before = input.state.query
+        if (!gridQueryReady(Some(input.handle))) {
+            report(
+                GridColumnActionResult.Rejected(
+                    input.handle.editError ?: input.labels.finishEditing
+                )
+            )
+            return
+        }
+        if (
+            !scope.isMounted ||
+                props.value.state !==
+                input.state ||
+                selected !=
+                id ||
+                input.state.query !==
+                before
+        ) {
+            report(GridColumnActionResult.Rejected("查询已更新，请重试"))
+            return
+        }
+        input.state.setQuery(query)
+        report(GridColumnActionResult.Applied)
+    }
+    private fun clearContentFit() {
+        contentFit?.cancel()
+        contentFit = None
+        fittedColumn = None
+        fittingModel = None
+    }
+    private fun fitContent() {
+        if (!available() || !(entry(selected)?.visible ?: false))
+            return
+        clearContentFit()
+        contentFit = Some(props.value.handle.fitColumnToContent(selected))
+        fittedColumn = Some(selected)
+        fittingModel = Some(props.value.state)
+        message = None
+        revision.value += 1L
+    }
+    public override fun onUnmount() {
+        clearContentFit()
+    }
+    public override fun render(): View {
+        revision.value
+        val input = props.value
+        val labels = input.labels
+        val states = input.state.columnState
+        val ordered = gridOrderedColumnStates(states)
+        val index = gridColumnStateIndex(ordered, selected) ?: 0L
+        val current = ordered[index]
+        val tree = input.state.headerTree
+        val previous =
+            tree.adjacentIndex(states, GridHeaderKey.Column(current.id), false, Some(current.pin))
+        val next =
+            tree.adjacentIndex(states, GridHeaderKey.Column(current.id), true, Some(current.pin))
+        selected = current.id
+        if (model !== input.state || shown != selected || appliedWidth != current.width) {
+            model = input.state
+            shown = selected
+            appliedWidth = current.width
+            draft = TextEditorState(gridColumnWidthText(current.width))
+            message = None
+        }
+        val appearance =
+            GridAppearance(
+                (input.theme ?: (ambient ?: currentThemeSource())).read(scope),
+                input.fonts ?: scope.defaultFonts,
+                scope.layoutDirection
+            )
+        val active = available()
+        val definition = input.state.column(selected)
+        val title = definition.title
+        val widthDraft = draft
+        val fitting =
+            when (fittingModel) {
+                case Some(val model) -> if (model === input.state && fittedColumn == Some(selected))
+                    contentFit
+                else
+                    None
+                case None -> None
+            }
+        val fitMessage =
+            when (fitting) {
+                case Some(val request) -> Some(
+                    when (request.result) {
+                        case Pending -> labels.measuring
+                        case Applied(_) -> labels.measured
+                        case Rejected(val text) -> labels.error(text)
+                        case Cancelled -> labels.cancelled
+                    }
+                )
+                case None -> None
+            }
+        val source =
+            GridColumnChoices(
+                input,
+                ordered,
+                selected,
+                appearance,
+                active,
+                { id -> choose(id) },
+                { id, visible -> show(id, visible) }
+            )
+        return column {
+            if (gridHasPivotControls(input.state))
+                add(gridPivotControls(input, active))
+            add(
+                columnsButton(labels.fit, { this @GridColumnsPanel.fit() }) {
+                    enabled = active
+                    fonts = input.fonts
+                    theme = input.theme
+                    semantics =
+                        ComponentSemantics(
+                            name = Some(labels.fitName),
+                            automationId = Some("grid-columns-fit")
+                        )
+                }
+            )
+            when (this @GridColumnsPanel.message) {
+                case Some(val text) -> add(gridColumnsLabel(labels.error(text), appearance))
+                case None -> {}
+            }
+            add(
+                columnsList(source, ItemExtent.Fixed(40.0 * appearance.density)) {
+                    key = ViewKey.Text("grid-columns-list")
+                    height = Some(input.height * appearance.density)
+                    enabled = active
+                    theme = input.theme
+                    navigation = ItemNavigation.Roving()
+                    itemSemantics = Some(source.semantics())
+                    collectionSemantics =
+                        ComponentSemantics(
+                            name = Some(labels.name),
+                            automationId = Some("grid-columns-list")
+                        )
+                }
+            )
+            add(gridColumnsLabel(labels.title(title), appearance))
+            if (!input.state.isTree) {
+                when (definition.grouping) {
+                    case Some(_) -> add(
+                        gridColumnGroupingControl(
+                            input.state,
+                            definition,
+                            active,
+                            labels.grouping,
+                            input.fonts,
+                            input.theme,
+                            { query -> this @GridColumnsPanel.groupQuery(current.id, query) }
+                        )
+                    )
+                    case None -> {}
+                }
+            }
+            if (definition.aggregations.size > 0L)
+                add(
+                    gridColumnAggregationControl(
+                        input.state,
+                        definition,
+                        active,
+                        labels,
+                        input.fonts,
+                        input.theme,
+                        { operation -> this @GridColumnsPanel.aggregate(current.id, operation) }
+                    )
+                )
+            for (ancestor in tree.ancestors(current.id)) {
+                val group =
+                    when (ancestor.key) {
+                        case Group(val id) -> id
+                        case Column(_) -> throw IllegalStateException(
+                            Some("a header parent must be a group")
+                        )
+                    }
+                val before = tree.adjacentIndex(states, ancestor.key, false)
+                val after = tree.adjacentIndex(states, ancestor.key, true)
+                row {
+                    key = ViewKey.Text(f"grid-column-group-${group.value}")
+                    item(gridColumnsLabel(labels.groupTitle(ancestor.title), appearance)) {
+                        grow = 1.0
+                    }
+                    add(
+                        columnsButton(
+                            labels.previousGroup,
+                            { this @GridColumnsPanel.moveGroup(group, false) }
+                        ) {
+                            enabled = active && before != None
+                            fonts = input.fonts;
+                            theme = input.theme;
+                            variant = ButtonVariant.Outline
+                            semantics =
+                                ComponentSemantics(
+                                    name = Some(labels.previousGroupName(ancestor.title)),
+                                    automationId =
+                                        Some(f"grid-column-group-${group.value}-previous")
+                                )
+                        }
+                    )
+                    add(
+                        columnsButton(
+                            labels.nextGroup,
+                            { this @GridColumnsPanel.moveGroup(group, true) }
+                        ) {
+                            enabled = active && after != None
+                            fonts = input.fonts;
+                            theme = input.theme;
+                            variant = ButtonVariant.Outline
+                            semantics =
+                                ComponentSemantics(
+                                    name = Some(labels.nextGroupName(ancestor.title)),
+                                    automationId = Some(f"grid-column-group-${group.value}-next")
+                                )
+                        }
+                    )
+                    spacing = 6.0 * appearance.density
+                }
+            }
+            row {
+                key = ViewKey.Text(f"grid-columns-placement-${current.id.encoded}")
+                item(
+                    columnsSelect(
+                        binding<GridPin?>(
+                            { this @GridColumnsPanel.entry(current.id)?.pin },
+                            {
+                                next -> when (next) {
+                                    case Some(val pin) -> this @GridColumnsPanel.pin(
+                                        current.id,
+                                        pin
+                                    );
+                                    case None -> {}
+                                }
+                            }
+                        ),
+                        [
+                            Choice(ViewKey.Text("none"), GridPin.None, labels.unpinned),
+                            Choice(ViewKey.Text("start"), GridPin.Start, labels.pinStart),
+                            Choice(ViewKey.Text("end"), GridPin.End, labels.pinEnd)
+                        ]
+                    ) {
+                        enabled = active
+                        width = Some(144.0 * appearance.density)
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = gridColumnControl(current.id, "pin", labels.pinName(title))
+                    }
+                ) { grow = 1.0 }
+                add(
+                    columnsButton(labels.previous, { this @GridColumnsPanel.move(false) }) {
+                        enabled = active && previous != None
+                        variant = ButtonVariant.Outline
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics =
+                            gridColumnControl(current.id, "previous", labels.previousName(title))
+                    }
+                )
+                add(
+                    columnsButton(labels.next, { this @GridColumnsPanel.move(true) }) {
+                        enabled = active && next != None
+                        variant = ButtonVariant.Outline
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = gridColumnControl(current.id, "next", labels.nextName(title))
+                    }
+                )
+                spacing = 6.0 * appearance.density
+            }
+            row {
+                key = ViewKey.Text(f"grid-columns-width-${current.id.encoded}")
+                item(
+                    columnsInput(widthDraft) {
+                        enabled =
+                            input.enabled &&
+                                input.handle.usesColumns(states) &&
+                                !input.handle.isSubmitting
+                        placeholder = labels.widthPlaceholder
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = gridColumnControl(current.id, "width", labels.widthName(title))
+                        onSubmit = { _ -> this @GridColumnsPanel.setWidth() }
+                    }
+                ) {
+                    basis = FlexBasis.Fixed(0.0)
+                    grow = 1.0
+                }
+                item(
+                    columnsButton(labels.apply, { this @GridColumnsPanel.setWidth() }) {
+                        enabled = active
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics = gridColumnControl(current.id, "apply", labels.applyName(title))
+                    }
+                ) { shrink = 0.0 }
+                item(
+                    columnsButton(labels.restore, { this @GridColumnsPanel.setWidth(true) }) {
+                        enabled = active
+                        fonts = input.fonts
+                        theme = input.theme
+                        variant = ButtonVariant.Outline
+                        semantics =
+                            gridColumnControl(current.id, "restore", labels.restoreName(title))
+                    }
+                ) { shrink = 0.0 }
+                spacing = 6.0 * appearance.density
+            }
+            add(
+                columnsButton(labels.fitContent, { this @GridColumnsPanel.fitContent() }) {
+                    enabled = active && current.visible && !(fitting?.isPending ?: false)
+                    fonts = input.fonts
+                    theme = input.theme
+                    variant = ButtonVariant.Outline
+                    semantics =
+                        gridColumnControl(current.id, "content", labels.fitContentName(title))
+                }
+            )
+            when (fitMessage) {
+                case Some(val text) -> add(gridColumnsLabel(text, appearance))
+                case None -> {}
+            }
+            spacing = 8.0 * appearance.density
+            alignment = CrossAlignment.Stretch
+        }
+    }
+}
+
+internal fun gridColumnWidthText(width: Double?): String =
+    when (width) {
+        case Some(val number) -> f"${number}"
+        case None -> ""
+    }
+
+internal fun gridColumnsLabel(text: String, appearance: GridAppearance): View =
+    component(
+        LabelProps(
+            LabelText.Plain(text, None),
+            Some(appearance.fonts),
+            baseStyle = Some(appearance.body)
+        ),
+        { props, scope -> Label(props, scope) }
+    )
+
+internal fun gridColumnControl(id: GridColumnId, part: String, name: String): ComponentSemantics =
+    ComponentSemantics(name = Some(name), automationId = Some(f"grid-columns-${id.value}-${part}"))
+
+public class GridColumnsPanelBuilder internal constructor() {
+    public var height: Double = 256.0
+    public var enabled: Boolean = true
+    public var fonts: FontCollection? = None
+    public var theme: ThemeSource? = None
+    public var labels: GridColumnsLabels = GridColumnsLabels()
+    public var key: ViewKey = ViewKey.Position
+    internal fun <Row> snapshot(
+        state: DataGridState<Row>,
+        handle: DataGridHandle
+    ): GridColumnsPanelProps<Row> =
+        GridColumnsPanelProps(state, handle, height, enabled, fonts, theme, labels)
+}
+
+public fun <Row> gridColumnsPanel(
+    state: DataGridState<Row>,
+    handle: DataGridHandle,
+    configure: GridColumnsPanelBuilder.() -> Unit = {}
+): View {
+    val builder = GridColumnsPanelBuilder()
+    builder.configure()
+    return component(
+        builder.snapshot(state, handle),
+        { props, scope -> GridColumnsPanel(props, scope) },
+        builder.key
+    )
+}

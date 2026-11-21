@@ -1,0 +1,180 @@
+package scoop.grid
+
+import scoop.graphics.Point
+import scoop.graphics.text.FontCollection
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.ThemeSource
+import scoop.ui.style.shadcn.shadcnTheme
+
+private class HeightRows(
+    public override val count: Long = 100000000L,
+    val reverse: Boolean = false
+): TableSource<Long> {
+    var reads = 0L
+    public override fun keyAt(index: Long): ViewKey =
+        ViewKey.Number(
+            if (reverse)
+                count - 1L - index
+            else
+                index
+        )
+    public override fun rowAt(index: Long): Long {
+        reads += 1L
+        return if (reverse)
+            count - 1L - index
+        else
+            index
+    }
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val value) -> if (value >= 0L && value < count)
+                Some(
+                    if (reverse)
+                        count - 1L - value
+                    else
+                        value
+                )
+            else
+                None
+            else -> None
+        }
+}
+
+private class HeightSetup(val fonts: FontCollection) {
+    val rows = HeightRows()
+    val columns =
+        Array<GridColumn<Long>>(3L) {
+            index -> gridColumn<Long, Long>(
+                GridColumnId(f"c${index}"),
+                f"Column ${index}",
+                { value -> value },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(100.0))
+            )
+        }
+    val model = DataGridState(rows, columns)
+    val theme = ThemeSource(shadcnTheme())
+    val appearance = GridAppearance(theme.current.value, fonts, LayoutDirection.Ltr)
+    val session = GridSession<Long>()
+    val scroll = ScrollState()
+    val measure: (Long) -> Double = { row -> 32.0 + (row % 4L).toDouble() * 8.0 }
+    fun plan(): GridColumnsPlan<Long> = GridColumnsPlan(columns, model.columnState, appearance)
+    fun input(
+        columns: GridColumnsPlan<Long>,
+        mode: GridRowSizing<Long> = GridRowSizing.Explicit(measure),
+        scrolling: ScrollState = scroll
+    ): GridRootProps<Long> =
+        GridRootProps(
+            DataGridProps(model, rowHeight = 32.0, rowSizing = mode),
+            columns,
+            GridRows(model.result.rows, columns, session, GridRowPolicy(mode, columns)),
+            scrolling,
+            session,
+            theme,
+            None
+        )
+}
+
+@Test
+private class GridRowHeightTest {
+    @Test
+    fun `row sizing checks its actual column and height inputs without reading the source`() {
+        FontCollection(false).use {
+            fonts ->
+            val setup = HeightSetup(fonts)
+            val plan = setup.plan()
+            val explicit = GridRowPolicy(GridRowSizing.Explicit(setup.measure), plan)
+            assertEquals(40.0, explicit.height(1L, 32.0))
+            assertEquals(32.0, GridRowPolicy(GridRowSizing.Fixed, plan).height(1L, 32.0))
+            for (
+                ids in [
+                    Array<GridColumnId>(0L) { _ -> GridColumnId("unused") },
+                    [GridColumnId("missing")],
+                    [GridColumnId("c1"), GridColumnId("c1")]
+                ]
+            )
+                assertFailsWith<IllegalArgumentException> {
+                    GridRowPolicy(GridRowSizing.Content(ids), plan)
+                }
+            for (value in [0.0, -1.0, Double.POSITIVE_INFINITY, Double.NaN])
+                assertFailsWith<IllegalArgumentException> {
+                    GridRowPolicy<Long>(GridRowSizing.Explicit { _ -> value }, plan).height(
+                        0L,
+                        32.0
+                    )
+                }
+            val mode: GridRowSizing<Long> = GridRowSizing.Content([GridColumnId("c1")])
+            assertTrue(GridRowPolicy(mode, plan).contributors.contains(1L))
+            setup.model.setColumnState(GridColumnState(GridColumnId("c1"), visible = false))
+            assertEquals(0L, GridRowPolicy(mode, setup.plan()).contributors.size)
+            assertEquals(0L, setup.rows.reads)
+        }
+    }
+
+    @Test
+    fun `sparse heights follow stable keys across ordering and reset when geometry changes`() {
+        FontCollection(false).use {
+            fonts ->
+            val setup = HeightSetup(fonts)
+            val cache = GridRowMeasurements<Long>()
+            val columns = setup.plan()
+            val input = setup.input(columns)
+            val values = cache.prepare(input, columns.resolve(500.0))
+            assertEquals(0L, values.known.size)
+            values.record(99999999L, ViewKey.Number(99999999L), 128.0)
+            assertEquals(3200000096.0, values.index.total)
+            assertEquals(1L, values.known.size)
+            assertTrue(values === cache.prepare(setup.input(columns), columns.resolve(500.0)))
+            val reversed = HeightRows(reverse = true)
+            setup.model.replaceData(reversed)
+            val moved = cache.prepare(setup.input(columns), columns.resolve(500.0))
+            assertEquals(128.0, moved.index.extent(0L))
+            assertEquals(32.0, moved.index.extent(99999999L))
+            assertEquals(1L, moved.known.size)
+            val content: GridRowSizing<Long> = GridRowSizing.Content([GridColumnId("c1")])
+            val natural = cache.prepare(setup.input(columns, content), columns.resolve(500.0))
+            natural.record(0L, ViewKey.Number(99999999L), 80.0)
+            setup.model.setColumnState(GridColumnState(GridColumnId("c1"), width = Some(60.0)))
+            val resized = setup.plan()
+            val reset = cache.prepare(setup.input(resized, content), resized.resolve(500.0))
+            assertEquals(32.0, reset.index.extent(0L))
+            assertEquals(0L, reset.known.size)
+            assertEquals(Point(0.0, 0.0), setup.scroll.offset)
+            assertEquals(0L, setup.rows.reads)
+            assertEquals(0L, reversed.reads)
+        }
+    }
+
+    @Test
+    fun `reading positions follow accepted keys and yield to explicit scroll requests`() {
+        FontCollection(false).use {
+            fonts ->
+            val setup = HeightSetup(fonts)
+            val cache = GridRowMeasurements<Long>()
+            val columns = setup.plan()
+            cache.accept(
+                GridRowReading(
+                    setup.model,
+                    setup.model.result.rows,
+                    setup.scroll,
+                    setup.scroll.requestRevision,
+                    Some(GridReadingAnchor(ViewKey.Number(7L), 7L, 12.0))
+                )
+            )
+            setup.model.replaceData(HeightRows(12L, true))
+            val anchor = cache.anchor(setup.input(columns))!!
+            assertEquals(ViewKey.Number(7L), anchor.key)
+            assertEquals(4L, anchor.index)
+            assertEquals(12.0, anchor.inside)
+            setup.model.replaceData(HeightRows(3L))
+            assertEquals(2L, cache.anchor(setup.input(columns))!!.index)
+            assertEquals(None, cache.anchor(setup.input(columns, scrolling = ScrollState()))?.key)
+            setup.scroll.scrollTo(Point(0.0, 120.0))
+            assertEquals(None, cache.anchor(setup.input(columns))?.key)
+            cache.close()
+            assertEquals(None, cache.anchor(setup.input(columns))?.key)
+        }
+    }
+}

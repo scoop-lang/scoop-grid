@@ -1,0 +1,289 @@
+package scoop.grid.tests.columns
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.style.shadcn.shadcnTheme
+
+internal fun ColumnsProbe.advanceResize() {
+    when (phase) {
+        case 76 -> {
+            val before = model.columnState
+            model.setColumnStates(
+                Array<GridColumnState>(before.size) {
+                    index -> GridColumnState(
+                        before[index].id,
+                        pin =
+                            if (index == 0L)
+                                GridPin.Start
+                            else
+                                if (index == 299L)
+                                    GridPin.End
+                                else
+                                    GridPin.None
+                    )
+                }
+            )
+            resizeResult = Some(model.result)
+        }
+        case 77 -> resizeBegin("c1")
+        case 78 -> resizeMove(40.0)
+        case 79 -> resizeRelease()
+        case 80 -> resizeBegin("c1")
+        case 81 -> resizeMove(30.0)
+        case 82 -> key(53, "\u001b")
+        case 83 -> {
+            resizeRelease();
+            key(124, "\uf703")
+        }
+        case 84 -> {
+            key(115, "\uf729")
+            model.setColumnState(
+                GridColumnState(GridColumnId("c299"), width = Some(150.0), pin = GridPin.End)
+            )
+        }
+        case 85 -> resizeBegin("c0")
+        case 86 -> resizeMove(350.0)
+        case 87 -> resizeRelease()
+        case 88 -> resizeBegin("c0")
+        case 89 -> resizeMove(-250.0)
+        case 90 -> width.value = 120.0
+        case 91 -> key(53, "\u001b")
+        case 92 -> {
+            resizeRelease()
+            width.value = 500.0
+            model.setColumnState(GridColumnState(GridColumnId("c0"), pin = GridPin.Start))
+            model.setColumnState(GridColumnState(GridColumnId("c299"), pin = GridPin.End))
+        }
+        case 93 -> resizeBegin("c1")
+        case 94 -> resizeMove(20.0)
+        case 95 -> {
+            model.setColumnState(GridColumnState(GridColumnId("c2"), width = Some(135.0)))
+            resizeExternal = Some(model.columnState)
+        }
+        case 96 -> key(53, "\u001b")
+        case 97 -> {
+            resizeRelease()
+            model.setColumnState(GridColumnState(GridColumnId("c1")))
+            model.setColumnState(GridColumnState(GridColumnId("c2")))
+        }
+        case 98 -> scroll.scrollTo(Point(50.0, 0.0))
+        case 99 -> {
+            scroll.scrollTo(Point(44520.0, 0.0))
+            direction.value = LayoutDirection.Rtl
+            width.value = 320.0
+            theme.current.value =
+                shadcnTheme() { tokens { typography { body { fontSize = 21.0 } } } }
+        }
+        case 100 -> resizeBegin("c1")
+        case 101 -> resizeMove(-30.0)
+        case 102 -> resizeRelease()
+        case 103 -> key(124, "\uf703")
+        case 104 -> {
+            key(115, "\uf729")
+            scroll.scrollTo(Point(0.0, 0.0))
+            direction.value = LayoutDirection.Ltr
+            width.value = 500.0
+            theme.current.value = shadcnTheme()
+        }
+        case 105 -> {
+            assertTrue(handle.beginEdit(address))
+            editor!!.state.replaceAll("bad")
+        }
+        case 106 -> resizeBegin("c0")
+        case 107 -> resizeMove(30.0)
+        case 108 -> resizeRelease()
+        case 109 -> {
+            editor!!.state.replaceAll("456")
+            resizeBegin("c0")
+        }
+        case 110 -> resizeMove(30.0)
+        case 111 -> resizeRelease()
+        case 112 -> {
+            val next = pendingRows!!
+            assertTrue(pending!!.accept(next))
+            rows = next
+            resizeResult = Some(model.result)
+        }
+        case 113 -> resizeBegin("c0")
+        case 114 -> resizeMove(20.0)
+        case 115 -> resizeRelease()
+        case 116 -> resizeBegin("c1")
+        case 117 -> resizeMove(25.0)
+        case 118 -> {
+            resizePrevious = Some(model)
+            selected.value =
+                DataGridState(
+                    rows,
+                    columnDefinitions(this),
+                    columnQuery(),
+                    Some { _ -> queryEvents += 1 }
+                )
+            resizeResult = Some(model.result)
+        }
+        case 119 -> resizeRelease()
+        case 120 -> resizeBegin("c0")
+        case 121 -> resizeMove(40.0)
+        case 122 -> enabled.value = false
+        case 123 -> {
+            resizeRelease()
+            enabled.value = true
+        }
+        case 124 -> resizeBegin("c0")
+        case 125 -> resizeMove(30.0)
+        case 126 -> {
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+        }
+        else -> fail(Some("unexpected header resize phase"))
+    }
+}
+
+internal fun ColumnsProbe.inspectResize() {
+    when (resizeResult) {
+        case Some(val result) -> assertTrue(
+            result === model.result,
+            Some(f"resize reran the query at ${phase}")
+        )
+        case None -> fail(Some("missing resize query result"))
+    }
+    when (phase) {
+        case 76 -> {
+            resizeControls()
+            assertTrue(resizeCenter!!.text(0, Some("调整 Amount 列宽")))
+            assertTrue(resizeCenter!!.text(2, Some("AXSplitter")))
+            assertTrue(resizeFrame(resizeStart!!, Rect(540.0, 16.0, 8.0, 24.0)))
+            assertTrue(resizeFrame(resizeCenter!!, Rect(640.0, 16.0, 8.0, 24.0)))
+            assertTrue(resizeFrame(resizeEnd!!, Rect(940.0, 16.0, 8.0, 24.0)))
+            cell = Some(keep(grid!!.cell(0L, 1L)!!))
+        }
+        case 78 -> {
+            resizeWidth("c1", Some(140.0))
+            assertTrue(cell!!.same(keep(grid!!.cell(0L, 1L)!!)))
+            assertTrue(resizeCenter!!.same(identified("grid-resize-c1")))
+        }
+        case 79 -> resizeWidth("c1", Some(140.0))
+        case 81 -> resizeWidth("c1", Some(170.0))
+        case 82 -> {
+            resizeWidth("c1", Some(140.0))
+            assertTrue(
+                resizeCenter!!.flag(4),
+                Some(
+                    f"Escape must retain resize focus; header=${
+                        identified("grid-header-c1").flag(4)
+                    }"
+                )
+            )
+        }
+        case 83 -> {
+            assertTrue(
+                resizeCenter!!.flag(4),
+                Some(
+                    f"release must retain resize focus; header=${
+                        identified("grid-header-c1").flag(4)
+                    }, next=${identified("grid-header-c2").flag(4)}, enabled=${
+                        resizeCenter!!.flag(1)
+                    }"
+                )
+            )
+            resizeWidth("c1", Some(150.0))
+        }
+        case 84 -> resizeWidth("c1", None)
+        case 86 -> {
+            resizeWidth("c0", Some(250.0));
+            assertEquals(250L, resizeStart!!.numericValue)
+        }
+        case 89 -> resizeWidth("c0", Some(50.0))
+        case 90 -> {
+            resizeWidth("c0", Some(50.0));
+            assertEquals(GridPin.Start, entry("c0").pin)
+        }
+        case 91 -> {
+            resizeWidth("c0", Some(250.0));
+            assertEquals(120.0, width.value)
+        }
+        case 92 -> {
+            resizeWidth("c0", None);
+            resizeControls()
+        }
+        case 94 -> resizeWidth("c1", Some(120.0))
+        case 96 -> {
+            resizeWidth("c1", Some(120.0))
+            resizeWidth("c2", Some(135.0))
+            assertTrue(resizeExternal!! === model.columnState)
+        }
+        case 98 -> {
+            assertTrue(resizeFrame(resizeCenter!!, Rect(590.0, 16.0, 8.0, 24.0)))
+            assertTrue(resizeFrame(resizeEnd!!, Rect(940.0, 16.0, 8.0, 24.0)))
+            val frozen =
+                find(root!!, "Column 299", role = Some("AXCell")) ?:
+                    fail(Some("missing frozen header"))
+            assertTrue(
+                resizeHit(frozen, 894.0, 28.0),
+                Some("a clipped center handle must not cover the frozen header")
+            )
+        }
+        case 99 -> {
+            resizeControls()
+            assertTrue(resizeFrame(resizeStart!!, Rect(778.0, 18.0, 12.0, 36.0)))
+            assertTrue(resizeFrame(resizeCenter!!, Rect(628.0, 18.0, 12.0, 36.0)))
+            assertTrue(resizeFrame(resizeEnd!!, Rect(448.0, 18.0, 12.0, 36.0)))
+        }
+        case 101 -> resizeWidth("c1", Some(120.0))
+        case 103 -> resizeWidth("c1", Some(110.0))
+        case 104 -> {
+            resizeWidth("c1", None);
+            resizeControls()
+        }
+        case 105 -> retry = handle.focusedCell != Some(address) || handle.isPending
+        case 107 -> {
+            resizeWidth("c0", None)
+            assertEquals(Some(address), handle.editingCell)
+            assertTrue(handle.editError != None)
+            assertEquals(1, submissions)
+        }
+        case 110 -> {
+            resizeWidth("c0", None)
+            assertTrue(handle.isSubmitting)
+            assertEquals(2, submissions)
+            assertFalse(resizeStart!!.flag(1))
+        }
+        case 112 -> {
+            resizeWidth("c0", None);
+            assertEquals(None, handle.editingCell)
+        }
+        case 115 -> resizeWidth("c0", Some(120.0))
+        case 117 -> resizeWidth("c1", Some(125.0))
+        case 118 -> {
+            resizeWidth("c1", None)
+            assertTrue(resizeFrame(identified("grid-resize-c1"), Rect(640.0, 16.0, 8.0, 24.0)))
+            val previous = resizePrevious!!
+            assertEquals(None, previous.columnState[1L].width)
+            assertEquals(Some(120.0), previous.columnState[0L].width)
+            resizeStart = Some(identified("grid-resize-c0"))
+        }
+        case 121 -> resizeWidth("c0", Some(140.0))
+        case 122 -> {
+            resizeWidth("c0", None);
+            assertFalse(resizeStart!!.flag(1))
+        }
+        case 123 -> {
+            assertTrue(resizeStart!!.flag(1), Some("resize handle must reenable with the grid"))
+            assertEquals(0.0, scroll.offset.x, Some(f"horizontal offset: ${scroll.offset.x}"))
+            assertTrue(resizeFrame(resizeStart!!, Rect(540.0, 16.0, 8.0, 24.0)))
+        }
+        case 124 -> assertTrue(
+            resizeStart!!.flag(4),
+            Some("the new press must focus the reenabled handle")
+        )
+        case 125 -> resizeWidth("c0", Some(130.0))
+        case 126 -> {
+            resizeWidth("c0", None)
+            assertFalse(resizeStart!!.flag(0))
+            assertFalse(handle.isAttached)
+        }
+        else -> {}
+    }
+}

@@ -1,0 +1,252 @@
+package scoop.grid.tests.pivot
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.ui.*
+
+internal fun PivotProbe.accepted() {
+    if (finished || waiting || !(window?.isFocused ?: false))
+        return
+    waiting = true
+    retry = false
+    when (phase) {
+        case 2 -> calls!!.post(named("grid-pivot-enabled"), phase)
+        case 5 -> calls!!.post(named("grid-pivot-enabled"), phase)
+        case 9 -> calls!!.post(far!!, phase, 2)
+        case 13 -> calls!!.post(row!!, phase, 14)
+        case 17 -> calls!!.post(row!!, phase, 15)
+        case 23 -> calls!!.post(named("grid-pivot-source"), phase)
+        case 25 -> calls!!.post(control!!, phase)
+        case 27 -> calls!!.post(named("grid-pivot-period-dimension"), phase)
+        case 29 -> calls!!.post(control!!, phase)
+        case 33 -> calls!!.post(named("grid-pivot-period-direction"), phase)
+        case 35 -> calls!!.post(control!!, phase)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun PivotProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            table = find(root!!, "AXTable")
+            assertEquals(400L, table!!.rowCount)
+            assertTrue(named("grid-pivot-enabled").flag(1))
+        }
+        case 1 -> retry = !focused
+        case 3 -> {
+            assertEquals(None, model.pivot)
+            assertTrue(named("grid-pivot-enabled").flag(1))
+            assertEquals(0L, named("grid-pivot-enabled").numericValue)
+            assertEquals(Some(address), handle.editingCell)
+            assertTrue(handle.editError != None)
+            assertEquals("bad", editor!!.state.text)
+            retry = !focused
+        }
+        case 4 -> assertEquals(None, handle.editingCell)
+        case 6 -> {
+            assertTrue(model.pivot != None)
+            assertEquals(1L, table!!.rowCount)
+            assertEquals(2L, model.columns.size)
+            assertTrue(keep(table!!.cell(0L, 1L)!!).text(1, Some("80200")))
+        }
+        case 8 -> {
+            assertEquals(2L, table!!.rowCount)
+            assertEquals(201L, model.columns.size)
+            first = Some(keep(table!!.cell(0L, 0L)!!))
+            row = Some(keep(first!!.parent()!!))
+            assertTrue(row!!.flag(18))
+            assertFalse(row!!.flag(20))
+            far = Some(keep(table!!.cell(0L, 151L)!!))
+            assertTrue(far!!.text(1, Some("151")))
+            assertFalse(far!!.flag(2))
+            assertEquals(0L, table!!.selectedCount)
+            baselineBuilds = dataBuilds
+        }
+        case 10 -> {
+            retry = handle.focusedCell != Some(GridCellAddress(rootKey, metric(150L)))
+            if (!retry)
+                assertTrue(far!!.flag(4))
+            assertEquals(baselineBuilds, dataBuilds)
+        }
+        case 12 -> {
+            assertEquals(None, handle.editingCell)
+            assertEquals(Some(GridCellAddress(rootKey, metric(150L))), handle.focusedCell)
+        }
+        case 14 -> {
+            assertTrue(model.isExpanded(rootKey))
+            assertEquals(4L, table!!.rowCount)
+            val leaf = keep(keep(table!!.cell(1L, 0L)!!).parent()!!)
+            assertFalse(leaf.flag(18))
+            assertFalse(leaf.flag(20))
+            assertEquals(1L, leaf.hierarchyLevel)
+        }
+        case 16 -> retry =
+            handle.focusedCell !=
+                Some(
+                    GridCellAddress(
+                        GridRowKey.Group(
+                            GridGroupPath(
+                                [
+                                    GridGroupPart(GridColumnId("region"), GridLiteral.Integer(0L)),
+                                    GridGroupPart(GridColumnId("team"), GridLiteral.Integer(0L))
+                                ]
+                            )
+                        ),
+                        metric(150L)
+                    )
+                )
+        case 18 -> {
+            assertEquals(2L, table!!.rowCount)
+            retry = handle.focusedCell != Some(GridCellAddress(rootKey, metric(150L)))
+        }
+        case 20 -> {
+            assertEquals(1L, table!!.rowCount)
+            assertEquals(200L, model.result.pageRows.count)
+            assertEquals(2L, model.result.pageCount)
+            assertTrue(keep(table!!.cell(0L, 151L)!!).text(1, Some("351")))
+        }
+        case 22 -> {
+            oldCell = Some(keep(table!!.cell(0L, 200L)!!))
+            assertTrue(oldCell!!.text(1, Some("400")))
+            saved = Some(model.saveViewState())
+        }
+        case 24 -> {
+            control = find(root!!, "AXMenuItem", Some("Period"));
+            assertTrue(control?.flag(0) ?: false)
+        }
+        case 26 -> assertTrue(named("grid-pivot-period-dimension").flag(1))
+        case 28 -> {
+            control = find(root!!, "AXMenuItem", Some("不透视"));
+            assertTrue(control?.flag(0) ?: false)
+        }
+        case 30 -> {
+            assertEquals(0L, model.pivot!!.dimensions.size)
+            assertEquals(2L, model.columns.size)
+            assertFalse(oldCell!!.flag(0))
+            assertFalse(far!!.flag(0))
+            assertTrue(keep(table!!.cell(0L, 1L)!!).text(1, Some("20100")))
+        }
+        case 32 -> {
+            assertEquals(201L, model.columns.size)
+            val states = model.columnState
+            var retained = false
+            for (entry in states)
+                if (entry.id == metric(199L)) {
+                    assertEquals(GridPin.End, entry.pin)
+                    assertEquals(Some(190.0), entry.width)
+                    retained = true
+                }
+            assertTrue(retained)
+            assertFalse(oldCell!!.flag(0))
+        }
+        case 34 -> {
+            control = find(root!!, "AXMenuItem", Some("降序"));
+            assertTrue(control?.flag(0) ?: false)
+        }
+        case 36 -> {
+            assertEquals(GridSortDirection.Descending, model.pivot!!.dimensions[0L].direction)
+            assertEquals(metric(199L), model.columns[1L].id)
+            assertEquals(metric(199L), model.columnState[1L].id)
+            assertEquals(baselineBuilds, dataBuilds)
+        }
+        case 38 -> {
+            assertEquals(3L, model.columns.size)
+            assertEquals(4L, model.result.totalRows)
+            assertEquals(1L, table!!.rowCount)
+            assertTrue(keep(table!!.cell(0L, 1L)!!).text(1, Some("2")))
+            assertTrue(keep(table!!.cell(0L, 2L)!!).text(1, Some("1")))
+        }
+        case 40 -> assertFalse(named("grid-pivot-enabled").flag(1))
+        case 41 -> assertTrue(named("grid-pivot-enabled").flag(1))
+        case 43 -> {
+            assertEquals(201L, model.columns.size)
+            assertEquals(400L, model.result.totalRows)
+            assertEquals(baselineBuilds, dataBuilds)
+        }
+        case 45 -> {
+            assertFalse(handle.isAttached)
+            assertFalse(table!!.flag(0))
+        }
+        else -> {}
+    }
+}
+
+internal fun PivotProbe.completed(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(
+        if (phase == 2)
+            0
+        else
+            1,
+        result,
+        Some(f"native pivot action at ${phase}")
+    )
+    waiting = false
+    if (retry) {
+        frame!!.requestFrame();
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 1 -> assertTrue(handle.beginEdit(address))
+        case 2 -> editor!!.state.replaceAll("bad")
+        case 4 -> assertTrue(handle.cancelEdit())
+        case 7 -> model.setQuery(
+            model.query.withGrouping([GridColumnId("region"), GridColumnId("team")])
+            .withPivot(Some(GridPivot([GridSort(GridColumnId("period"))])))
+        )
+        case 11 -> key(120)
+        case 15 -> assertTrue(
+            handle.focusCell(
+                GridCellAddress(
+                    GridRowKey.Group(
+                        GridGroupPath(
+                            [
+                                GridGroupPart(GridColumnId("region"), GridLiteral.Integer(0L)),
+                                GridGroupPart(GridColumnId("team"), GridLiteral.Integer(0L))
+                            ]
+                        )
+                    ),
+                    metric(150L)
+                )
+            )
+        )
+        case 19 -> model.setPagination(GridPagination.Page(1L, 1L))
+        case 21 -> {
+            model.setColumnState(
+                GridColumnState(GridColumnId(GridColumnKey.PivotLabel), pin = GridPin.Start)
+            )
+            model.setColumnState(
+                GridColumnState(metric(199L), width = Some(190.0), pin = GridPin.End)
+            )
+        }
+        case 31 -> model.restoreViewState(saved!!)
+        case 37 -> model.setQuery(
+            model.query.withFilter(
+                GridFilter.Column(
+                    GridColumnId("period"),
+                    GridCondition.Compare(GridComparison.Less, GridLiteral.Integer(2L))
+                )
+            )
+        )
+        case 39 -> enabled.value = false
+        case 41 -> enabled.value = true
+        case 42 -> model.restoreViewState(saved!!)
+        case 44 -> {
+            ui!!.close()
+            phase = 45
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+            return
+        }
+        case 46 -> {
+            finished = true;
+            application!!.requestExit();
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}

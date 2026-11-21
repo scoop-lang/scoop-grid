@@ -1,0 +1,338 @@
+package scoop.grid.tests.selection
+
+import scoop.graphics.Point
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.CheckState
+
+internal fun SelectionProbe.accepted() {
+    if (finished || waiting || !(window?.isFocused ?: false))
+        return
+    when (calls) {
+        case None -> return;
+        case Some(_) -> {}
+    }
+    if (!initialized) {
+        initialized = true
+        assertTrue(outside.requestFocus())
+    }
+    waiting = true
+    retry = false
+    when (phase) {
+        case 1 -> calls!!.post(far!!, phase, 16)
+        case 4 -> calls!!.post(header!!, phase)
+        case 7 -> calls!!.post(checkbox!!, phase)
+        case 10 -> calls!!.post(row!!, phase, 17)
+        case 15 -> calls!!.post(header!!, phase)
+        case 20 -> calls!!.post(row!!, phase, 17)
+        case 27 -> calls!!.post(checkbox!!, phase)
+        case 28 -> calls!!.post(checkbox!!, phase)
+        case 36 -> calls!!.post(row!!, phase, 16)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun SelectionProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    when (phase) {
+        case 0 -> {
+            before = built
+            far = Some(at(50000000L))
+            nativeSelection(50000000L, false, 0L)
+            assertEquals(before, built)
+            assertEquals(0L, control(-1L).numericValue)
+        }
+        case 1 -> {
+            keys([50000000L])
+            nativeSelection(50000000L, true, 1L)
+            assertFalse(live.contains(selectionAddress(50000000L)))
+            assertEquals(Point(0.0, 0.0), scroll.offset)
+            assertTrue(outside.hasFocus)
+        }
+        case 2 -> {
+            assertEquals(2L, control(-1L).numericValue)
+            assertEquals(0L, control(0L).numericValue)
+            assertTrue(reads < 400L)
+            assertTrue(built < 400L)
+            assertTrue(outside.hasFocus)
+        }
+        case 3 -> {
+            assertFalse(far!!.flag(0))
+            tableNode = Some(table())
+            assertTrue(tableNode!!.text(0, Some("Data grid")))
+            header = Some(control(-1L))
+            checkbox = Some(control(0L))
+            assertFalse(control(2L).flag(1))
+            nativeSelection(0L, false, 0L)
+        }
+        case 4 -> {
+            keys([0L, 1L, 3L, 4L]);
+            assertEquals(0, queries)
+        }
+        case 5 -> {
+            assertEquals(1L, header!!.numericValue)
+            assertEquals(1L, checkbox!!.numericValue)
+            assertEquals(0L, control(5L).numericValue)
+            nativeSelection(5L, false, 4L)
+            prepareClick(-1L)
+        }
+        case 6 -> {
+            keys([]);
+            assertEquals(0, queries)
+        }
+        case 7 -> keys([0L])
+        case 8 -> {
+            assertEquals(2L, header!!.numericValue);
+            prepareClick(4L)
+        }
+        case 9 -> {
+            keys([0L, 1L, 3L, 4L])
+            nativeSelection(4L, true, 4L)
+            assertEquals(0, queries)
+            row = Some(at(3L))
+        }
+        case 10 -> keys([0L, 1L, 4L])
+        case 11 -> nativeSelection(3L, false, 3L)
+        case 12 -> retry = handle.focusedCell != Some(selectionAddress(3L))
+        case 13 -> {
+            keys([0L, 1L, 3L, 4L]);
+            assertEquals(None, handle.editingCell)
+            assertEquals(Some(selectionAddress(3L)), handle.focusedCell)
+            assertTrue(tableNode!!.text(0, Some("Orders")))
+            assertTrue(tableNode!!.same(table()))
+            assertTrue(header!!.text(0, Some("Select page")))
+            assertTrue(header!!.same(control(-1L)))
+            assertTrue(checkbox!!.text(0, Some("Select row 1")))
+            assertTrue(checkbox!!.same(control(0L)))
+            assertTrue(labelRows!! === model.result.rows)
+            assertTrue(labelColumns!! === model.columnState)
+            assertTrue(keep(root!!.find("grid-header-c0")!!).text(5, Some("Move columns")))
+            assertEquals(0, queries)
+        }
+        case 14 -> {
+            keys([0L, 1L, 3L, 4L])
+            assertTrue(tableNode!!.text(0, Some("Data grid")))
+            assertTrue(header!!.text(0, Some("选择当前页")))
+            header = Some(control(-1L))
+            assertEquals(0L, header!!.numericValue)
+            nativeSelection(0L, false, 0L)
+        }
+        case 15 -> keys([0L, 1L, 3L, 4L, 5L, 6L, 7L, 8L, 9L])
+        case 16 -> {
+            nativeSelection(0L, true, 5L);
+            nativeSelection(5L, false, 5L)
+        }
+        case 17 -> {
+            assertEquals(3L, model.result.rows.count)
+            assertEquals(9L, model.selectedRowKeys.size)
+            nativeSelection(0L, true, 1L)
+        }
+        case 18 -> {
+            keys([0L, 1L, 3L, 4L, 5L, 6L, 7L, 8L])
+            assertEquals(1L, model.result.rows.count)
+            nativeSelection(0L, true, 1L)
+        }
+        case 19 -> {
+            assertFalse(control(-1L).flag(1))
+            assertFalse(control(0L).flag(1))
+            row = Some(at(0L))
+        }
+        case 20 -> nativeSelection(0L, true, 1L)
+        case 21 -> keys([0L, 1L, 3L, 4L, 5L, 6L, 7L, 8L])
+        case 22 -> {
+            assertEquals(1L, control(0L).numericValue)
+            assertEquals(1L, control(-1L).numericValue)
+            nativeSelection(0L, true, 4L)
+            prepareClick(4L)
+        }
+        case 23 -> {
+            keys([0L, 1L, 3L, 5L, 6L, 7L, 8L]);
+            nativeSelection(4L, false, 3L)
+        }
+        case 24 -> {
+            when (findControl(0L)) {
+                case Some(val unexpected) -> {
+                    unexpected.close();
+                    fail(Some("hidden checkbox still exposed"))
+                }
+                case None -> {}
+            }
+            retry = handle.focusedCell != Some(selectionAddress(1L))
+        }
+        case 25 -> {
+            keys([0L, 3L, 5L, 6L, 7L, 8L]);
+            nativeSelection(1L, false, 2L)
+        }
+        case 26 -> {
+            when (findControl(-1L)) {
+                case Some(val unexpected) -> {
+                    unexpected.close();
+                    fail(Some("single selection exposes page checkbox"))
+                }
+                case None -> {}
+            }
+            checkbox = Some(control(0L))
+        }
+        case 27 -> {
+            keys([0L]);
+            checkbox = Some(control(1L))
+        }
+        case 28 -> keys([1L])
+        case 29 -> {
+            nativeSelection(1L, true, 1L)
+            assertEquals(6L, previous!!.selectedRowKeys.size)
+        }
+        case 30 -> {
+            assertEquals(Some(selectionAddress(0L)), handle.editingCell);
+            prepareClick(3L)
+        }
+        case 31 -> {
+            keys([1L])
+            assertEquals(Some(selectionAddress(0L)), handle.editingCell)
+            assertTrue(handle.editError != None)
+            assertEquals(0, submissions)
+            prepareClick(3L)
+        }
+        case 32 -> {
+            keys([1L]);
+            assertEquals(1, submissions);
+            assertTrue(handle.editingCell != None)
+        }
+        case 33 -> {
+            assertEquals(None, handle.editingCell);
+            keys([1L])
+            prepareClick(3L)
+        }
+        case 34 -> {
+            keys([3L]);
+            assertEquals(1, submissions);
+            nativeSelection(3L, true, 1L)
+        }
+        case 35 -> {
+            keys([])
+            when (findControl(0L)) {
+                case Some(val unexpected) -> {
+                    unexpected.close();
+                    fail(Some("disabled selection exposes checkbox"))
+                }
+                case None -> {}
+            }
+            row = Some(at(3L))
+        }
+        case 36 -> keys([])
+        case 37 -> {
+            header = Some(control(-1L))
+            checkbox = Some(control(0L))
+            row = Some(at(0L))
+            nativeSelection(0L, true, 1L)
+        }
+        case 38 -> {
+            assertFalse(row!!.flag(0))
+            assertFalse(header!!.flag(0))
+            assertFalse(checkbox!!.flag(0))
+            assertFalse(handle.isAttached)
+        }
+        else -> fail(Some("unexpected selection phase"))
+    }
+}
+
+internal fun SelectionProbe.completed(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(1, result, Some(f"native action at ${phase}"))
+    waiting = false
+    if (retry) {
+        frame!!.requestFrame();
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 3 -> selected.value = small()
+        case 6 -> click()
+        case 9 -> click(true)
+        case 12 -> assertTrue(handle.focusCell(selectionAddress(3L)))
+        case 13 -> {
+            labelRows = Some(model.result.rows)
+            labelColumns = Some(model.columnState)
+            labels.value =
+                GridLabels(
+                    name = "Orders",
+                    selectPage = "Select page",
+                    selectRow = { index -> f"Select row ${index}" },
+                    moveColumnHelp = "Move columns"
+                )
+            shiftSpace()
+        }
+        case 14 -> {
+            labels.value = GridLabels()
+            model.setPage(1L)
+        }
+        case 17 -> model.setQuery(
+            GridQuery(quickFilter = "1", pagination = GridPagination.Page(0L, 5L))
+        )
+        case 18 -> {
+            records = selectionRows(9L);
+            model.replaceData(records)
+        }
+        case 19 -> enabled.value = false
+        case 21 -> when (handle.setRowSelected(ViewKey.Number(1L), false)) {
+            case Applied -> fail(Some("disabled grid selected a row"));
+            case Rejected(_) -> {}
+        }
+        case 22 -> {
+            enabled.value = true
+            model.setQuery(GridQuery(pagination = GridPagination.Page(0L, 5L)))
+            direction.value = LayoutDirection.Rtl
+            model.setColumnState(GridColumnState(GridColumnId("c0"), visible = false))
+        }
+        case 23 -> click()
+        case 24 -> {
+            checkboxes.value = false;
+            assertTrue(handle.focusCell(selectionAddress(1L)))
+        }
+        case 25 -> shiftSpace()
+        case 26 -> {
+            previous = Some(model)
+            records = selectionRows()
+            selected.value = small(GridRowSelectionMode.Single)
+            direction.value = LayoutDirection.Ltr
+            checkboxes.value = true
+        }
+        case 30 -> {
+            assertTrue(handle.beginEdit(selectionAddress(0L)));
+            editor!!.state.replaceAll("bad")
+        }
+        case 31 -> click()
+        case 32 -> {
+            editor!!.state.replaceAll("25");
+            click()
+        }
+        case 33 -> {
+            records = pendingRows!!;
+            assertTrue(pending!!.accept(records))
+        }
+        case 34 -> click()
+        case 35 -> selected.value = small(GridRowSelectionMode.Disabled)
+        case 37 -> {
+            selected.value = small();
+            assertTrue(model.setRowSelected(ViewKey.Number(0L), true))
+        }
+        case 38 -> {
+            ui!!.close()
+            when (handle.clearRowSelection()) {
+                case Applied -> fail(Some("unmounted grid selected rows"));
+                case Rejected(_) -> {}
+            }
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+            return
+        }
+        case 39 -> {
+            finished = true;
+            application!!.requestExit();
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}

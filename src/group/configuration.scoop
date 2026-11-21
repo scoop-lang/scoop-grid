@@ -1,0 +1,74 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+
+internal fun <Row> gridSurvivingGrouping(
+    values: Array<GridColumnId>,
+    columns: GridColumns<Row>
+): Array<GridColumnId> {
+    val result = ArrayList<GridColumnId>()
+    val seen = HashSet<GridColumnId>()
+    for (id in values)
+        if (seen.add(id) && gridGroupingAllowed(columns, id))
+            result.add(id)
+    return result.toArray()
+}
+
+internal fun <Row> gridGroupingAllowed(columns: GridColumns<Row>, id: GridColumnId): Boolean =
+    when (columns.find(id)) {
+        case Some(val column) -> when (column.grouping) {
+            case Some(_) -> true
+            case None -> false
+        }
+        case None -> false
+    }
+
+internal fun gridSurvivingGroupSorting(
+    values: Array<GridGroupSort>,
+    grouping: Array<GridColumnId>,
+    aggregations: Array<GridAggregationSelection>
+): Array<GridGroupSort> {
+    val dimensions = HashSet<GridColumnId>()
+    val metrics = HashSet<GridColumnId>()
+    for (column in grouping)
+        dimensions.add(column)
+    for (selection in aggregations)
+        metrics.add(selection.column)
+    val result = ArrayList<GridGroupSort>()
+    for (sort in values) {
+        if (!dimensions.contains(sort.column))
+            continue
+        when (sort.by) {
+            case Aggregate(val column) -> if (!metrics.contains(column))
+                continue
+            case Value -> {}
+        }
+        var duplicate = false
+        for (prior in result)
+            if (prior.column == sort.column && prior.by == sort.by)
+                duplicate = true
+        if (!duplicate)
+            result.add(sort)
+    }
+    return result.toArray()
+}
+
+internal fun gridRestoreExpansion(
+    value: GridExpandedRows,
+    grouping: Array<GridColumnId>,
+    issues: ArrayList<GridRestoreIssue>
+): GridExpandedRows {
+    val keys = ArrayList<GridRowKey>()
+    for (key in value.exceptions) {
+        val valid =
+            when (key) {
+                case Group(val path) -> path.matches(grouping)
+                else -> false
+            }
+        if (valid)
+            keys.add(key)
+        else
+            issues.add(GridRestoreIssue(GridStatePart.Expansion(key), "展开身份与当前分组维度不相容"))
+    }
+    return GridExpandedRows(value.defaultExpanded, keys.toArray())
+}

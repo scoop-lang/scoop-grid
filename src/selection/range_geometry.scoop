@@ -1,0 +1,153 @@
+package scoop.grid
+
+import scoop.graphics.*
+import scoop.math.max
+import scoop.math.min
+import scoop.ui.LayoutDirection
+
+internal struct GridRangeHit(val row: Long, val column: Long)
+
+/** Resolves only the visible regions; the extent indices keep large sources lazy. */
+internal fun gridRangeHit(
+    columns: GridColumnLayout,
+    rows: GridRowLayout,
+    offset: Point,
+    point: Point
+): GridRangeHit? {
+    if (point.x < 0.0 || point.x >= columns.viewport || point.y < 0.0 || point.y >= rows.available)
+        return None
+    val column = gridRangeColumn(columns, offset.x, point.x) ?: return None
+    val row = gridRangeRow(rows, offset.y, point.y) ?: return None
+    return Some(GridRangeHit(row, column))
+}
+
+private fun gridRangeColumn(columns: GridColumnLayout, offset: Double, x: Double): Long? {
+    val rtl = columns.direction == LayoutDirection.Rtl
+    val logical =
+        if (rtl)
+            columns.viewport - x
+        else
+            x
+    var from = columns.startCount
+    var end = columns.endStart
+    var position =
+        if (rtl)
+            columns.total - offset - x
+        else
+            offset + x
+    if (
+        if (rtl)
+            x >= columns.viewport - columns.startVisible
+        else
+            x < columns.startVisible
+    ) {
+        from = 0L
+        end = columns.startCount
+        position = logical
+    } else
+        if (
+            if (rtl)
+                x < columns.endVisible
+            else
+                x >= columns.viewport - columns.endVisible
+        ) {
+            from = columns.endStart
+            end = columns.widths.size
+            position = columns.prefix[end] - columns.viewport + logical
+        }
+    var low = from
+    var high = end
+    while (low < high) {
+        val middle = low + (high - low) / 2L
+        if (
+            if (rtl)
+                columns.prefix[middle + 1L] < position
+            else
+                columns.prefix[middle + 1L] <= position
+        )
+            low = middle + 1L
+        else
+            high = middle
+    }
+    if (
+        low >=
+            end ||
+            columns.widths[low] <=
+            0.0 ||
+            (
+                if (rtl)
+                    position <= columns.prefix[low]
+                else
+                    position < columns.prefix[low]
+            )
+    )
+        return None
+    return Some(low)
+}
+
+private fun gridRangeRow(rows: GridRowLayout, offset: Double, y: Double): Long? {
+    var from = rows.topCount
+    var end = rows.bodyEnd
+    var position = rows.topExtent + offset + y - rows.topVisible
+    if (y < rows.topVisible) {
+        from = 0L
+        end = rows.topCount
+        position = y
+    } else
+        if (y >= rows.available - rows.bottomVisible) {
+            from = rows.bodyEnd
+            end = rows.index.count
+            position = rows.bottomStart + y - (rows.available - rows.bottomVisible)
+        }
+    if (from >= end || position < rows.index.prefix(from) || position >= rows.index.prefix(end))
+        return None
+    val at = rows.index.indexAt(position)
+    return if (at >= from && at < end)
+        Some(at)
+    else
+        None
+}
+
+internal fun gridRangeSpeed(
+    columns: GridColumnLayout,
+    rows: GridRowLayout,
+    point: Point,
+    density: Double,
+    offset: Point,
+    maximum: Point
+): Point {
+    if (point.x < 0.0 || point.x >= columns.viewport || point.y < 0.0 || point.y >= rows.available)
+        return Point(0.0, 0.0)
+    val left =
+        if (columns.direction == LayoutDirection.Rtl)
+            columns.endVisible
+        else
+            columns.startVisible
+    val width = max(0.0, columns.viewport - columns.startVisible - columns.endVisible)
+    val horizontal = gridRangeEdgeSpeed(point.x, left, width, density, offset.x, maximum.x)
+    val vertical =
+        gridRangeEdgeSpeed(point.y, rows.topVisible, rows.bodyHeight, density, offset.y, maximum.y)
+    return Point(horizontal, vertical)
+}
+
+private fun gridRangeEdgeSpeed(
+    position: Double,
+    start: Double,
+    size: Double,
+    density: Double,
+    offset: Double,
+    maximum: Double
+): Double {
+    if (position < start || position >= start + size)
+        return 0.0
+    val edge = min(24.0 * density, size / 2.0)
+    if (edge <= 0.0)
+        return 0.0
+    val before = position - start
+    val after = start + size - position
+    if (before < edge && offset > 0.0)
+        return -600.0 * density * (1.0 - before / edge)
+    if (after < edge && offset < maximum)
+        return 600.0 * density * (1.0 - after / edge)
+    return 0.0
+}

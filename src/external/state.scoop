@@ -1,0 +1,132 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.ui.ViewKey
+
+internal fun gridExternalTreeExpansion(
+    value: GridExpandedRows,
+    issues: ArrayList<GridRestoreIssue>? = None
+): GridExpandedRows {
+    val kept = ArrayList<GridRowKey>()
+    for (key in value.exceptions) {
+        val valid =
+            when (key) {
+                case Data(val id) -> id != ViewKey.Position;
+                else -> false
+            }
+        if (valid)
+            kept.add(key)
+        else
+            issues?.add(GridRestoreIssue(GridStatePart.Expansion(key), "外部树展开必须引用业务记录"))
+    }
+    return if (kept.size == value.exceptions.size)
+        value
+    else
+        GridExpandedRows(value.defaultExpanded, kept.toArray())
+}
+
+internal fun gridExternalPrunePins(
+    pins: GridPinnedRows,
+    deleted: GridSelectedRows
+): GridPinnedRows {
+    val top = ArrayList<ViewKey>()
+    val bottom = ArrayList<ViewKey>()
+    for (key in pins.top)
+        if (!deleted.contains(key))
+            top.add(key)
+    for (key in pins.bottom)
+        if (!deleted.contains(key))
+            bottom.add(key)
+    return GridPinnedRows(top.toArray(), bottom.toArray())
+}
+
+internal fun gridExternalPruneExpansion(
+    value: GridExpandedRows,
+    deleted: GridSelectedRows
+): GridExpandedRows {
+    val kept = ArrayList<GridRowKey>()
+    for (key in value.exceptions)
+        when (key.dataKey) {
+            case Some(val id) -> if (!deleted.contains(id))
+                kept.add(key)
+            case None -> kept.add(key)
+        }
+    return GridExpandedRows(value.defaultExpanded, kept.toArray())
+}
+
+internal fun <Row> gridExternalSelection(
+    value: GridComputed<Row>,
+    selected: GridSelectedRows,
+    selectable: ((Row) -> Boolean)?
+): GridSelectedRows {
+    val kept = ArrayList<ViewKey>()
+    for (key in selected.keys) {
+        val index = value.source.indexOfKey(key)
+        if (
+            index ==
+                None ||
+                (
+                    !(value.external!!.item(GridRowKey.Data(key))?.contextOnly ?: false) &&
+                        (selectable?.invoke(value.source.rowAt(index!!)) ?: true)
+                )
+        )
+            kept.add(key)
+    }
+    return GridSelectedRows(kept.toArray())
+}
+
+internal fun <Row> gridExternalRangeStable(
+    before: GridResult<Row>,
+    after: GridResult<Row>,
+    bounds: GridCellRangeBounds
+): Boolean {
+    for (index in 0L ..< before.availableRows.count) {
+        val key = before.availableRows.rowKeyAt(index)
+        val old = before.rows.indexOfKey(key) ?: continue
+        if (
+            old >=
+                bounds.firstRow &&
+                old <=
+                bounds.lastRow &&
+                after.rows.indexOfKey(key) !=
+                Some(old)
+        )
+            return false
+    }
+    return true
+}
+
+internal fun <Row> gridExternalGroupKeys(model: DataGridState<Row>, path: GridGroupPath): Array<
+    ViewKey
+>? {
+    val snapshot = model.externalSnapshot ?: return None
+    val item = snapshot.item(GridRowKey.Group(path)) ?: return None
+    val members = item.members ?: return None
+    val result = ArrayList<ViewKey>()
+    for (key in members) {
+        if (model.source.indexOfKey(key) == None)
+            return None
+        if (model.isRowSelectable(key))
+            result.add(key)
+    }
+    return Some(result.toArray())
+}
+
+internal fun <Row> gridExternalFilterValues(
+    source: GridExternalSource<Row>,
+    query: GridQuery,
+    column: GridColumn<Row>
+): GridFilterValues {
+    val filter =
+        gridExternalFilter(source, column.id) ?:
+            throw IllegalArgumentException(Some("external candidates are not declared"))
+    val load = filter.values ?: throw IllegalArgumentException(Some("应用尚未提供完整筛选候选"))
+    val values = load(query)
+    val positions = HashMap<GridLiteral, Long>()
+    for (at in 0L ..< values.size) {
+        gridRequire(!positions.containsKey(values[at].key), "duplicate external candidate value")
+        column.predicate(GridCondition.In([values[at].key]))
+        positions.put(values[at].key, at)
+    }
+    return GridFilterValues(values, positions)
+}

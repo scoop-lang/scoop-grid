@@ -1,0 +1,77 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+
+@Test
+private class GridDetailsStateTest {
+    @Test
+    fun `restoration resolves expanded parents before reading anchors and rejects detail cell focus`() {
+        val model =
+            DataGridState(
+                DetailSource(4L),
+                detailColumns(),
+                details = Some(detailDefinition<Long>()),
+                expandedDetails = [ViewKey.Number(1L), ViewKey.Number(3L)]
+            )
+        val reading = Some(GridReadingPosition(detailKey(1L), 17.0, 30.0))
+        val saved =
+            model.saveViewState(readingPosition = reading, focusedCell = Some(detailAddress(1L)))
+        model.setExpandedDetails([])
+        val report = model.restoreViewState(saved)
+        assertEquals(0L, report.issues.size)
+        assertEquals(reading, report.state.readingPosition)
+        assertEquals(2L, model.result.detailCount)
+        assertEquals(Some(detailAddress(1L)), report.state.focusedCell)
+        val bad =
+            GridViewState(
+                model.columnState,
+                expandedDetails =
+                    [ViewKey.Number(1L), ViewKey.Number(1L), ViewKey.Number(9L), ViewKey.Position],
+                focusedCell = Some(GridCellAddress(detailKey(1L), GridColumnId("id")))
+            )
+        val partial = model.restoreViewState(bad)
+        assertEquals(4L, partial.issues.size)
+        assertEquals(1L, model.expandedDetails.size)
+        assertEquals(None, partial.state.focusedCell)
+        model.setDetails(None)
+        val unavailable = model.restoreViewState(saved)
+        assertEquals(3L, unavailable.issues.size)
+        assertEquals(0L, model.result.detailCount)
+    }
+
+    @Test
+    fun `filtering retains expansion while actual deletion prunes parents and metadata failures are atomic`() {
+        val source = DetailSource(4L)
+        val model =
+            DataGridState(
+                source,
+                detailColumns(),
+                details = Some(detailDefinition<Long>()),
+                expandedDetails = [ViewKey.Number(0L), ViewKey.Number(3L)]
+            )
+        val saved = model.saveViewState()
+        model.setQuery(
+            model.query.withFilter(
+                GridFilter.Column(
+                    GridColumnId("id"),
+                    GridCondition.Compare(GridComparison.Equal, GridLiteral.Integer(1L))
+                )
+            )
+        )
+        assertEquals(0L, model.result.detailCount)
+        assertEquals(2L, model.expandedDetails.size)
+        model.setQuery(model.query.withFilter(GridFilter.All))
+        assertEquals(2L, model.result.detailCount)
+        val replacement = DetailSource(2L)
+        model.replaceData(replacement)
+        assertEquals(1L, model.expandedDetails.size)
+        val result = model.result
+        replacement.onLookup = Some { throw IllegalStateException(Some("restore failed")) }
+        assertFailsWith<IllegalStateException> { model.restoreViewState(saved) }
+        assertTrue(result === model.result)
+        val restored = model.restoreViewState(saved)
+        assertEquals(1L, restored.issues.size)
+        assertEquals(1L, model.result.detailCount)
+    }
+}

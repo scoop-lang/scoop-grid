@@ -1,0 +1,249 @@
+package scoop.grid.tests.performance
+
+import scoop.collections.sorted
+import scoop.graphics.Point
+import scoop.grid.*
+import scoop.platform.time.*
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+
+@Test
+private class GridPerformanceTest {
+    @Test
+    fun `production grid scales with the viewport and closes after measured native work`() {
+        val probe = PerfProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost(onRootError = { _, error -> throw error }) {
+                    host,
+                    active,
+                    event -> probe.event(host, active, event)
+                }.use { host -> Application().run(host) }
+            }
+            assertTrue(probe.finished)
+            measureQueries()
+        } catch (error: Throwable) {
+            println(f"PERF_FAILED case=${probe.index} phase=${probe.phase} step=${probe.iteration}")
+            if (error is Exception)
+                error.printStackTrace()
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+internal class PerfProbe: Closeable {
+    private val configurations =
+        [
+            PerfConfig("management", 10000L, 20L, controls = true, preallocated = true),
+            PerfConfig("wide-fixed", 100000L, 300L),
+            PerfConfig("wide-frozen", 100000L, 300L, frozen = true),
+            PerfConfig("wide-content", 100000L, 300L, frozen = true, contentHeight = true),
+            PerfConfig("million-lazy", 1000000L, 300L, frozen = true)
+        ]
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(45L)
+    private var host: UiHost? = None
+    private var active: ActiveApplication? = None
+    private var window: Window? = None
+    private var ui: UiWindow? = None
+    private var frames: FrameProbe? = None
+    private var idleDeadline: WindowDeadline? = None
+    private var current: PerfSample? = None
+    private var requested = MonotonicTimeSource.now()
+    private var attached = MonotonicTimeSource.now()
+    private var waiting = false
+    private var idleFrames = 0L
+    var frame: ComponentScope? = None
+    var index = 0L
+    var phase = 0
+    var iteration = -6
+    var finished = false
+
+    fun event(host: UiHost, application: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                this.host = Some(host)
+                active = Some(application)
+                application.setControlFlow(ControlFlow.WaitUntil(timeout))
+                val native =
+                    application.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid measured production viewport"
+                            size = LogicalSize(1200.0, 600.0)
+                        }
+                    )
+                window = Some(native)
+                frames = Some(observeFrames(native))
+                idleDeadline = Some(native.createDeadline { idle() })
+                begin()
+                native.requestFocus()
+            }
+            case NewEvents(StartCause.Deadline) -> {
+                if (MonotonicTimeSource.now() >= timeout)
+                    fail(Some(f"performance timeout: ${index}/${phase}/${iteration}"))
+            }
+            else -> {}
+        }
+    }
+    private fun begin() {
+        val sample = PerfSample(configurations[index])
+        current = Some(sample)
+        phase = 0
+        iteration = -6
+        waiting = false
+        attached = MonotonicTimeSource.now()
+        println(f"PERF_BEGIN ${sample.configuration.name}")
+        ui = host!!.attach(window!!, { scope -> PerfScene(this, sample, scope) })
+    }
+    fun accepted(sample: PerfSample, epoch: Long, uiNs: Long) {
+        val activeSample = current ?: return
+        if (finished || waiting || activeSample !== sample)
+            return
+        sample.capture(epoch)
+        when (phase) {
+            case 0 -> {
+                sample.firstNs = elapsedNs(attached)
+                assertTrue(sample.cells.live.size > 0L)
+                post {
+                    assertTrue(
+                        sample.handle.focusCell(
+                            GridCellAddress(ViewKey.Number(0L), GridColumnId("c0"))
+                        )
+                    )
+                    phase = 1
+                }
+            }
+            case 1 -> {
+                if (sample.handle.isPending) {
+                    frame!!.requestFrame()
+                    return
+                }
+                assertEquals(
+                    Some(GridCellAddress(ViewKey.Number(0L), GridColumnId("c0"))),
+                    sample.handle.focusedCell
+                )
+                phase = 2
+                scroll()
+            }
+            case 2 -> {
+                if (iteration >= 0) {
+                    sample.uiTimes.add(uiNs)
+                    sample.latencies.add(elapsedNs(requested))
+                }
+                iteration += 1
+                if (iteration < 40)
+                    scroll()
+                else {
+                    phase = 3
+                    idleDeadline!!.schedule(MonotonicTimeSource.now() + Duration.milliseconds(250L))
+                }
+            }
+            else -> {}
+        }
+    }
+    private fun post(action: () -> Unit) {
+        waiting = true
+        val scope = frame!!
+        assertTrue(
+            active!!.proxy().post {
+                _ -> assertTrue(
+                    scope.dispatch {
+                        action()
+                        waiting = false
+                        scope.requestFrame()
+                    }
+                )
+            }
+        )
+    }
+    private fun scroll() {
+        val sample = current!!
+        val step = iteration
+        post {
+            val x =
+                if (step < 32)
+                    ((step + 6) % 20).toDouble() * 120.0
+                else
+                    (((step - 32) * 37 + 30).toLong() % sample.configuration.columns).toDouble() *
+                        120.0
+            val y =
+                if (step < 32)
+                    (step + 7).toDouble() * 84.0
+                else
+                    (sample.configuration.rows * (step - 31).toLong() / 9L).toDouble() * 28.0
+            requested = MonotonicTimeSource.now()
+            sample.scroll.scrollTo(Point(x, y))
+        }
+    }
+    private fun idle() {
+        val sample = current!!
+        val snapshot = frames!!.snapshot()
+        assertFalse(snapshot.required, Some("static grid still requests frames"))
+        if (phase == 3) {
+            idleFrames = snapshot.presentations
+            phase = 4
+            idleDeadline!!.schedule(MonotonicTimeSource.now() + Duration.milliseconds(100L))
+            return
+        }
+        assertEquals(4, phase)
+        assertEquals(idleFrames, snapshot.presentations, Some("static grid keeps presenting"))
+        assertEquals(40L, sample.uiTimes.size)
+        assertTrue(
+            sample.rows.reads < sample.configuration.rows,
+            Some("viewport read the whole source")
+        )
+        ui!!.close()
+        assertEquals(0L, sample.cells.live.size)
+        assertFalse(sample.handle.isAttached)
+        assertFalse(sample.handle.isPending)
+        assertEquals(None, sample.handle.editingCell)
+        assertFalse(sample.scroll.isAttached)
+        assertFalse(frames!!.snapshot().attached)
+        report(sample)
+        index += 1L
+        if (index < configurations.size)
+            begin()
+        else {
+            finished = true
+            active!!.requestExit()
+        }
+    }
+    public override fun close() {
+        idleDeadline?.close()
+        frames?.close()
+    }
+}
+
+private fun report(sample: PerfSample) {
+    val config = sample.configuration
+    println(
+        f"PERF_RESULT ${config.name} rows=${config.rows} columns=${config.columns} setup_ms=${
+            ms(sample.setupNs)
+        } first_accepted_ms=${ms(sample.firstNs)} visible_peak=${sample.visiblePeak} mounted_peak=${
+            sample.cells.mountedPeak
+        } retained_peak=${sample.retainedPeak} factories=${sample.cells.factories} measures=${
+            sample.cells.measures
+        } row_reads=${sample.rows.reads} idle_delta=0 closed_live=${sample.cells.live.size}"
+    )
+    distribution(config.name, "ui", sample.uiTimes)
+    distribution(config.name, "request", sample.latencies)
+}
+
+private fun distribution(name: String, kind: String, samples: ArrayList<Long>) {
+    val ordered = samples.sorted()
+    println(
+        f"PERF_TIMES ${name} ${kind} samples=${ordered.size} p50_ms=${
+            ms(ordered[(ordered.size - 1L) / 2L])
+        } p95_ms=${ms(ordered[(ordered.size * 95L + 99L) / 100L - 1L])} max_ms=${
+            ms(ordered[ordered.size - 1L])
+        }"
+    )
+}
+
+internal fun ms(nanoseconds: Long): Double = nanoseconds.toDouble() / 1000000.0

@@ -1,0 +1,231 @@
+package scoop.grid
+
+import scoop.datetime.LocalDate
+import scoop.ui.style.Insets
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.row as filterRow
+import scoop.ui.component.column as filterColumn
+import scoop.ui.component.button as filterButton
+import scoop.ui.component.select as filterSelect
+
+internal class GridFilterUi<Row>(
+    val input: GridFilterPanelProps<Row>,
+    val draft: GridFilterDraft,
+    val appearance: GridAppearance,
+    val referenceDate: LocalDate,
+    val active: () -> Boolean,
+    val failed: (String) -> Unit
+) {
+    val labels: GridFilterLabels get() = input.labels
+    val enabled: Boolean get() = input.enabled
+    val structural: Boolean get() = enabled && !draft.composing
+    fun message(text: String): View =
+        component(
+            LabelProps(
+                LabelText.Plain(text, None),
+                Some(appearance.fonts),
+                baseStyle = Some(appearance.body)
+            ),
+            { props, scope -> Label(props, scope) }
+        )
+    fun firstColumn(): GridColumn<Row>? {
+        for (column in input.state.sourceColumns)
+            if (input.state.canFilter(column.id) && column.valueKind != None)
+                return Some(column)
+        return None
+    }
+    fun addCondition(group: GridFilterGroupDraft) {
+        if (!active() || draft.composing)
+            return
+        val column = firstColumn() ?: return
+        val node =
+            GridFilterConditionDraft(
+                draft.keys.take(),
+                column.id,
+                GridCondition.Compare(
+                    GridComparison.Equal,
+                    gridFilterDefault(column.valueKind!!, referenceDate)
+                )
+            )
+        node.operation.value = input.state.firstFilterOperation(column.id)
+        group.append(GridFilterNode.Condition(node))
+    }
+    fun addGroup(group: GridFilterGroupDraft) {
+        if (active() && !draft.composing)
+            group.append(GridFilterNode.Group(GridFilterGroupDraft(draft.keys.take(), true, [])))
+    }
+    fun columnChoices(): Array<Choice<GridColumnId>> {
+        val choices = ArrayList<Choice<GridColumnId>>()
+        for (column in input.state.sourceColumns)
+            if (input.state.canFilter(column.id) && column.valueKind != None)
+                choices.add(Choice(ViewKey.Text(column.id.value), column.id, column.title))
+        return choices.toArray()
+    }
+}
+
+internal fun <Row> gridFilterKind(
+    model: DataGridState<Row>,
+    id: GridColumnId,
+    labels: GridFilterLabels
+): GridValueKind {
+    val column =
+        model.findColumn(id) ?: throw IllegalArgumentException(Some(labels.columnRemoved(id.value)))
+    gridRequire(model.canFilter(id), labels.columnUnfilterable(column.title))
+    return column.valueKind ?:
+        throw IllegalArgumentException(Some(labels.columnWithoutValue(column.title)))
+}
+
+internal fun gridFilterControl(key: ViewKey, part: String, name: String): ComponentSemantics =
+    ComponentSemantics(name = Some(name), automationId = Some(gridFilterControlId(key, part)))
+
+internal fun gridFilterControlId(key: ViewKey, part: String): String =
+    when (key) {
+        case Number(val id) -> f"grid-filter-${id}-${part}"
+        case Text(val id) -> f"grid-filter-${id}-${part}"
+        case Position -> throw IllegalArgumentException(
+            Some("filter controls require explicit keys")
+        )
+    }
+
+internal fun <Row> gridFilterGroupView(
+    group: GridFilterGroupDraft,
+    ui: GridFilterUi<Row>,
+    path: String,
+    remove: (() -> Unit)?
+): View {
+    val density = ui.appearance.density
+    val labels = ui.labels
+    val title =
+        if (path == "")
+            labels.name
+        else
+            labels.groupTitle(path)
+    return filterColumn {
+        key = group.key
+        add(
+            filterRow {
+                item(
+                    filterSelect(
+                        binding<Boolean?>(
+                            { Some(group.conjunction.value) },
+                            {
+                                next -> if (ui.active() && !ui.draft.composing)
+                                    when (next) {
+                                        case Some(val value) -> group.join(value);
+                                        case None -> {}
+                                    }
+                            }
+                        ),
+                        [
+                            Choice(ViewKey.Text("and"), true, labels.allConditions),
+                            Choice(ViewKey.Text("or"), false, labels.anyCondition)
+                        ]
+                    ) {
+                        enabled = ui.structural
+                        width = Some(184.0 * density)
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        semantics = gridFilterControl(group.key, "join", labels.joinName(title))
+                    }
+                ) { grow = 1.0 }
+                when (remove) {
+                    case Some(val action) -> add(
+                        filterButton(labels.removeGroup, action) {
+                            enabled = ui.structural
+                            fonts = ui.input.fonts
+                            theme = ui.input.theme
+                            variant = ButtonVariant.Outline
+                            semantics =
+                                gridFilterControl(
+                                    group.key,
+                                    "remove",
+                                    labels.removeGroupName(title)
+                                )
+                        }
+                    )
+                    case None -> {}
+                }
+                spacing = 8.0 * density
+            }
+        )
+        val children = group.children.value
+        if (children.size == 0L)
+            add(
+                ui.message(
+                    if (path == "")
+                        labels.emptyRoot
+                    else
+                        labels.emptyGroup
+                )
+            )
+        for (index in 0L ..< children.size) {
+            val child = children[index]
+            val childPath =
+                if (path == "")
+                    f"${index + 1L}"
+                else
+                    f"${path}.${index + 1L}"
+            val erase: () -> Unit =
+                {
+                    if (ui.active() && !ui.draft.composing)
+                        group.remove(child.key)
+                }
+            when (child) {
+                case Condition(val condition) -> add(
+                    gridFilterConditionView(condition, ui, childPath, erase)
+                )
+                case Group(val nested) -> add(
+                    gridFilterGroupView(nested, ui, childPath, Some(erase))
+                )
+                case All(val childKey) -> add(
+                    filterRow {
+                        key = childKey
+                        item(ui.message(labels.allRecords)) { grow = 1.0 }
+                        add(
+                            filterButton(labels.removeCondition, erase) {
+                                enabled = ui.structural
+                                fonts = ui.input.fonts
+                                theme = ui.input.theme
+                                semantics =
+                                    gridFilterControl(
+                                        childKey,
+                                        "remove",
+                                        labels.removeConditionName(childPath)
+                                    )
+                            }
+                        )
+                    }
+                )
+            }
+        }
+        add(
+            filterRow {
+                add(
+                    filterButton(labels.addCondition, { ui.addCondition(group) }) {
+                        enabled = ui.structural && ui.firstColumn()?.filterable == Some(true)
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        variant = ButtonVariant.Outline
+                        semantics =
+                            gridFilterControl(group.key, "add", labels.addConditionName(title))
+                    }
+                )
+                add(
+                    filterButton(labels.addGroup, { ui.addGroup(group) }) {
+                        enabled = ui.structural
+                        fonts = ui.input.fonts
+                        theme = ui.input.theme
+                        variant = ButtonVariant.Outline
+                        semantics =
+                            gridFilterControl(group.key, "add-group", labels.addGroupName(title))
+                    }
+                )
+                spacing = 8.0 * density
+            }
+        )
+        padding = Insets.all(8.0 * density)
+        spacing = 8.0 * density
+        alignment = CrossAlignment.Stretch
+    }
+}

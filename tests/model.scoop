@@ -1,0 +1,397 @@
+package scoop.grid
+
+import scoop.datetime.LocalDate
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private class Record(
+    val name: String,
+    val amount: Long,
+    val enabled: Boolean,
+    val date: LocalDate = LocalDate(2026, 11, 20),
+    val optional: Long? = None
+)
+
+private class Calls {
+    var reads = 0L;
+    var views = 0L;
+    var changes = 0L
+}
+
+private fun rows(records: Array<Record>): TableRows<Record> =
+    TableRows(
+        Array<TableRecord<Record>>(records.size) {
+            index -> TableRecord(ViewKey.Number(index + 100L), records[index])
+        }
+    )
+
+private fun columns(calls: Calls): Array<GridColumn<Record>> =
+    [
+        gridColumn<Record, String>(
+            GridColumnId("name"),
+            "Value",
+            {
+                row ->
+                calls.reads += 1L;
+                row.name
+            },
+            gridTextValues(),
+            cell =
+                Some {
+                    _ ->
+                    calls.views += 1L;
+                    empty()
+                }
+        ),
+        gridColumn<Record, Long>(
+            GridColumnId("amount"),
+            "Value",
+            {
+                row ->
+                calls.reads += 1L;
+                row.amount
+            },
+            gridLongValues()
+        ),
+        gridColumn<Record, Boolean>(
+            GridColumnId("enabled"),
+            "Enabled",
+            { row -> row.enabled },
+            gridBooleanValues()
+        ),
+        gridColumn<Record, LocalDate>(
+            GridColumnId("date"),
+            "Date",
+            { row -> row.date },
+            gridDateValues()
+        ),
+        gridColumn<Record, Long?>(
+            GridColumnId("optional"),
+            "Optional",
+            { row -> row.optional },
+            nullableGridValues(gridLongValues())
+        ),
+        gridActionColumn<Record>(
+            GridColumnId("actions"),
+            "Actions",
+            {
+                _ ->
+                calls.views += 1L;
+                empty()
+            }
+        )
+    ]
+
+private fun filter(id: String, condition: GridCondition): GridFilter =
+    GridFilter.Column(GridColumnId(id), condition)
+
+private fun <Row> ids(source: TableSource<Row>): Array<Long> =
+    Array<Long>(source.count) {
+        index -> when (source.keyAt(index)) {
+            case Number(val id) -> id
+            else -> throw IllegalArgumentException(Some("expected numeric test key"))
+        }
+    }
+
+@Test
+private class GridModelTest {
+    @Test
+    fun `typed stable sorting retains integer precision and separates duplicate labels`() {
+        val calls = Calls()
+        val model =
+            DataGridState(
+                rows(
+                    [
+                        Record("B", 9007199254740993L, true),
+                        Record("A", 9007199254740992L, false),
+                        Record("C", 9007199254740993L, true),
+                        Record("A", -3L, true)
+                    ]
+                ),
+                columns(calls)
+            )
+        model.setQuery(GridQuery([GridSort(GridColumnId("amount"))]))
+        assertLongs([103L, 101L, 100L, 102L], ids(model.result.rows))
+        model.setQuery(
+            GridQuery(
+                [
+                    GridSort(GridColumnId("name")),
+                    GridSort(GridColumnId("amount"), GridSortDirection.Descending)
+                ]
+            )
+        )
+        assertLongs([101L, 103L, 100L, 102L], ids(model.result.rows))
+        assertEquals(0L, calls.views)
+    }
+
+    @Test
+    fun `missing placement stays last in either sort direction and explicit filters match it`() {
+        val model =
+            DataGridState(
+                rows(
+                    [
+                        Record("None", 1L, true),
+                        Record("Two", 2L, true, optional = Some(2L)),
+                        Record("One", 3L, true, optional = Some(1L))
+                    ]
+                ),
+                columns(Calls())
+            )
+        model.setQuery(GridQuery([GridSort(GridColumnId("optional"))]))
+        assertLongs([102L, 101L, 100L], ids(model.result.rows))
+        model.toggleSort(GridColumnId("optional"))
+        assertLongs([101L, 102L, 100L], ids(model.result.rows))
+        model.setQuery(
+            GridQuery(
+                filter =
+                    filter(
+                        "optional",
+                        GridCondition.In([GridLiteral.Empty, GridLiteral.Integer(1L)])
+                    )
+            )
+        )
+        assertLongs([100L, 102L], ids(model.result.rows))
+        model.setQuery(
+            GridQuery(
+                filter =
+                    filter(
+                        "optional",
+                        GridCondition.Compare(GridComparison.NotEqual, GridLiteral.Integer(2L))
+                    )
+            )
+        )
+        assertLongs([102L], ids(model.result.rows))
+    }
+
+    @Test
+    fun `combined date boolean text and set filters operate on data without views`() {
+        val calls = Calls()
+        val model =
+            DataGridState(
+                rows(
+                    [
+                        Record("ALPHA", 1L, true, LocalDate(2026, 1, 1)),
+                        Record("Alpha", 2L, false, LocalDate(2026, 11, 20)),
+                        Record("中文", 3L, true, LocalDate(2026, 11, 20)),
+                        Record("beta", 4L, true, LocalDate(2026, 11, 21))
+                    ]
+                ),
+                columns(calls)
+            )
+        model.setQuery(
+            GridQuery(
+                filter =
+                    GridFilter.And(
+                        [
+                            filter(
+                                "date",
+                                GridCondition.Between(
+                                    GridLiteral.Date(LocalDate(2026, 11, 20)),
+                                    GridLiteral.Date(LocalDate(2026, 11, 21))
+                                )
+                            ),
+                            filter(
+                                "enabled",
+                                GridCondition.Compare(
+                                    GridComparison.Equal,
+                                    GridLiteral.BooleanValue(true)
+                                )
+                            ),
+                            GridFilter.Or(
+                                [
+                                    filter(
+                                        "name",
+                                        GridCondition.Text(GridTextMatch.StartsWith, "B", false)
+                                    ),
+                                    filter("amount", GridCondition.In([GridLiteral.Integer(3L)]))
+                                ]
+                            )
+                        ]
+                    )
+            )
+        )
+        assertLongs([102L, 103L], ids(model.result.rows))
+        model.setQuery(GridQuery(quickFilter = "alpha"))
+        assertLongs([100L, 101L], ids(model.result.rows))
+        model.setQuery(GridQuery(quickFilter = "中文"))
+        assertLongs([102L], ids(model.result.rows))
+        assertEquals(0L, calls.views)
+    }
+
+    @Test
+    fun `page and presentation changes reuse the query while disabled pagination returns all rows`() {
+        val calls = Calls()
+        val model =
+            DataGridState(
+                rows([Record("Z", 3L, true), Record("B", 1L, true), Record("A", 2L, true)]),
+                columns(calls),
+                GridQuery(
+                    [GridSort(GridColumnId("amount"))],
+                    pagination = GridPagination.Page(0L, 1L)
+                ),
+                Some { _ -> calls.changes += 1L }
+            )
+        val order = model.result.ordered
+        val reads = calls.reads
+        model.setPage(1L)
+        model.setColumnState(
+            GridColumnState(GridColumnId("name"), false, Some(10.0), GridPin.Start)
+        )
+        model.moveColumn(GridColumnId("amount"), 0L)
+        assertLongs([102L], ids(model.result.rows))
+        assertEquals(GridColumnId("amount"), model.columnState[0L].id)
+        assertEquals(Some(48.0), model.columnState[1L].width)
+        assertEquals(reads, calls.reads)
+        assertTrue(order === model.result.ordered)
+        model.setPagination(GridPagination.Disabled)
+        assertLongs([101L, 102L, 100L], ids(model.result.rows))
+        assertEquals(2L, calls.changes)
+        assertEquals(reads, calls.reads)
+        assertFailsWith<IllegalArgumentException> { model.setPage(0L) }
+    }
+
+    @Test
+    fun `criteria reset the page and replacing data clamps the final page`() {
+        val model =
+            DataGridState(
+                rows([Record("a", 1L, true), Record("b", 2L, true), Record("c", 3L, true)]),
+                columns(Calls()),
+                GridQuery(pagination = GridPagination.Page(Long.MAX_VALUE, 1L))
+            )
+        assertEquals(GridPagination.Page(2L, 1L), model.query.pagination)
+        model.setQuery(GridQuery(quickFilter = "a", pagination = GridPagination.Page(2L, 1L)))
+        assertEquals(GridPagination.Page(0L, 1L), model.query.pagination)
+        model.replaceData(rows([]))
+        assertEquals(0L, model.result.totalRows)
+        assertEquals(0L, model.result.pageCount)
+        assertEquals(GridPagination.Page(0L, 1L), model.query.pagination)
+    }
+
+    @Test
+    fun `rejected queries and duplicate columns do not publish partial state`() {
+        val definitions = columns(Calls())
+        val model = DataGridState(rows([Record("a", 1L, true)]), definitions)
+        val old = model.result
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(GridQuery([GridSort(GridColumnId("missing"))]))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(
+                GridQuery([GridSort(GridColumnId("name")), GridSort(GridColumnId("name"))])
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(
+                GridQuery(
+                    filter =
+                        filter(
+                            "amount",
+                            GridCondition.Compare(GridComparison.Equal, GridLiteral.Text("1"))
+                        )
+                )
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(
+                GridQuery(
+                    filter =
+                        filter(
+                            "amount",
+                            GridCondition.Between(GridLiteral.Integer(2L), GridLiteral.Integer(1L))
+                        )
+                )
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(GridQuery(filter = GridFilter.Or([])))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(GridQuery([GridSort(GridColumnId("actions"))]))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.replaceColumns([definitions[0L], definitions[0L]])
+        }
+        assertTrue(old === model.result)
+        assertEquals(GridQuery(), model.query)
+    }
+
+    @Test
+    fun `column replacement retains presentation and removes deleted query references`() {
+        val calls = Calls()
+        val definitions = columns(calls)
+        val model =
+            DataGridState(
+                rows([Record("A", 1L, true), Record("B", 2L, true)]),
+                definitions,
+                GridQuery(
+                    filter =
+                        GridFilter.Or(
+                            [
+                                filter(
+                                    "amount",
+                                    GridCondition.Compare(
+                                        GridComparison.Equal,
+                                        GridLiteral.Integer(1L)
+                                    )
+                                ),
+                                filter(
+                                    "name",
+                                    GridCondition.Compare(
+                                        GridComparison.Equal,
+                                        GridLiteral.Text("B")
+                                    )
+                                )
+                            ]
+                        )
+                )
+            )
+        model.setColumnState(GridColumnState(GridColumnId("name"), false, Some(144.0), GridPin.End))
+        model.moveColumn(GridColumnId("name"), 2L)
+        model.replaceColumns([definitions[0L], definitions[2L]])
+        assertLongs([101L], ids(model.result.rows))
+        assertEquals(GridColumnId("enabled"), model.columnState[0L].id)
+        assertEquals(GridColumnId("name"), model.columnState[1L].id)
+        assertFalse(model.columnState[1L].visible)
+        assertEquals(Some(144.0), model.columnState[1L].width)
+        assertEquals(GridPin.End, model.columnState[1L].pin)
+    }
+
+    @Test
+    fun `incompatible replacement leaves both query and presentation intact`() {
+        val model =
+            DataGridState(
+                rows([Record("A", 1L, true)]),
+                columns(Calls()),
+                GridQuery(
+                    filter =
+                        filter(
+                            "name",
+                            GridCondition.Compare(GridComparison.Equal, GridLiteral.Text("A"))
+                        )
+                )
+            )
+        val result = model.result
+        val oldColumns = model.columns
+        assertFailsWith<IllegalArgumentException> {
+            model.replaceColumns(
+                [
+                    gridColumn<Record, Long>(
+                        GridColumnId("name"),
+                        "Number",
+                        { row -> row.amount },
+                        gridLongValues()
+                    )
+                ]
+            )
+        }
+        assertTrue(result === model.result)
+        assertTrue(oldColumns[0L] === model.columns[0L])
+    }
+}
+
+private fun assertLongs(expected: Array<Long>, actual: Array<Long>) {
+    assertEquals(expected.size, actual.size)
+    for (index in 0L ..< expected.size)
+        assertEquals(expected[index], actual[index], Some(f"index ${index}"))
+}

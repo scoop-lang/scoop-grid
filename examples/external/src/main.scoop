@@ -1,0 +1,253 @@
+package scoop.grid.examples.external
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as inventoryColumn
+import scoop.ui.component.tabs as gridToolsTabs
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+
+private class InventoryExample(scope: ComponentScope): Component(scope) {
+    private val service = InventoryService()
+    private val handle = DataGridHandle()
+    private val known = state(true)
+    private val lastAction = state("按需加载；可排序、筛选、分页、选择并编辑库存。")
+    private val requests = state(0L)
+    private val cancelled = state(0L)
+    private var failNext = false
+    private val tool = state<String?>(Some("filters"))
+    private val definitions = columns()
+    private val model =
+        DataGridState<InventoryRecord>(
+            columns = definitions,
+            external =
+                Some(
+                    GridExternalSource<InventoryRecord>(
+                        { request -> load(request) },
+                        blockSize = 40L,
+                        quickFilter = true,
+                        filters =
+                            [
+                                GridExternalFilter(
+                                    GridColumnId("quantity"),
+                                    [
+                                        GridFilterOperator.Greater,
+                                        GridFilterOperator.Less,
+                                        GridFilterOperator.Between,
+                                        GridFilterOperator.Equal
+                                    ]
+                                )
+                            ]
+                    )
+                ),
+            rowSelection = GridRowSelectionMode.Multiple
+        )
+    private fun columns(): Array<GridColumn<InventoryRecord>> {
+        val example = this
+        return [
+            gridColumn<InventoryRecord, Long>(
+                GridColumnId("id"),
+                "编号",
+                { row -> row.id + 1L },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(110.0))
+            ),
+            gridColumn<InventoryRecord, String>(
+                GridColumnId("name"),
+                "商品",
+                { row -> row.name },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fraction(1.0))
+            ),
+            gridColumn<InventoryRecord, Long>(
+                GridColumnId("quantity"),
+                "库存",
+                { row -> row.quantity },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(150.0)),
+                edit =
+                    Some(
+                        gridEdit<InventoryRecord, Long>(
+                            { value -> gridLongEditor(value) },
+                            {
+                                change,
+                                commit -> example.save(
+                                    InventoryRecord(change.row.id, change.row.name, change.value),
+                                    commit
+                                )
+                            },
+                            validate =
+                                {
+                                    _,
+                                    value -> if (value < 0L)
+                                        Some("库存不能为负数")
+                                    else
+                                        None
+                                }
+                        )
+                    )
+            )
+        ]
+    }
+    private fun load(request: GridExternalRequest<InventoryRecord>): (() -> Unit)? {
+        requests.value += 1L
+        val ticket = InventoryTicket()
+        val example = this
+        val accepted =
+            scope.application.proxy().post {
+                _ -> if (example.scope.isMounted && !ticket.cancelled)
+                    example.scope.dispatch {
+                        if (request.isActive) {
+                            if (example.failNext) {
+                                example.failNext = false;
+                                request.fail("本次加载失败，请点击重试。")
+                            }
+                            else
+                                request.complete(
+                                    example.service.page(
+                                        request,
+                                        example.definitions,
+                                        example.known.value
+                                    )
+                                )
+                        }
+                    }
+            }
+        if (!accepted)
+            request.fail("应用队列已关闭")
+        return Some {
+            ticket.cancelled = true;
+            example.cancelled.value += 1L
+        }
+    }
+    private fun save(record: InventoryRecord, commit: GridCommit<InventoryRecord>) {
+        val example = this
+        scope.application.proxy().post {
+            _ -> if (example.scope.isMounted)
+                example.scope.dispatch {
+                    if (commit.isActive) {
+                        example.service.save(record)
+                        commit.acceptRow(record)
+                        example.lastAction.value = "库存已保存；刷新会按当前查询重新排序和筛选。"
+                    }
+                }
+        }
+    }
+    public override fun render(): View {
+        val example = this
+        val model = this.model
+        val handle = this.handle
+        val theme = currentThemeSource().read(scope)
+        return styled(
+            row {
+                item(
+                    inventoryColumn {
+                        label("库存工作台 · 外部结果")
+                        label("数据由示例应用提供，网格只请求当前需要的区间。")
+                        row {
+                            button(
+                                if (example.known.value)
+                                    "切换为未知总数"
+                                else
+                                    "切换为已知总数",
+                                {
+                                    example.known.value = !example.known.value;
+                                    model.refreshExternal()
+                                }
+                            )
+                            button(
+                                "模拟加载失败",
+                                {
+                                    example.failNext = true;
+                                    model.refreshExternal()
+                                }
+                            )
+                            button("刷新", { model.refreshExternal() })
+                            button(
+                                "定位第 701 项",
+                                {
+                                    handle.focusPosition(
+                                        GridExternalPosition(GridExternalBranch.Root, 700L),
+                                        GridColumnId("quantity")
+                                    );
+                                    Unit
+                                }
+                            )
+                            spacing = 6.0
+                        }
+                        add(gridQuickFilter(model) { this.handle = Some(handle) })
+                        add(gridFind(handle))
+                        add(
+                            dataGrid(model) {
+                                this.handle = Some(handle);
+                                height = 455.0;
+                                rowHeight = 36.0;
+                                selectionCheckboxes = true
+                                labels = GridLabels(name = "外部库存结果")
+                            }
+                        )
+                        add(
+                            gridPager(model) {
+                                this.handle = Some(handle);
+                                pageSizes = [20L, 40L, 100L]
+                            }
+                        )
+                        label(
+                            f"已发出 ${example.requests.value} 次区间请求，取消 ${example.cancelled.value} 次。"
+                        )
+                        label(handle.editError ?: example.lastAction.value)
+                        spacing = 10.0
+                    }
+                ) { grow = 1.0 }
+                frame(
+                    gridToolsTabs(example.tool.binding()) {
+                        item(
+                            Choice(ViewKey.Text("filters"), "filters", "筛选"),
+                            gridFilterPanel(model) {
+                                this.handle = Some(handle);
+                                height = 570.0
+                            }
+                        )
+                        item(
+                            Choice(ViewKey.Text("columns"), "columns", "列"),
+                            gridColumnsPanel(model, handle) { height = 570.0 }
+                        )
+                        retention = ContentRetention.KeepMounted
+                    }
+                ) { width = Some(360.0) }
+                spacing = 16.0;
+                padding = Insets.all(12.0);
+                alignment = CrossAlignment.Start
+            }
+        ) { style { background = Some(Paint(theme.tokens.palette.background.background)) } }
+    }
+}
+
+fun main() {
+    context(ThemeSource(shadcnTheme())) {
+        UiHost(onRootError = { _, error -> throw error }) {
+            host,
+            active,
+            event -> when (event) {
+                case Resumed -> host.attach(
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid — External inventory";
+                            size = LogicalSize(1320.0, 820.0)
+                        }
+                    ),
+                    { scope -> InventoryExample(scope) }
+                )
+                case Window(_, WindowEvent.CloseRequested) -> active.requestExit()
+                else -> {}
+            }
+        }.use {
+            host -> Application(
+                applicationOptions { lastWindowPolicy = LastWindowPolicy.Exit }
+            ).run(host)
+        }
+    }
+}

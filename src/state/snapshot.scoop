@@ -1,0 +1,44 @@
+package scoop.grid
+
+import scoop.ui.ViewKey
+
+public struct GridReadingPosition(
+    val row: GridRowKey,
+    val rowOffset: Double = 0.0,
+    val horizontalOffset: Double = 0.0
+) {
+    public constructor(row: ViewKey, rowOffset: Double = 0.0, horizontalOffset: Double = 0.0):
+    this(GridRowKey.Data(row), rowOffset, horizontalOffset) {}
+}
+
+/** Persistent view data, independent of row values and mounted UI resources. */
+public class GridViewState public constructor(
+    public val columns: Array<GridColumnState>,
+    public val query: GridQuery = GridQuery(),
+    public val pinnedRows: GridPinnedRows = GridPinnedRows(),
+    public val selectedRows: Array<ViewKey> = [],
+    public val cellRange: GridCellRange? = None,
+    public val readingPosition: GridReadingPosition? = None,
+    public val focusedCell: GridCellAddress? = None,
+    public val expandedRows: GridExpandedRows = GridExpandedRows(),
+    public val expandedDetails: Array<ViewKey> = []
+)
+
+public enum GridStatePart {
+    Column(GridColumnId), ColumnOrder, Sorting(GridColumnId), Filter(Array<Long>), QuickFilter,
+    PinnedRow(ViewKey), SelectedRow(ViewKey), CellRange, ReadingPosition, FocusedCell, Pagination,
+    Detail(ViewKey), Pivot, Aggregation(GridColumnId), Grouping(GridColumnId), GroupSorting(
+        GridColumnId
+    ), Expansion(GridRowKey)
+}
+
+public struct GridRestoreIssue(val part: GridStatePart, val message: String)
+
+public class GridRestoreReport public constructor(
+    public val state: GridViewState,
+    public val issues: Array<GridRestoreIssue>
+)
+
+public enum GridRestoreResult {
+    Restored(GridRestoreReport), Rejected(String)
+}
