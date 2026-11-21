@@ -20,7 +20,14 @@ public class GridStatusLabels public constructor(
         },
     public val unavailable: String = "无法统计当前选区",
     public val changed: String = "统计期间选区已更新，请重新计算",
-    public val error: (String) -> String = { message -> message }
+    public val error: (String) -> String = { message -> message },
+    public val loaded: (GridExternalAvailability) -> String =
+        {
+            value -> when (value.recordTotal) {
+                case Some(val total) -> f"已加载 ${value.loadedRows} 条 / 共 ${total} 条"
+                case None -> f"已加载 ${value.loadedRows} 条 / 总数未知"
+            }
+        }
 )
 
 public class GridStatusBarProps<Row> public constructor(
@@ -115,7 +122,12 @@ public class GridStatusBar<Row> public constructor(
                     alignment = CrossAlignment.Center
                     spacing = 12.0
                     add(
-                        statusLabel(labels.rows(input.state.result.totalRows)) {
+                        statusLabel(
+                            when (input.state.result.external) {
+                                case Some(val value) -> labels.loaded(value);
+                                case None -> labels.rows(input.state.result.totalRows)
+                            }
+                        ) {
                             fonts = input.fonts;
                             theme = input.theme
                             semantics = ComponentSemantics(automationId = Some("grid-status-rows"))

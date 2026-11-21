@@ -22,7 +22,9 @@ public class GridFindLabels public constructor(
             else
                 "已定位匹配单元格"
         },
-    public val error: (String) -> String = { message -> message }
+    public val error: (String) -> String = { message -> message },
+    public val loadedInput: String = "查找当前已加载单元格",
+    public val loadedNotFound: String = "当前已加载结果中未找到匹配单元格"
 )
 
 public class GridFindProps public constructor(
@@ -92,7 +94,10 @@ public class GridFind public constructor(
             when (val result = message.value) {
                 case Some(val value) -> when (value) {
                     case Found(val match) -> input.labels.found(match)
-                    case NotFound -> input.labels.notFound
+                    case NotFound -> if (input.handle.searchesLoadedRows)
+                        input.labels.loadedNotFound
+                    else
+                        input.labels.notFound
                     case Rejected(val reason) -> input.labels.error(reason)
                 }
                 case None -> ""
@@ -104,6 +109,11 @@ public class GridFind public constructor(
                 !draft.isComposing &&
                 draft.committedText !=
                 ""
+        val caption =
+            if (input.handle.searchesLoadedRows)
+                input.labels.loadedInput
+            else
+                input.labels.input
         return column {
             add(
                 findRow {
@@ -113,10 +123,10 @@ public class GridFind public constructor(
                             fonts = input.fonts
                             theme = input.theme
                             focus = input.focus
-                            placeholder = input.labels.input
+                            placeholder = caption
                             semantics =
                                 ComponentSemantics(
-                                    name = Some(input.labels.input),
+                                    name = Some(caption),
                                     automationId = Some("grid-find-input")
                                 )
                             onSubmit = { _ -> this @GridFind.find(false) }

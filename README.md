@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、透视、按层级展开、小计与总计，以及普通或嵌套主从详情。公开合同见 [SPEC.md](docs/SPEC.md)，外部结果继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、透视、按层级展开、小计与总计，以及普通或嵌套主从详情、外部分页／区间加载和未知总数。公开合同见 [SPEC.md](docs/SPEC.md)。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -52,6 +52,12 @@ fun main() {
 
 `handle.setDetailExpanded(parentKey, value)`、展开按钮和 Alt＋Enter 使用父网格的编辑门控；`handle.focusDetail(parentKey)` 或 Alt＋Down 进入已展开详情，未被内部控件处理的 Escape 返回父行。收起或替换详情会结束子编辑器、弹层及在途保存；真实删除父记录时焦点回网格入口。直接模型操作为 `setDetails`、`setDetailExpanded` 和 `setExpandedDetails`，视图快照保留展开 key 与阅读位置。[订单示例](examples/details/README.md) 展示独立备注、优先级选择、可编辑交付子表与父行固定。
 
+外部结果通过 `DataGridState(columns = ..., external = Some(GridExternalSource<Row>(...)))` 接入。加载回调接收完整 query、Root／Group／Tree 分支、offset／count 和固定记录配置，在 owner 线程用原请求 `complete(page)`／`fail(message)` 回交，并可返回应用 Job 的取消函数。构造模型、读文字和原生元数据不会发起加载；挂载、查询动作和 Accepted 视口调度才请求缺失区间。
+
+已知总数可用 `handle.focusPosition(GridExternalPosition(branch, offset), column)` 定位远处；未知总数保持有限尾部，末段到达后收敛。加载或失败位置没有业务 key，实际记录到达后才解析单元格。排序／分组／聚合／透视由列定义声明，筛选方式由 `GridExternalFilter` 声明；未声明的操作不会在已加载页上偷偷执行。
+
+外部查找仅搜索当前可用结果，`GridExportScope.LoadedRows` 明确导出已加载内容。跨缺口的复制、统计和完整范围 CSV 抛出 `GridDataUnavailableException`，携带缺失区间／业务 key。`GridCommit.acceptRow(row)` 安装应用确认的单格编辑结果；需要重新排序或过滤时由应用调用 `refreshExternal()`。缓存回收不会清除稳定 key 选择；应用确认删除时使用 `refreshExternal(deletedKeys)`。完整示例见 [外部库存工作台](examples/external/README.md)。
+
 本地模型验证：
 
 ```sh
@@ -94,14 +100,14 @@ scoop test --release .
 
 `gridAggregationSummary(model)` 显示整个筛选结果的记录数与总计，可放入 footer；翻页、排序、固定和选行不会改变聚合成员或重新聚合。`model.result.aggregates.total(id)` 返回 Value／Missing／Failed，未配置返回 None；`numericTotal(id)` 返回成功数值的 BigDecimal。Long 求和保留整数精度，超出 Long 范围时明确失败；count 只数非缺值，全缺值的其他操作返回 Missing。可空列使用 `nullableGridAggregation(...)`。内置 Double／BigDecimal 的求和与平均值，以及 `gridAggregation<T, A, R>` 的自定义累加器／结果格式化，见 [聚合合同](docs/SPEC.md#类型化聚合)。操作 title、列面板 Labels 和 `GridAggregationLabels` 分别配置名称、选择器及总计文案。十万行示例默认汇总金额，修改金额后总计随数据更新。
 
-`model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "全部筛选结果")))` 把全筛选集总计显示为正文结果行，After 放在正文末尾，Hidden 隐藏。它不占分页名额，与业务行共用布局、焦点、矩形、复制和查找，保持只读；固定行不改变聚合成员。`GridCellAddress(GridRowKey.Total(GridTotalKey.AllFiltered), columnId)` 定位总计。`result.rows.rowAt(index)` 返回完整的 Data／Group／Total／Detail 变体，`infoAt` 与 `rowKeyAt` 只读取元数据；原始业务数据仍从 pageRows／ordered 访问。CSV 缺省导出业务记录；指定 `GridCsvOptions(data = GridExportData.Displayed)` 包含已启用的总计，可用 includeTotals 排除。十万行示例在首部固定记录之后直接显示总计。
+`model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "全部筛选结果")))` 把全筛选集总计显示为正文结果行，After 放在正文末尾，Hidden 隐藏。它不占分页名额，与业务行共用布局、焦点、矩形、复制和查找，保持只读；固定行不改变聚合成员。`GridCellAddress(GridRowKey.Total(GridTotalKey.AllFiltered), columnId)` 定位总计。`result.rows.rowAt(index)` 返回完整的 Data／Group／Total／Detail／Unloaded 变体，`infoAt` 与 `rowKeyAt` 只读取元数据；原始业务数据仍从 pageRows／ordered 访问。CSV 缺省导出业务记录；指定 `GridCsvOptions(data = GridExportData.Displayed)` 包含已启用的总计，可用 includeTotals 排除。十万行示例在首部固定记录之后直接显示总计。
 
 
 `gridFind(handle) { ... }` 提供真实查找输入框、上一项／下一项和结果提示，Enter 查找下一项。它在当前呈现结果与可见逻辑列的数据文字中定位，不改变筛选／排序／分页。默认忽略 ASCII 大小写，Unicode 原文保留；可配置 `matchCase`、`wrap`、`labels`、字体／主题／焦点与 `onResult`。连续操作从上次匹配继续，修改文字重新开始；组合输入期间不提交查找。未命中或编辑校验拒绝时保留原范围，成功时清除矩形并显露匹配格。
 
 只读取模型时调用 `model.findCell(text, after, backwards, matchCase, wrap)`，返回包含地址与是否循环的 `GridFindMatch` 或 None；它不创建 View。`handle.findCell(...)` 返回 `Found`／`NotFound`／`Rejected`，通过当前编辑门控后使用既有按 key 定位；Found 表示请求接受，实际焦点等布局呈现后到达。扫描期间应用更新结果时拒绝旧定位。
 
-`model.exportCsv(GridCsvOptions(...))` 默认导出当前呈现页、可见逻辑列与表头，固定记录按 key 去重。`scope` 可选 `CurrentPage`、`AllFiltered` 或 `SelectedRows`；已选记录按选择 key 的保存顺序读取完整本地来源，包含其他页和暂被筛选隐藏的选择。`includePinnedRows = false` 排除固定记录，`includeHiddenColumns = true` 包含隐藏列，`columns = Some(ids)` 指定列序；纯操作列与不可导出列始终省略。整个动作读取同一快照，只返回 CSV 文字，由应用决定文件或剪贴板去向。[十万行示例](examples/basic/src/main.scoop) 提供当前页／已选 CSV 的复制按钮。
+`model.exportCsv(GridCsvOptions(...))` 默认导出当前呈现页、可见逻辑列与表头，固定记录按 key 去重。`scope` 可选 `CurrentPage`、`AllFiltered`、`SelectedRows` 或 `LoadedRows`（本地模式与 AllFiltered 相同）；已选记录按选择 key 的保存顺序读取完整本地来源，包含其他页和暂被筛选隐藏的选择。`includePinnedRows = false` 排除固定记录，`includeHiddenColumns = true` 包含隐藏列，`columns = Some(ids)` 指定列序；纯操作列与不可导出列始终省略。整个动作读取同一快照，只返回 CSV 文字，由应用决定文件或剪贴板去向。[十万行示例](examples/basic/src/main.scoop) 提供当前页／已选 CSV 的复制按钮。
 
 `model.saveViewState()` 保存列、完整查询、固定行、业务选择与矩形；`model.restoreViewState(snapshot)` 在一次动作中准备并发布最终结果，返回 `GridRestoreReport`。删除的引用、无效条件和被调整的宽度／页码通过 `issues` 逐项报告；计算失败保留原模型，保存页码不因恢复筛选而自动回到首页。快照只包含普通数据，持久化由应用负责。
 

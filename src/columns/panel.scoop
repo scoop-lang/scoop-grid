@@ -330,9 +330,8 @@ public class GridColumnsPanel<Row> public constructor(
                 }
             )
             add(gridColumnsLabel(labels.title(title), appearance))
-            when (input.state.treeData) {
-                case Some(_) -> {}
-                case None -> when (definition.grouping) {
+            if (!input.state.isTree) {
+                when (definition.grouping) {
                     case Some(_) -> add(
                         gridColumnGroupingControl(
                             input.state,

@@ -1,0 +1,208 @@
+package scoop.grid.tests.external
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.tests.window.nativeEditorKey
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridExternalWindowTest {
+    @Test
+    fun `native external loading resolves positions cancels stale input and commits actual rows`() {
+        val probe = ExternalWindowProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost(
+                    onRootError =
+                        {
+                            _, error ->
+                            println(probe.diagnostic);
+                            remoteFailure(error);
+                            throw error
+                        }
+                ) { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            for (request in probe.requests)
+                assertFalse(request.isActive)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            remoteFailure(error)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+private fun remoteFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        remoteFailure(error.primaryFailure);
+        remoteFailure(error.cleanupFailure)
+    }
+    else
+        if (error is AssertionFailure)
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        else
+            if (error is Exception)
+                error.printStackTrace()
+}
+
+internal class ExternalWindowProbe: Closeable {
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val outside = FocusHandle()
+    val requests = ArrayList<GridExternalRequest<RemoteRecord>>()
+    var cancelled = 0L
+    var autoReply = true
+    var failNext = false
+    var unknown = false
+    var readsBefore = 0L
+    var oldRequest: GridExternalRequest<RemoteRecord>? = None
+    var editor: GridTextEditor<Long>? = None
+    var options: GridEditorOptions? = None
+    var commit: GridCommit<RemoteRecord>? = None
+    val model =
+        DataGridState<RemoteRecord>(
+            columns = columns(),
+            external =
+                Some(
+                    GridExternalSource<RemoteRecord>(
+                        { request -> load(request) },
+                        blockSize = 8L,
+                        quickFilter = true
+                    )
+                ),
+            rowSelection = GridRowSelectionMode.Multiple
+        )
+    var frame: ComponentScope? = None
+    var application: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var root: NativeNode? = None
+    var table: NativeNode? = None
+    var retryButton: NativeNode? = None
+    var calls: NativeCalls? = None
+    var phase = 0
+    var waiting = false
+    var waitingInput = false
+    var retry = false
+    var finished = false
+    var nativeFocused = false
+    private val retained = ArrayList<NativeNode>()
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(35L)
+    val diagnostic: String get() =
+        f"external phase=${phase}, requests=${requests.size}, cancelled=${cancelled}, rows=${
+            model.result.rows.count
+        }, focus=${handle.focusedCell?.column?.value ?: "none"}, position=${
+            handle.pendingPosition?.position?.offset ?: -1L
+        }, pending=${handle.isPending}, nativeFocus=${nativeFocused}, scroll=${scroll.offset.y}"
+    init {
+        model.setColumnState(GridColumnState(GridColumnId("id"), pin = GridPin.Start))
+        model.setColumnState(GridColumnState(GridColumnId("end"), pin = GridPin.End))
+    }
+    fun event(host: UiHost, active: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                application = Some(active)
+                active.setControlFlow(ControlFlow.WaitUntil(timeout))
+                val native =
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid external results";
+                            size = LogicalSize(740.0, 300.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> RemoteScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(active.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(val value)) -> {
+                nativeFocused = value;
+                if (value)
+                    frame?.requestFrame()
+            }
+            case NewEvents(StartCause.Deadline) -> fail(Some(diagnostic))
+            else -> {}
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        retained.add(node);
+        return node
+    }
+    fun find(node: NativeNode, role: String): NativeNode? {
+        if (node.flag(0) && node.text(2, Some(role)))
+            return Some(node)
+        for (index in 0L ..< node.count)
+            when (val child = find(keep(node.child(index)), role)) {
+                case Some(_) -> return child;
+                case None -> {}
+            }
+        return None
+    }
+    fun key(code: Int, text: String) {
+        @Unsafe
+        {
+            window!!.acquireNativeWindow().use {
+                lease -> @Unsafe
+                {
+                    when (lease.handle) {
+                        case AppKit(_, val pointer) -> text.withUtf8Bytes {
+                            bytes,
+                            length -> @Unsafe
+                            {
+                                assertEquals(0, nativeEditorKey(pointer, code, bytes, length, 0))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        waitingInput = true
+        assertTrue(
+            application!!.proxy().post {
+                _ ->
+                waitingInput = false;
+                if (!finished)
+                    frame?.requestFrame()
+            }
+        )
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in retained)
+            node.close()
+    }
+}

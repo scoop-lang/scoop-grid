@@ -12,7 +12,7 @@ public enum GridRowActionResult {
 }
 
 public enum GridCopyResult {
-    Copied, Rejected(String)
+    Copied, Rejected(String), Unavailable(GridDataUnavailableException)
 }
 
 public struct GridCellAddress(val row: GridRowKey, val column: GridColumnId): Equals<
@@ -52,6 +52,18 @@ public class DataGridHandle public constructor() {
     public val pendingCell: GridCellAddress? get() {
         checkThread();
         return target?.requested ?: None
+    }
+    public val pendingPosition: GridPositionTarget? get() {
+        checkThread()
+        return target?.pendingPosition ?: None
+    }
+    public val searchesLoadedRows: Boolean get() {
+        checkThread()
+        return target?.searchesLoadedRows ?: false
+    }
+    public fun focusPosition(position: GridExternalPosition, column: GridColumnId): Boolean {
+        guard.checkMutation()
+        return target?.focusPosition(position, column) ?: false
     }
     public val editingCell: GridCellAddress? get() {
         checkThread()
@@ -232,12 +244,15 @@ internal interface GridMount {
     val pending: Boolean
     val focused: GridCellAddress?
     val requested: GridCellAddress?
+    val pendingPosition: GridPositionTarget?
+    val searchesLoadedRows: Boolean
     val editingCell: GridCellAddress?
     val editError: String?
     val submitting: Boolean
     val cellRange: GridCellRange?
     val columnStates: Array<GridColumnState>?
     fun focus(address: GridCellAddress): Boolean
+    fun focusPosition(position: GridExternalPosition, column: GridColumnId): Boolean
     fun cancel()
     fun beginEdit(address: GridCellAddress): Boolean
     fun commitEdit(): GridEditAttempt

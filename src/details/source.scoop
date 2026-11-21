@@ -14,6 +14,14 @@ internal class GridDetailSource<Row>(
 ): GridRowSource<Row> {
     private val details = HashMap<ViewKey, Long>()
     public override val count: Long = source.count + positions.size
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> {
+        val first = start - before(start)
+        val end = start + count - before(start + count)
+        return if (end > first)
+            source.unavailable(first, end - first)
+        else
+            []
+    }
     init {
         for (at in 0L ..< positions.size)
             details.put(GridRowKey.Detail(positions[at].info.parent).viewKey, at)
@@ -122,6 +130,8 @@ internal fun <Row> gridDetailResult(
         result.aggregates,
         result.rootCount,
         result.pageUnit,
-        positions.size
+        positions.size,
+        result.external,
+        result.availableRows
     )
 }

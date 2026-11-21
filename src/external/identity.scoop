@@ -1,0 +1,113 @@
+package scoop.grid
+
+import scoop.ui.ViewKey
+
+public enum GridExternalBranch: Equals<GridExternalBranch>, Hash {
+    Root, Group(GridGroupPath), Tree(ViewKey)
+    public override operator fun equals(other: GridExternalBranch): Boolean =
+        when ((this, other)) {
+            case(Root, Root) -> true
+            case(Group(val a), Group(val b)) -> a == b
+            case(Tree(val a), Tree(val b)) -> a == b
+            else -> false
+        }
+    public override fun hash(): Long =
+        when (this) {
+            case Root -> 0L
+            case Group(val path) -> path.hash() xor 1L
+            case Tree(val key) -> key.hash() xor 2L
+        }
+    internal val parent: GridRowKey? get() =
+        when (this) {
+            case Root -> None
+            case Group(val path) -> Some(GridRowKey.Group(path))
+            case Tree(val key) -> Some(GridRowKey.Data(key))
+        }
+    internal val encoded: String get() =
+        when (parent) {
+            case None -> "r"
+            case Some(val key) -> when (key.viewKey) {
+                case Number(val value) -> f"n${value}"
+                case Text(val value) -> f"s${value}"
+                case Position -> throw IllegalArgumentException(
+                    Some("external branch requires a key")
+                )
+            }
+        }
+}
+
+public class GridExternalPosition public constructor(
+    public val branch: GridExternalBranch,
+    public val offset: Long
+): Equals<GridExternalPosition>, Hash {
+    init {
+        gridRequire(offset >= 0L, "negative external row position")
+        gridRequire(
+            branch != GridExternalBranch.Tree(ViewKey.Position),
+            "external parent requires a key"
+        )
+    }
+    public override operator fun equals(other: GridExternalPosition): Boolean =
+        branch == other.branch && offset == other.offset
+    public override fun hash(): Long = branch.hash() xor offset.hash()
+    internal val encoded: String get() = f"${branch.encoded}:${offset}"
+}
+
+public class GridExternalRange public constructor(
+    public val branch: GridExternalBranch,
+    public val offset: Long,
+    public val count: Long
+): Equals<GridExternalRange>, Hash {
+    init {
+        gridRequire(
+            offset >= 0L && count > 0L && count <= Long.MAX_VALUE - offset,
+            "invalid external range"
+        )
+        gridRequire(
+            branch != GridExternalBranch.Tree(ViewKey.Position),
+            "external parent requires a key"
+        )
+    }
+    public val end: Long get() = offset + count
+    public override operator fun equals(other: GridExternalRange): Boolean =
+        branch == other.branch && offset == other.offset && count == other.count
+    public override fun hash(): Long = branch.hash() xor offset.hash() xor (count.hash() shl 7)
+    internal fun contains(position: GridExternalPosition): Boolean =
+        branch == position.branch && position.offset >= offset && position.offset < end
+    internal fun overlaps(other: GridExternalRange): Boolean =
+        branch == other.branch && offset < other.end && other.offset < end
+}
+
+public enum GridLoadState {
+    Unloaded, Loading, Failed(String)
+}
+
+public class GridLoadRow internal constructor(
+    public val position: GridExternalPosition,
+    public val state: GridLoadState
+)
+
+public class GridDataUnavailableException public constructor(
+    public val ranges: Array<GridExternalRange>,
+    public val keys: Array<ViewKey> = []
+): Exception(Some(gridUnavailableMessage(ranges, keys)))
+
+internal fun gridUnavailableMessage(
+    ranges: Array<GridExternalRange>,
+    keys: Array<ViewKey>
+): String {
+    val text = StringBuilder()
+    var written = false
+    for (range in ranges) {
+        if (written)
+            text.append("；")
+        text.append(f"${range.branch.encoded}：第 ${range.offset + 1L}–${range.end} 项未加载")
+        written = true
+    }
+    if (keys.size > 0L) {
+        if (written)
+            text.append("；")
+        text.append(f"${keys.size} 条指定记录未加载")
+    }
+    return text.toString()
+}

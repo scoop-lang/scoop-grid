@@ -1,0 +1,210 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.math.min
+import scoop.ui.ViewKey
+
+internal fun <Row> gridComputeExternal(
+    snapshot: GridExternalSnapshot<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    pins: GridPinnedRows,
+    expanded: GridExpandedRows,
+    details: GridDetailState<Row>
+): GridComputed<Row> {
+    val preserve =
+        gridCriteriaEqual(snapshot.query, query) &&
+            snapshot.query.totals ==
+            query.totals &&
+            snapshot.query.groupTotals ==
+            query.groupTotals &&
+            snapshot.query.treeTotals ==
+            query.treeTotals
+    var current = snapshot.forQuery(query, preserve)
+    var resolved = query
+    val root = current.data(GridExternalBranch.Root)
+    var start = 0L
+    var size = root.extent
+    var pages = 1L
+    when (query.pagination) {
+        case Page(val index, val count) -> {
+            when (root.total) {
+                case Some(val total) -> {
+                    val bounds = gridPageRange(total, query.pagination)
+                    resolved = query.withPagination(bounds.pagination)
+                    start = bounds.start
+                    size = bounds.count
+                    pages = bounds.pages
+                }
+                case None -> {
+                    gridRequire(
+                        index <= (Long.MAX_VALUE - count) / count,
+                        "external page range overflows"
+                    )
+                    start = index * count
+                    size =
+                        if (root.tail > start)
+                            min(count, root.tail - start)
+                        else
+                            1L
+                    pages =
+                        index +
+                            1L +
+                            (
+                                if (root.tail - start >= count)
+                                    1L
+                                else
+                                    0L
+                            )
+                }
+            }
+        }
+        case Disabled -> {}
+    }
+    if (resolved != current.query)
+        current = current.forQuery(resolved, true)
+    val logical = GridExternalRows(current, start, size, expanded)
+    val expandedPage = GridExternalRows(current, start, size, GridExpandedRows(true))
+    val pageRows = expandedPage.records()
+    val all = gridExternalRecords(current)
+    val total =
+        current.recordTotal ?:
+            (
+                if (
+                    current.source.treeColumn ==
+                        None &&
+                        resolved.grouping.size ==
+                        0L &&
+                        resolved.pivot ==
+                        None
+                )
+                    root.total ?: all.count
+                else
+                    all.count
+            )
+    val pageUnit =
+        if (current.source.treeColumn != None)
+            GridPageUnit.TreeRoots
+        else
+            if (resolved.grouping.size > 0L)
+                GridPageUnit.Roots
+            else
+                GridPageUnit.Records
+    val effectivePins =
+        if (resolved.pivot == None)
+            pins
+        else
+            GridPinnedRows()
+    val base =
+        gridComposeResult(
+            logical,
+            pageRows,
+            all,
+            total,
+            pages,
+            effectivePins,
+            current.aggregates,
+            if (current.schema?.columns?.size != None || resolved.pivot == None)
+                resolved.totals
+            else
+                GridTotals(),
+            root.total ?: root.indices.size,
+            pageUnit,
+            GridDataRows(all)
+        )
+    val available =
+        gridComposeResult(
+            logical.available(),
+            pageRows,
+            all,
+            total,
+            pages,
+            effectivePins,
+            current.aggregates,
+            if (current.schema?.columns?.size != None || resolved.pivot == None)
+                resolved.totals
+            else
+                GridTotals(),
+            root.total ?: root.indices.size,
+            pageUnit,
+            GridDataRows(all)
+        ).rows
+    val hasNext =
+        when (resolved.pagination) {
+            case Page(val index, _) -> index + 1L < pages
+            case Disabled -> root.total == None
+        }
+    val pageComplete =
+        expandedPage.unavailable(0L, expandedPage.count).size ==
+            0L &&
+            (
+                root.total !=
+                    None ||
+                    when (resolved.pagination) {
+                        case Page(_, val count) -> size == count;
+                        case Disabled -> false
+                    }
+            )
+    val availability =
+        GridExternalAvailability(
+            all.count,
+            root.total,
+            when (current.recordTotal) {
+                case Some(_) -> current.recordTotal
+                case None -> if (pageUnit == GridPageUnit.Records && resolved.pivot == None)
+                    root.total
+                else
+                    None
+            },
+            hasNext,
+            pageComplete
+        )
+    val result =
+        GridResult(
+            base.rows,
+            pageRows,
+            all,
+            total,
+            pages,
+            base.topCount,
+            base.bottomCount,
+            current.aggregates,
+            root.total ?: root.indices.size,
+            pageUnit,
+            external = Some(availability),
+            availableRows = available
+        )
+    return GridComputed(
+        all,
+        columns,
+        resolved,
+        result,
+        pins,
+        all,
+        expanded,
+        details = details,
+        external = Some(current)
+    )
+}
+
+internal fun <Row> gridExternalRecords(snapshot: GridExternalSnapshot<Row>): GridExternalRecords<
+    Row
+> {
+    val rows = ArrayList<(ViewKey, Row)>()
+    val seen = HashSet<ViewKey>()
+    for ((_, data) in snapshot.branches)
+        for (at in data.indices)
+            when (data.items[at]!!.row) {
+                case Data(val row, val key) -> {
+                    seen.add(key);
+                    rows.add((key, row))
+                }
+                else -> {}
+            }
+    for (at in 0L ..< snapshot.pinned.count) {
+        val key = snapshot.pinned.keyAt(at)
+        if (seen.add(key))
+            rows.add((key, snapshot.pinned.rowAt(at)))
+    }
+    return GridExternalRecords(rows.toArray())
+}

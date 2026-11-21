@@ -7,7 +7,7 @@ import scoop.ui.component.DatePickerDraft
 import scoop.ui.component.FieldTarget
 import scoop.ui.text.TextEditorState
 
-internal enum GridFilterOperator: Equals<GridFilterOperator> {
+public enum GridFilterOperator: Equals<GridFilterOperator> {
     Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual, Between,
     Contains, StartsWith, EndsWith, Missing, Present, In
     public override operator fun equals(other: GridFilterOperator): Boolean =
@@ -130,11 +130,15 @@ internal class GridFilterConditionDraft(
             else -> first.composing
         }
 
-    fun setColumn(id: GridColumnId, initial: GridLiteral) {
+    fun setColumn(
+        id: GridColumnId,
+        initial: GridLiteral,
+        operation: GridFilterOperator = GridFilterOperator.Equal
+    ) {
         if (composing)
             return
         column.value = id
-        operation.value = GridFilterOperator.Equal
+        this.operation.value = operation
         first.reset(initial)
         second.reset(initial)
         caseSensitive.value = false
@@ -185,7 +189,7 @@ private fun gridFilterOperand(condition: GridCondition, second: Boolean): GridLi
         else -> GridLiteral.Text("")
     }
 
-private fun gridFilterOperator(condition: GridCondition): GridFilterOperator =
+internal fun gridFilterOperator(condition: GridCondition): GridFilterOperator =
     when (condition) {
         case Missing(val missing) -> if (missing)
             GridFilterOperator.Missing

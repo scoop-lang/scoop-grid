@@ -35,7 +35,12 @@ public class GridQuickFilter<Row> public constructor(
 
     private fun apply(clear: Boolean = false) {
         val input = props.value
-        if (!scope.isMounted || !input.enabled || draft.isComposing)
+        if (
+            !scope.isMounted ||
+                !input.enabled ||
+                draft.isComposing ||
+                !(input.state.external?.quickFilter ?: true)
+        )
             return
         val text =
             if (clear)
@@ -53,6 +58,8 @@ public class GridQuickFilter<Row> public constructor(
 
     public override fun render(): View {
         val input = props.value
+        if (!(input.state.external?.quickFilter ?: true))
+            return empty()
         val labels = input.labels
         val source = input.theme ?: (ambient ?: currentThemeSource())
         val density = source.read(scope).tokens.typography.body.fontSize / 14.0

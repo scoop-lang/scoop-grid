@@ -448,6 +448,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                                     when (result) {
                                         case Copied -> "已复制单元格"
                                         case Rejected(val message) -> message
+                                        case Unavailable(val error) -> error.message ?: "所需范围未加载"
                                     }
                             }
                     }

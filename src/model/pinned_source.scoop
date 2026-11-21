@@ -117,6 +117,12 @@ private class GridUnpinnedLogicalRows<Row>(
     omitted: Array<Long>
 ): GridRowSource<Row> {
     private val rows = GridUnpinnedRows(source, omitted)
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> {
+        if (count == 0L)
+            return []
+        val first = rows.sourceIndex(start)
+        return source.unavailable(first, rows.sourceIndex(start + count - 1L) - first + 1L)
+    }
     public override val count: Long get() = rows.count
     public override fun keyAt(index: Long): ViewKey = rows.keyAt(index)
     public override fun rowAt(index: Long): GridRow<Row> = rows.rowAt(index)

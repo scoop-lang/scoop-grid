@@ -31,5 +31,16 @@ public class GridPagerLabels public constructor(
     public val treeRoots: (Long, Long) -> String =
         { count, records -> f"共 ${count} 根 · 匹配 ${records} 条" },
     public val treeRootStatus: (Long, Long, Long, Long) -> String =
-        { count, records, page, pages -> f"共 ${count} 根 · 匹配 ${records} 条 · ${page} / ${pages} 页" }
+        { count, records, page, pages -> f"共 ${count} 根 · 匹配 ${records} 条 · ${page} / ${pages} 页" },
+    public val loaded: (GridExternalAvailability, Long) -> String =
+        {
+            value, page ->
+            val total =
+                when (value.rootTotal) {
+                    case Some(val count) -> f"共 ${count} 项";
+                    case None -> "总数未知"
+                }
+            f"已加载 ${value.loadedRows} 条 · ${total} · 第 ${page} 页"
+        },
+    public val ranges: String = "按需加载"
 )

@@ -40,7 +40,7 @@ private class GridDetailsLayoutTest {
                         session,
                         GridRowPolicy(GridRowSizing.Fixed, columns),
                         details = model.details,
-                        hasDetails = model.result.detailCount > 0L
+                        hasStructuralRows = model.result.detailCount > 0L
                     ),
                     scroll,
                     session,
@@ -102,7 +102,7 @@ private class GridDetailsLayoutTest {
                     GridSession<Long>(),
                     GridRowPolicy(GridRowSizing.Fixed, columns),
                     details = model.details,
-                    hasDetails = true
+                    hasStructuralRows = true
                 )
             val semantics = rows.semantics()
             val info = semantics.describe(100000000L)!!

@@ -241,6 +241,7 @@ private fun gridMenuCopy(result: GridCopyResult): GridMenuResult =
     when (result) {
         case Copied -> GridMenuResult.Applied
         case Rejected(val message) -> GridMenuResult.Rejected(message)
+        case Unavailable(val error) -> GridMenuResult.Rejected(error.message ?: "所需范围未加载")
     }
 
 private fun gridMenuColumnResult(result: GridColumnActionResult): GridMenuResult =

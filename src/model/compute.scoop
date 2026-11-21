@@ -18,16 +18,24 @@ internal class GridComputed<Row>(
     val groups: GridGrouped<Row>? = None,
     val tree: GridTreeComputed<Row>? = None,
     val pivot: GridPivoted<Row>? = None,
-    val details: GridDetailState<Row> = GridDetailState<Row>()
+    val details: GridDetailState<Row> = GridDetailState<Row>(),
+    val external: GridExternalSnapshot<Row>? = None
 ) {
     val result: GridResult<Row> = gridDetailResult(baseResult, details)
-    val displayColumns: GridColumns<Row> get() = pivot?.schema?.columns ?: columns
+    val externalSchema: GridExternalColumns<Row>? get() = external?.schema ?: None
+    val resultHeaders: GridHeaders? get() =
+        when (externalSchema) {
+            case Some(val schema) -> Some(schema.tree)
+            case None -> pivot?.schema?.headers
+        }
+    val displayColumns: GridColumns<Row> get() =
+        externalSchema?.definitions ?: (pivot?.schema?.columns ?: columns)
     val pivotMode: Boolean get() = query.pivot != None
     val treeData: GridTreeData<Row>? get() = tree?.topology?.definition
     val treeMode: Boolean get() =
         when (tree) {
             case Some(_) -> true
-            case None -> false
+            case None -> (external?.source?.treeColumn ?: None) != None
         }
 }
 
@@ -41,6 +49,26 @@ internal fun <Row> gridCompute(
     treeData: GridTreeData<Row>? = None,
     details: GridDetailState<Row>? = None
 ): GridComputed<Row> {
+    when (previous?.external ?: None) {
+        case Some(val external) -> {
+            val old = previous!!
+            val sameColumns = old.columns === columns
+            if (!sameColumns || external.query != query)
+                gridCheckExternalQuery(external.source, columns, query)
+            return gridComputeExternal(
+                if (sameColumns)
+                    external
+                else
+                    GridExternalSnapshot(external.source, query),
+                columns,
+                query,
+                pins,
+                expanded,
+                details ?: old.details
+            )
+        }
+        case None -> {}
+    }
     val value = gridComputeBase(source, columns, query, previous, pins, expanded, treeData)
     var configured = details ?: (previous?.details ?: GridDetailState<Row>())
     when (previous) {
@@ -62,6 +90,57 @@ internal fun <Row> gridCompute(
         configured
     )
 }
+
+internal fun <Row> gridInitialComputed(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    pins: GridPinnedRows,
+    expanded: GridExpandedRows,
+    tree: GridTreeData<Row>?,
+    details: GridDetailState<Row>,
+    external: GridExternalSource<Row>?
+): GridComputed<Row> =
+    when (external) {
+        case Some(val config) -> {
+            gridRequire(source.count == 0L, "external and local records require separate sources")
+            gridRequire(
+                when (tree) {
+                    case Some(_) -> false;
+                    case None -> true
+                },
+                "external tree uses its declared label column"
+            )
+            gridCheckExternalQuery(config, columns, query)
+            val expansion =
+                if (config.treeColumn == None)
+                    expanded.forGrouping(query.grouping)
+                else
+                    gridExternalTreeExpansion(expanded)
+            gridRequire(
+                expansion.exceptions.size == expanded.exceptions.size,
+                "expansion key does not match the external hierarchy"
+            )
+            gridComputeExternal(
+                GridExternalSnapshot(config, query),
+                columns,
+                query,
+                pins,
+                expansion,
+                details
+            )
+        }
+        case None -> gridCompute(
+            source,
+            columns,
+            query,
+            None,
+            gridCheckPinnedRows(source, pins),
+            expanded,
+            tree,
+            Some(details.check(source))
+        )
+    }
 
 private fun <Row> gridComputeBase(
     source: TableSource<Row>,

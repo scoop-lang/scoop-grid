@@ -1,0 +1,142 @@
+package scoop.grid.tests.external
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal struct RemoteRecord(val id: Long, val amount: Long)
+
+internal fun remoteAddress(id: Long, column: String = "id"): GridCellAddress =
+    GridCellAddress(ViewKey.Number(id), GridColumnId(column))
+
+internal fun remotePosition(index: Long): GridExternalPosition =
+    GridExternalPosition(GridExternalBranch.Root, index)
+
+internal fun remoteRange(start: Long, count: Long): GridExternalRange =
+    GridExternalRange(GridExternalBranch.Root, start, count)
+
+internal fun ExternalWindowProbe.columns(): Array<GridColumn<RemoteRecord>> {
+    val probe = this
+    return [
+        gridColumn<RemoteRecord, Long>(
+            GridColumnId("id"),
+            "ID",
+            { row -> row.id },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(100.0))
+        ),
+        gridColumn<RemoteRecord, Long>(
+            GridColumnId("amount"),
+            "Amount",
+            { row -> row.amount },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(140.0)),
+            edit =
+                Some(
+                    gridEdit<RemoteRecord, Long>(
+                        {
+                            value ->
+                            val editor = gridLongEditor(value)
+                            probe.editor = Some(editor)
+                            RemoteEditor(editor, { options -> probe.options = Some(options) })
+                        },
+                        { _, commit -> probe.commit = Some(commit) }
+                    )
+                )
+        ),
+        gridColumn<RemoteRecord, String>(
+            GridColumnId("text"),
+            "Description",
+            { row -> f"Remote record ${row.id}" },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(400.0))
+        ),
+        gridColumn<RemoteRecord, String>(
+            GridColumnId("end"),
+            "End",
+            { _ -> "End" },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(90.0))
+        )
+    ]
+}
+
+internal fun ExternalWindowProbe.load(request: GridExternalRequest<RemoteRecord>): (() -> Unit)? {
+    val probe = this
+    requests.add(request)
+    assertTrue(
+        application!!.proxy().post {
+            _ -> if (probe.autoReply && request.isActive)
+                probe.reply(request)
+        }
+    )
+    return Some { probe.cancelled += 1L }
+}
+
+internal fun ExternalWindowProbe.reply(request: GridExternalRequest<RemoteRecord>): Boolean {
+    if (!request.isActive)
+        return false
+    if (failNext) {
+        failNext = false;
+        return request.fail("Temporary remote failure")
+    }
+    val total =
+        if (unknown)
+            24L
+        else
+            100000L
+    val start = request.range.offset
+    val remaining =
+        if (start < total)
+            total - start
+        else
+            0L
+    val count =
+        if (request.range.count < remaining)
+            request.range.count
+        else
+            remaining
+    val shift =
+        if (request.query.quickFilter == "changed")
+            100000L
+        else
+            0L
+    return request.complete(
+        GridExternalPage(
+            Array<GridExternalItem<RemoteRecord>>(count) {
+                index ->
+                val id = shift + start + index
+                GridExternalItem(GridRow.Data(RemoteRecord(id, id + 1L), ViewKey.Number(id)))
+            },
+            if (unknown)
+                None
+            else
+                Some(total),
+            start + count >= total
+        )
+    )
+}
+
+internal fun ExternalWindowProbe.release() {
+    autoReply = true
+    for (request in requests.toArray())
+        if (request.isActive)
+            reply(request)
+}
+
+internal class RemoteEditor<T>(
+    private val editor: GridTextEditor<T>,
+    private val observe: (GridEditorOptions) -> Unit
+): GridEditor<T> {
+    public override val composing: Boolean get() = editor.composing
+    public override fun candidate(): GridCandidate<T> = editor.candidate()
+    public override fun importText(text: String): String? = editor.importText(text)
+    public override fun cancelComposition() {
+        editor.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        observe(options);
+        return editor.view(options)
+    }
+}

@@ -6,7 +6,8 @@ internal fun <Row> gridRestoreQuery(
     saved: GridQuery,
     columns: GridColumns<Row>,
     issues: ArrayList<GridRestoreIssue>,
-    treeMode: Boolean = false
+    treeMode: Boolean = false,
+    external: GridExternalSource<Row>? = None
 ): GridQuery {
     val sorting = ArrayList<GridSort>()
     val seen = HashSet<GridColumnId>()
@@ -17,7 +18,15 @@ internal fun <Row> gridRestoreQuery(
         else
             sorting.add(entry)
     }
-    val filter = gridRestoreFilter(saved.filter, columns, [], issues) ?: GridFilter.All
+    val filter = gridRestoreFilter(saved.filter, columns, [], issues, external) ?: GridFilter.All
+    var quickFilter = saved.quickFilter
+    when (external) {
+        case Some(val source) -> if (quickFilter != "" && !source.quickFilter) {
+            quickFilter = ""
+            issues.add(GridRestoreIssue(GridStatePart.QuickFilter, "外部来源未声明快速筛选"))
+        }
+        case None -> {}
+    }
     val aggregations = ArrayList<GridAggregationSelection>()
     val metrics = HashSet<GridColumnId>()
     for (entry in saved.aggregations) {
@@ -68,7 +77,7 @@ internal fun <Row> gridRestoreQuery(
     return GridQuery(
         sorting.toArray(),
         filter,
-        saved.quickFilter,
+        quickFilter,
         saved.pagination,
         aggregations.toArray(),
         saved.totals,
@@ -84,7 +93,8 @@ private fun <Row> gridRestoreFilter(
     value: GridFilter,
     columns: GridColumns<Row>,
     path: Array<Long>,
-    issues: ArrayList<GridRestoreIssue>
+    issues: ArrayList<GridRestoreIssue>,
+    external: GridExternalSource<Row>?
 ): GridFilter? =
     when (value) {
         case All -> Some(value)
@@ -95,6 +105,19 @@ private fun <Row> gridRestoreFilter(
                 None
             } else {
                 try {
+                    when (external) {
+                        case Some(val source) -> {
+                            val config = gridExternalFilter(source, id)
+                            gridRequire(
+                                gridAllowsFilter(
+                                    config?.operations ?: [],
+                                    gridFilterOperator(condition)
+                                ),
+                                "外部来源未声明该筛选操作"
+                            )
+                        }
+                        case None -> {}
+                    }
                     definition!!.predicate(condition)
                     Some(value)
                 } catch (error: IllegalArgumentException) {
@@ -105,8 +128,22 @@ private fun <Row> gridRestoreFilter(
                 }
             }
         }
-        case And(val children) -> gridRestoreFilterChildren(children, columns, path, issues, true)
-        case Or(val children) -> gridRestoreFilterChildren(children, columns, path, issues, false)
+        case And(val children) -> gridRestoreFilterChildren(
+            children,
+            columns,
+            path,
+            issues,
+            true,
+            external
+        )
+        case Or(val children) -> gridRestoreFilterChildren(
+            children,
+            columns,
+            path,
+            issues,
+            false,
+            external
+        )
     }
 
 private fun <Row> gridRestoreFilterChildren(
@@ -114,7 +151,8 @@ private fun <Row> gridRestoreFilterChildren(
     columns: GridColumns<Row>,
     path: Array<Long>,
     issues: ArrayList<GridRestoreIssue>,
-    conjunction: Boolean
+    conjunction: Boolean,
+    external: GridExternalSource<Row>?
 ): GridFilter? {
     if (children.size == 0L) {
         issues.add(GridRestoreIssue(GridStatePart.Filter(path), "空筛选组已移除"))
@@ -129,7 +167,7 @@ private fun <Row> gridRestoreFilterChildren(
                 else
                     path[at]
             }
-        when (gridRestoreFilter(children[index], columns, childPath, issues)) {
+        when (gridRestoreFilter(children[index], columns, childPath, issues, external)) {
             case Some(val child) -> kept.add(child)
             case None -> {}
         }

@@ -1,0 +1,69 @@
+package scoop.grid.tests.external
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+import scoop.ui.component.button
+
+internal class RemoteScene(
+    private val probe: ExternalWindowProbe,
+    scope: ComponentScope
+): Component(scope) {
+    public override fun render(): View {
+        val probe = this.probe
+        return element(
+            RemoteLayoutProps(probe, probe.model.result),
+            { props, scope -> RemoteLayout(props, scope) },
+            [
+                dataGrid(probe.model) {
+                    width = Some(480.0);
+                    height = 240.0;
+                    rowHeight = 32.0;
+                    headerHeight = 32.0;
+                    overscan = 0.0
+                    scroll = Some(probe.scroll);
+                    handle = Some(probe.handle)
+                    labels = GridLabels(name = "Remote results", retry = "Retry remote request")
+                },
+                button("Outside grid", {}) { focus = FocusOptions(Some(probe.outside)) }
+            ]
+        )
+    }
+}
+
+private class RemoteLayoutProps(
+    val probe: ExternalWindowProbe,
+    val result: GridResult<RemoteRecord>
+)
+
+private class RemoteLayout(
+    private val props: Props<RemoteLayoutProps>,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    init {
+        props.value.probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(480.0, 240.0)))
+        context.placeChild(0L, Point(12.0, 12.0))
+        context.measureChild(1L, Constraints(maxWidth = Some(200.0)))
+        context.placeChild(1L, Point(510.0, 24.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(740.0, 300.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val input = props.value
+        context.children()
+        context.onFrameComplete {
+            frame -> if (
+                frame.submission ==
+                    FrameSubmission.Accepted &&
+                    input.result ===
+                    input.probe.model.result
+            )
+                input.probe.accepted()
+        }
+    }
+}

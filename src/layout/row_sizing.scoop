@@ -141,10 +141,10 @@ internal class GridRowConfiguration<Row>(
                 !gridSameRowSizing(input.rows.policy.mode, next.input.rows.policy.mode)
         )
             return false
-        if (input.rows.hasDetails != next.input.rows.hasDetails)
+        if (input.rows.hasStructuralRows != next.input.rows.hasStructuralRows)
             return false
         if (
-            input.rows.hasDetails &&
+            input.rows.hasStructuralRows &&
                 (
                     columns.viewport !=
                         next.columns.viewport ||
@@ -203,7 +203,7 @@ internal class GridRowMeasurements<Row> {
             GridRowExtents(
                 input.rows.count,
                 next.estimate,
-                input.rows.policy.variable || input.rows.hasDetails
+                input.rows.policy.variable || input.rows.hasStructuralRows
             )
         if (sameShape && fresh.index.variable) {
             for ((key, height) in extents!!.known) {

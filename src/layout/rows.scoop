@@ -24,7 +24,7 @@ internal class GridRows<Row>(
     val labels: GridLabels = GridLabels(),
     val busy: Boolean = false,
     val details: GridDetails<Row>? = None,
-    val hasDetails: Boolean = false
+    val hasStructuralRows: Boolean = false
 ): ItemSource {
     public override val count: Long get() = source.count
     public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
@@ -42,6 +42,7 @@ internal class GridRows<Row>(
                     [definition.content(value)]
                 )
             }
+            case Unloaded(val load) -> return gridLoadView(this, load, index)
             else -> {}
         }
         val spans = spansFor(row)
@@ -76,6 +77,7 @@ internal class GridRows<Row>(
             case Group(_) -> GridRowSpans(columns.columns.size)
             case Total(_) -> GridRowSpans(columns.columns.size)
             case Detail(_, _) -> GridRowSpans(0L)
+            case Unloaded(_) -> GridRowSpans(0L)
         }
     fun indexOfKey(key: GridRowKey): Long? = source.indexOfKey(key)
     private fun labelColumn(row: GridRow<Row>): GridColumnId? = row.labelColumn(columns.columns)
@@ -224,7 +226,7 @@ internal class GridRows<Row>(
                                 case None -> None
                             },
                         hasCells =
-                            if (hasDetails)
+                            if (hasStructuralRows)
                                 Some {
                                     key -> when (val index = source.indexOfKey(gridRowKey(key))) {
                                         case Some(val at) -> source.rowKeyAt(at).hasCells
@@ -268,6 +270,13 @@ internal class GridBody<Row>(
         semantics.update(
             SemanticProperties(
                 name = Some(rows.labels.name),
+                description =
+                    when (rows.session.currentModel?.result?.external ?: None) {
+                        case Some(val availability) -> Some(
+                            rows.labels.externalStatus(availability)
+                        )
+                        case None -> None
+                    },
                 busy = rows.busy,
                 enabled = rows.enabled,
                 table = Some(SemanticTableSize(rows.count, rows.columns.columns.size))
@@ -436,6 +445,9 @@ internal class GridRowView<Row>(
                 case Total(_) -> plan.rows.estimate
                 case Detail(_, _) -> throw IllegalStateException(
                     Some("detail content uses its own row measure")
+                )
+                case Unloaded(_) -> throw IllegalStateException(
+                    Some("loading content uses its own row measure")
                 )
             }
         for (index in contributors) {

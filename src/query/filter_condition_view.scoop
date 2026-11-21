@@ -22,7 +22,7 @@ internal fun <Row> gridFilterConditionView(
     val column = ui.input.state.findColumn(node.column.value)
     val kind: GridValueKind? =
         when (column) {
-            case Some(val value) -> if (value.filterable)
+            case Some(val value) -> if (ui.input.state.canFilter(value.id))
                 value.valueKind
             else
                 None
@@ -46,7 +46,8 @@ internal fun <Row> gridFilterConditionView(
                                             gridFilterDefault(
                                                 gridFilterKind(ui.input.state, id, ui.labels),
                                                 ui.referenceDate
-                                            )
+                                            ),
+                                            ui.input.state.firstFilterOperation(id)
                                         )
                                         case None -> {}
                                     }
@@ -75,7 +76,12 @@ internal fun <Row> gridFilterConditionView(
                                     }
                             }
                         ),
-                        gridFilterOperators(kind, node.operation.value, ui.labels)
+                        gridFilterOperators(
+                            kind,
+                            node.operation.value,
+                            ui.labels,
+                            ui.input.state.filterOperations(node.column.value)
+                        )
                     ) {
                         enabled = ui.structural && kind != None
                         width = Some(132.0 * density)
@@ -278,7 +284,8 @@ private fun <Row> gridFilterScalarView(
 private fun gridFilterOperators(
     kind: GridValueKind?,
     current: GridFilterOperator,
-    labels: GridFilterLabels
+    labels: GridFilterLabels,
+    allowed: Array<GridFilterOperator>?
 ): Array<Choice<GridFilterOperator>> {
     val choices =
         [
@@ -310,7 +317,12 @@ private fun gridFilterOperators(
                 case Between -> gridFilterOrderedKind(kind)
                 else -> true
             }
-        if (available || choice.value == current)
+        val declared =
+            when (allowed) {
+                case Some(val operations) -> gridAllowsFilter(operations, choice.value);
+                case None -> true
+            }
+        if (declared && (available || choice.value == current))
             result.add(choice)
     }
     return result.toArray()

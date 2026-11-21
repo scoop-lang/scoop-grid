@@ -25,7 +25,7 @@ public class GridViewState public constructor(
 )
 
 public enum GridStatePart {
-    Column(GridColumnId), ColumnOrder, Sorting(GridColumnId), Filter(Array<Long>),
+    Column(GridColumnId), ColumnOrder, Sorting(GridColumnId), Filter(Array<Long>), QuickFilter,
     PinnedRow(ViewKey), SelectedRow(ViewKey), CellRange, ReadingPosition, FocusedCell, Pagination,
     Detail(ViewKey), Pivot, Aggregation(GridColumnId), Grouping(GridColumnId), GroupSorting(
         GridColumnId

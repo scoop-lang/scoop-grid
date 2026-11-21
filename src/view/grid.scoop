@@ -108,7 +108,7 @@ public class DataGrid<Row> public constructor(
                     }
                 },
                 input.state.details,
-                result.detailCount > 0L
+                result.detailCount > 0L || input.state.isExternal
             )
         val header =
             GridHeaderCells(

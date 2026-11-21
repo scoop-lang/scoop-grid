@@ -1,0 +1,79 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.math.BigDecimal
+
+/** A supplied aggregate retains its real value type behind the common column operations. */
+public class GridProvidedAggregate internal constructor(
+    public val selection: GridAggregationSelection,
+    internal val values: GridAggregateValues
+)
+
+public fun <T> gridProvidedAggregate(
+    column: GridColumnId,
+    operation: GridAggregateId,
+    value: T?,
+    values: GridValues<T>
+): GridProvidedAggregate =
+    GridProvidedAggregate(
+        GridAggregationSelection(column, operation),
+        GridProvidedValue(value, values)
+    )
+
+public fun gridProvidedAggregations(values: Array<GridProvidedAggregate> = []): GridAggregations {
+    val selections = ArrayList<GridAggregationSelection>()
+    val byColumn = HashMap<GridColumnId, GridAggregateValues>()
+    for (value in values) {
+        gridRequire(
+            !byColumn.containsKey(value.selection.column),
+            "duplicate provided aggregate column"
+        )
+        selections.add(value.selection)
+        byColumn.put(value.selection.column, value.values)
+    }
+    return GridAggregations(selections.toArray(), byColumn)
+}
+
+private class GridProvidedValue<T>(
+    private val value: T?,
+    private val values: GridValues<T>
+): GridAggregateValues {
+    public override fun display(group: Long): GridAggregateDisplay =
+        when (value) {
+            case Some(val item) -> if (values.missing(item))
+                GridAggregateDisplay.Missing
+            else
+                GridAggregateDisplay.Value(values.format(item))
+            case None -> GridAggregateDisplay.Missing
+        }
+    public override fun number(group: Long): BigDecimal? {
+        val item = value ?: return None
+        if (values.missing(item))
+            return None
+        return when (values.encode(item)) {
+            case Integer(val number) -> Some(BigDecimal(number))
+            case Number(val number) -> Some(BigDecimal.fromDouble(number))
+            else -> when (values.number(item)) {
+                case Some(val number) -> Some(BigDecimal.fromDouble(number))
+                case None -> None
+            }
+        }
+    }
+    public override fun compare(left: Long, right: Long): Long = 0L
+}
+
+public fun gridExternalGroup(
+    path: GridGroupPath,
+    label: String,
+    count: Long? = None,
+    aggregates: GridAggregations = gridProvidedAggregations()
+): GridGroupRow {
+    gridRequire((count ?: 0L) >= 0L, "negative external group count")
+    return GridGroupRow(path, label, count ?: 0L, aggregates, count != None)
+}
+
+public fun gridExternalTotal(
+    key: GridTotalKey,
+    label: String,
+    aggregates: GridAggregations
+): GridTotalRow = GridTotalRow(key, label, aggregates)

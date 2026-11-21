@@ -31,6 +31,7 @@ internal class GridSession<Row>: GridMount {
     val editing = GridEditCoordinator<Row>(this)
     private val hierarchyActions = GridHierarchyActions<Row>(this)
     val detailActions = GridDetailActions<Row>(this)
+    val externalDriver = GridExternalDriver<Row>(this)
     val columnActions = GridColumnActions<Row>(this)
     val columnReorder = GridColumnReorder<Row>(this)
     val rangeDrag = GridRangeDrag<Row>(this)
@@ -41,6 +42,13 @@ internal class GridSession<Row>: GridMount {
     private var owner: ComponentScope? = None
     private var model: DataGridState<Row>? = None
     val currentModel: DataGridState<Row>? get() = model
+    public override val searchesLoadedRows: Boolean get() = model?.isExternal ?: false
+    public override val pendingPosition: GridPositionTarget? get() = externalDriver.pending
+    public override fun focusPosition(
+        position: GridExternalPosition,
+        column: GridColumnId
+    ): Boolean = externalDriver.focus(position, column)
+    val hasGridFocus: Boolean get() = active && (owner?.input?.activity?.hasFocus ?: false)
     private val rows: GridRowSource<Row>? get() = model?.result?.rows
     private var columns: GridColumnsPlan<Row>? = None
     private var spanColumns: GridSpanColumns? = None
@@ -116,6 +124,8 @@ internal class GridSession<Row>: GridMount {
                 return GridCopyResult.Rejected("网格已关闭或禁用")
             scope.nativeWindow.clipboard.writeText(text)
             GridCopyResult.Copied
+        } catch (error: GridDataUnavailableException) {
+            GridCopyResult.Unavailable(error)
         } catch (error: Exception) {
             GridCopyResult.Rejected(error.message ?: "无法复制单元格")
         }
@@ -275,6 +285,7 @@ internal class GridSession<Row>: GridMount {
                 case Some(val address) -> requestCell(address)
                 case None -> {}
             }
+            externalDriver.accept(plan, input)
         }
     }
     fun requestFrame() {
@@ -386,6 +397,20 @@ internal class GridSession<Row>: GridMount {
             case Some(_) -> {}
         }
         val target = next!!
+        when (source.rowKeyAt(target.row)) {
+            case Unloaded(val position) -> {
+                externalDriver.focus(
+                    position,
+                    plan.columns[target.column].id,
+                    if (extending)
+                        Some((model?.cellRange ?: None)?.anchor ?: address)
+                    else
+                        None
+                )
+                return true
+            }
+            else -> {}
+        }
         if (extending) {
             val current = model ?: return false
             val end = GridCellAddress(source.rowKeyAt(target.row), plan.columns[target.column].id)
@@ -413,7 +438,7 @@ internal class GridSession<Row>: GridMount {
         return scope.isMounted && scope.input.isEnabledInHierarchy
     }
     public override val pending: Boolean get() =
-        requested != None || (bodyFocus?.isPending ?: false)
+        pendingPosition != None || requested != None || (bodyFocus?.isPending ?: false)
     val preparing: GridCellAddress? get() {
         val focus = bodyFocus ?: return None
         val row = focus.pendingItem ?: return None
@@ -504,6 +529,9 @@ internal class GridSession<Row>: GridMount {
         onCopyResult = input.input.onCopyResult
         editing.update(input.input)
         detailActions.update(input.input.state)
+        externalDriver.update(input.input.state, owner!!)
+        if (!enabled)
+            externalDriver.cancel()
         columnReorder.update(input)
         rangeDrag.update(input)
         columnSizing.update(input)
@@ -546,6 +574,7 @@ internal class GridSession<Row>: GridMount {
         columnActions.close()
         detailActions.close()
         editing.close()
+        externalDriver.close()
         reference?.unbind(this)
         reference = None
         owner = None
@@ -596,6 +625,7 @@ internal class GridSession<Row>: GridMount {
                     case Group(_) -> GridCellSpan(at)
                     case Total(_) -> GridCellSpan(at)
                     case Detail(_, _) -> return None
+                    case Unloaded(_) -> return None
                 }
                 case None -> GridCellSpan(at)
             }
@@ -626,6 +656,7 @@ internal class GridSession<Row>: GridMount {
     fun requestCell(address: GridCellAddress, editor: FocusHandle? = None): Boolean {
         if (!active || !valid(address))
             return false
+        externalDriver.cancel()
         viewState.cancelRequest()
         val target = anchor(address) ?: return false
         val focus = bodyFocus ?: return false
@@ -655,6 +686,20 @@ internal class GridSession<Row>: GridMount {
         val at =
             gridCellRow(source, candidate, true) ?:
                 (gridCellRow(source, candidate, false) ?: return)
+        when (source.rowKeyAt(at)) {
+            case Unloaded(val position) -> {
+                if (model?.visibleColumn(address.column) ?: false)
+                    externalDriver.focus(position, address.column)
+                else
+                    for (column in plan.columns)
+                        if (model?.visibleColumn(column.id) ?: false) {
+                            externalDriver.focus(position, column.id)
+                            break
+                        }
+                return
+            }
+            else -> {}
+        }
         if (model?.visibleColumn(address.column) ?: false) {
             requestCell(GridCellAddress(source.rowKeyAt(at), address.column))
             return
@@ -694,6 +739,7 @@ internal class GridSession<Row>: GridMount {
         onPasteResult(address, result)
     }
     public override fun cancel() {
+        externalDriver.cancel()
         viewState.cancelRequest()
         bodyFocus?.cancelRequest()
         for ((_, cell) in cells)

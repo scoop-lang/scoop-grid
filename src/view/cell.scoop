@@ -173,6 +173,9 @@ internal class GridDataCell<Row>(
                                 case Detail(_, _) -> throw IllegalStateException(
                                     Some("detail content cannot be mounted as a cell")
                                 )
+                                case Unloaded(_) -> throw IllegalStateException(
+                                    Some("unloaded positions do not build cells")
+                                )
                             }
                         ]
                     )

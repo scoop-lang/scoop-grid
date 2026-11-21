@@ -4,7 +4,7 @@ package scoop.grid
 internal fun <Row> gridCellRow(source: GridRowSource<Row>, start: Long, forward: Boolean): Long? {
     var at = start
     while (at >= 0L && at < source.count) {
-        if (source.rowKeyAt(at).hasCells)
+        if (gridNavigableRow(source.rowKeyAt(at)))
             return Some(at)
         if (forward) {
             if (at == source.count - 1L)
@@ -27,7 +27,7 @@ internal fun <Row> gridNextResultCell(
     command: GridNavigation
 ): GridCellIndex? {
     val next = gridNextCell(current, source.count, columns, page, command) ?: return None
-    if (source.rowKeyAt(next.row).hasCells)
+    if (gridNavigableRow(source.rowKeyAt(next.row)))
         return Some(next)
     val forward =
         when (command) {
@@ -49,3 +49,10 @@ internal fun <Row> gridNextResultCell(
         }
     }
 }
+
+private fun gridNavigableRow(key: GridRowKey): Boolean =
+    key.hasCells ||
+        when (key) {
+            case Unloaded(_) -> true
+            else -> false
+        }

@@ -99,7 +99,8 @@ public class GridGroupRow internal constructor(
     public val path: GridGroupPath,
     public val label: String,
     public val count: Long,
-    public val aggregates: GridAggregations
+    public val aggregates: GridAggregations,
+    public val countKnown: Boolean = true
 ) {
     public val column: GridColumnId get() = path.parts[path.parts.size - 1L].column
 }

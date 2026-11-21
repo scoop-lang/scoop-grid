@@ -30,10 +30,8 @@ internal fun <Row> gridPivotControls(input: GridColumnsPanelProps<Row>, enabled:
     )
 
 internal fun <Row> gridHasPivotControls(model: DataGridState<Row>): Boolean {
-    when (model.treeData) {
-        case Some(_) -> return false;
-        case None -> {}
-    }
+    if (model.isTree)
+        return false
     if (model.pivot != None)
         return true
     for (column in model.sourceColumns)

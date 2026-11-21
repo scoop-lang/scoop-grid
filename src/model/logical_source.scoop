@@ -32,6 +32,24 @@ internal class GridWithTotalRows<Row>(
     private val total: GridTotalRow,
     private val before: Boolean
 ): GridRowSource<Row> {
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> {
+        val first =
+            if (before && start > 0L)
+                start - 1L
+            else
+                start
+        val includes = totalIndex >= start && totalIndex - start < count
+        val length =
+            count -
+                if (includes)
+                    1L
+                else
+                    0L
+        return if (length > 0L)
+            source.unavailable(first, length)
+        else
+            []
+    }
     init {
         gridRequire(source.count < Long.MAX_VALUE, "grid result row count overflow")
     }
@@ -81,6 +99,24 @@ internal class GridCombinedRows<Row>(
     private val body: GridRowSource<Row>,
     private val bottom: GridRowSource<Row>
 ): GridRowSource<Row> {
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> {
+        val result = ArrayList<GridExternalRange>()
+        var offset = start
+        var left = count
+        while (left > 0L) {
+            val(part, index) = at(offset)
+            val size =
+                if (left < part.count - index)
+                    left
+                else
+                    part.count - index
+            for (range in part.unavailable(index, size))
+                result.add(range)
+            offset += size
+            left -= size
+        }
+        return result.toArray()
+    }
     init {
         gridRequire(
             top.count <=
@@ -154,6 +190,8 @@ internal class GridSliceRows<Row>(
     private val start: Long,
     public override val count: Long
 ): GridRowSource<Row> {
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> =
+        source.unavailable(this.start + start, count)
     private fun offset(index: Long): Long {
         gridRequire(index >= 0L && index < count, "grid row index is out of range")
         return start + index

@@ -5,10 +5,11 @@ import scoop.collections.HashMap
 import scoop.ui.state
 import scoop.ui.ViewKey
 import scoop.ui.component.TableSource
+import scoop.ui.component.TableRows
 import scoop.ui.component.CheckState
 
 public class DataGridState<Row> public constructor(
-    source: TableSource<Row>,
+    source: TableSource<Row> = TableRows<Row>([]),
     columns: Array<GridColumn<Row>>,
     query: GridQuery = GridQuery(),
     public val onQueryChange: ((GridQuery) -> Unit)? = None,
@@ -20,19 +21,20 @@ public class DataGridState<Row> public constructor(
     expandedRows: GridExpandedRows = GridExpandedRows(),
     treeData: GridTreeData<Row>? = None,
     details: GridDetails<Row>? = None,
-    expandedDetails: Array<ViewKey> = []
+    expandedDetails: Array<ViewKey> = [],
+    public val external: GridExternalSource<Row>? = None
 ) {
     private val computed =
         state(
-            gridCompute(
+            gridInitialComputed(
                 source,
                 GridColumns(columns),
                 query,
-                None,
-                gridCheckPinnedRows(source, pinnedRows),
+                pinnedRows,
                 expandedRows,
                 treeData,
-                Some(GridDetailState(details, expandedDetails).check(source))
+                GridDetailState(details, expandedDetails),
+                external
             )
         )
     private val headerState =
@@ -43,6 +45,120 @@ public class DataGridState<Row> public constructor(
     private val presentation =
         state(gridDefaultColumnStates(computed.value.pivot?.schema?.headers ?: headerState.value))
     private val observers = ArrayList<GridModelObserver>()
+    private val externalController =
+        GridExternalController<Row>({ computed.value }, { value -> installExternal(value) })
+    public val isExternal: Boolean get() =
+        when (external) {
+            case Some(_) -> true;
+            case None -> false
+        }
+    internal val externalSnapshot: GridExternalSnapshot<Row>? get() = computed.value.external
+    internal val treeColumn: GridColumnId? get() =
+        when (external) {
+            case Some(val source) -> source.treeColumn
+            case None -> treeData?.column ?: None
+        }
+    internal val isTree: Boolean get() = computed.value.treeMode
+    internal fun attachExternal(retained: () -> Array<GridRowKey>): Closeable =
+        externalController.attach(retained)
+    internal fun synchronizeExternal() = externalController.synchronize()
+    internal fun loadExternal(position: GridExternalPosition): Boolean =
+        externalController.load(position)
+    public fun retryExternal(position: GridExternalPosition): Boolean {
+        computed.checkMutation()
+        return externalController.load(position, true)
+    }
+    public fun evictExternal(range: GridExternalRange): Boolean {
+        computed.checkMutation()
+        return externalController.evict(range)
+    }
+    public fun refreshExternal(deletedKeys: Array<ViewKey> = []) {
+        computed.checkMutation()
+        val old = computed.value
+        val snapshot =
+            old.external ?: throw IllegalStateException(Some("grid does not use external results"))
+        val deleted = GridSelectedRows(deletedKeys)
+        val selected = ArrayList<ViewKey>()
+        for (key in selectedRowKeys)
+            if (!deleted.contains(key))
+                selected.add(key)
+        val details = ArrayList<ViewKey>()
+        for (key in expandedDetails)
+            if (!deleted.contains(key))
+                details.add(key)
+        val pins = gridExternalPrunePins(old.pins, deleted)
+        val next =
+            gridComputeExternal(
+                GridExternalSnapshot(snapshot.source, old.query),
+                old.columns,
+                old.query,
+                pins,
+                gridExternalPruneExpansion(old.expanded, deleted),
+                GridDetailState(old.details.definition, details.toArray())
+            )
+        publishComputed(next)
+        clearCellRange()
+        filterCandidates.clear()
+        publishSelection(GridSelectedRows(selected.toArray()))
+        changed()
+    }
+    internal fun replaceExternalRow(key: ViewKey, row: Row) {
+        computed.checkMutation()
+        val snapshot =
+            computed.value.external ?:
+                throw IllegalStateException(Some("acceptRow requires external results"))
+        installExternal(snapshot.replacing(key, row))
+    }
+    private fun installExternal(snapshot: GridExternalSnapshot<Row>) {
+        computed.checkMutation()
+        val old = computed.value
+        val beforeSelection = selection.value
+        val beforeColumns = presentation.value
+        val bounds = cellRangeBounds
+        val next =
+            gridComputeExternal(
+                snapshot,
+                old.columns,
+                snapshot.query,
+                old.pins,
+                old.expanded,
+                old.details
+            )
+        val sameRows = snapshot.sameRows(old.external!!)
+        val selected =
+            if (sameRows)
+                beforeSelection
+            else
+                gridExternalSelection(next, beforeSelection, selectable)
+        val keepRange =
+            when (bounds) {
+                case Some(val range) -> sameRows ||
+                    gridExternalRangeStable(old.result, next.result, range);
+                case None -> true
+            }
+        if (
+            computed.value !==
+                old ||
+                selection.value !==
+                beforeSelection ||
+                presentation.value !==
+                beforeColumns
+        )
+            throw IllegalStateException(Some("准备外部结果期间模型已更新，请重试"))
+        publishComputed(next)
+        publishSelection(selected)
+        when (cellRange) {
+            case Some(val range) -> if (
+                !keepRange ||
+                    !gridSameCellColumns(beforeColumns, presentation.value) ||
+                    gridCellRangeBounds(range, next.result.rows, cellColumns()) ==
+                    None
+            )
+                clearCellRange()
+            case None -> {}
+        }
+        notify(old.query, next.query)
+    }
     private val filterCandidates = HashMap<GridColumnId, GridFilterValues>()
     private val selection = state(GridSelectedRows([]))
     private val rangeSelection = state<GridCellRange?>(None)
@@ -72,7 +188,10 @@ public class DataGridState<Row> public constructor(
         )
         val next = GridSelectedRows(keys)
         for (key in keys)
-            gridRequire(isRowSelectable(key), "selected row is absent or not selectable")
+            gridRequire(
+                (isExternal && source.indexOfKey(key) == None) || isRowSelectable(key),
+                "selected row is absent or not selectable"
+            )
         selectionAnchor = None
         publishSelection(next)
     }
@@ -128,6 +247,8 @@ public class DataGridState<Row> public constructor(
                 last
             else
                 first
+        if (rows.unavailable(start, stop - start + 1L).size > 0L)
+            return false
         val targeted = HashSet<ViewKey>()
         val keys = ArrayList<ViewKey>()
         for (index in start .. stop) {
@@ -204,6 +325,10 @@ public class DataGridState<Row> public constructor(
     public val expandedRows: GridExpandedRows get() = computed.value.expanded
     public val treeData: GridTreeData<Row>? get() = computed.value.treeData
     public fun isContextRow(key: ViewKey): Boolean {
+        when (computed.value.external) {
+            case Some(val value) -> return value.item(GridRowKey.Data(key))?.contextOnly ?: false;
+            case None -> {}
+        }
         val tree = computed.value.tree ?: return false
         val node = tree.topology.positions[key] ?: return false
         return tree.matches.context(node)
@@ -218,6 +343,7 @@ public class DataGridState<Row> public constructor(
     }
     public fun setTreeData(value: GridTreeData<Row>?) {
         computed.checkMutation()
+        gridRequire(!isExternal, "external hierarchy is supplied by the application")
         val old = computed.value
         when ((old.treeData, value)) {
             case(None, None) -> return
@@ -237,6 +363,10 @@ public class DataGridState<Row> public constructor(
         notify(old.query, next.query)
     }
     internal fun canExpand(key: GridRowKey): Boolean {
+        when (computed.value.external) {
+            case Some(val value) -> return value.item(key)?.hasChildren ?: false;
+            case None -> {}
+        }
         return when (key) {
             case Group(val path) -> {
                 val groups = computed.value.groups ?: return false
@@ -258,16 +388,24 @@ public class DataGridState<Row> public constructor(
         if (!canExpand(key))
             return false
         setExpandedRows(old.expanded.changed(key, value))
+        if (value)
+            when ((computed.value.external?.item(key) ?: None)?.branch ?: None) {
+                case Some(val branch) -> externalController.load(GridExternalPosition(branch, 0L))
+                case None -> {}
+            }
         return true
     }
     public fun setExpandedRows(value: GridExpandedRows) {
         computed.checkMutation()
         val old = computed.value
         val checked =
-            when (old.tree) {
-                case Some(val tree) -> gridTreeExpansion(value, tree.topology)
-                case None -> value.forGrouping(old.query.grouping)
-            }
+            if (isExternal && old.treeMode)
+                gridExternalTreeExpansion(value)
+            else
+                when (old.tree) {
+                    case Some(val tree) -> gridTreeExpansion(value, tree.topology)
+                    case None -> value.forGrouping(old.query.grouping)
+                }
         gridRequire(
             checked.exceptions.size == value.exceptions.size,
             "expansion key does not match the current hierarchy"
@@ -293,6 +431,8 @@ public class DataGridState<Row> public constructor(
     public fun groupSelectableRows(path: GridGroupPath): Long {
         if (rowSelection != GridRowSelectionMode.Multiple)
             return 0L
+        if (isExternal)
+            return gridExternalGroupKeys(this, path)?.size ?: 0L
         val groups = computed.value.groups ?: return 0L
         val group = groups.topology.paths[path] ?: return 0L
         when (selectableGroups) {
@@ -307,6 +447,14 @@ public class DataGridState<Row> public constructor(
     public fun groupRowSelection(path: GridGroupPath): CheckState {
         if (rowSelection != GridRowSelectionMode.Multiple)
             return CheckState.Unchecked
+        if (isExternal) {
+            val keys = gridExternalGroupKeys(this, path) ?: return CheckState.Unchecked
+            var count = 0L
+            for (key in keys)
+                if (selectedRows.contains(key))
+                    count += 1L
+            return gridSelectionState(count, keys.size)
+        }
         val total = groupSelectableRows(path)
         val groups = computed.value.groups ?: return CheckState.Unchecked
         val group = groups.topology.paths[path] ?: return CheckState.Unchecked
@@ -324,6 +472,15 @@ public class DataGridState<Row> public constructor(
         selection.checkMutation()
         if (rowSelection != GridRowSelectionMode.Multiple)
             return false
+        if (isExternal) {
+            val keys = gridExternalGroupKeys(this, path) ?: return false
+            val targeted = HashSet<ViewKey>()
+            for (key in keys)
+                targeted.add(key)
+            changeSelection(targeted, keys, value)
+            selectionAnchor = None
+            return true
+        }
         val groups = computed.value.groups ?: return false
         val group = groups.topology.paths[path] ?: return false
         val start = groups.order.starts[group]
@@ -415,7 +572,7 @@ public class DataGridState<Row> public constructor(
     ): GridFindMatch? {
         val snapshot = computed.value
         return gridFindCell(
-            snapshot.result.rows,
+            snapshot.result.availableRows,
             snapshot.displayColumns,
             columnState,
             text,
@@ -507,7 +664,12 @@ public class DataGridState<Row> public constructor(
     public fun setExpandedDetails(keys: Array<ViewKey>) {
         computed.checkMutation()
         val old = computed.value
-        val next = GridDetailState(old.details.definition, keys).check(old.source)
+        val candidate = GridDetailState(old.details.definition, keys)
+        val next =
+            if (isExternal)
+                candidate
+            else
+                candidate.check(old.source)
         if (computed.value !== old)
             throw IllegalStateException(Some("准备详情期间模型已更新，请重试"))
         updateDetails(next)
@@ -538,7 +700,8 @@ public class DataGridState<Row> public constructor(
                 old.groups,
                 old.tree,
                 old.pivot,
-                value
+                value,
+                old.external
             )
         if (computed.value !== old)
             throw IllegalStateException(Some("准备详情期间模型已更新，请重试"))
@@ -555,8 +718,7 @@ public class DataGridState<Row> public constructor(
     public fun setPivot(value: GridPivot?) = setQuery(query.withPivot(value))
     public val columnState: Array<GridColumnState> get() = presentation.value
     public val headers: Array<GridHeaderNode> get() = headerTree.values
-    internal val headerTree: GridHeaders get() =
-        computed.value.pivot?.schema?.headers ?: headerState.value
+    internal val headerTree: GridHeaders get() = computed.value.resultHeaders ?: headerState.value
     public fun column(id: GridColumnId): GridColumn<Row> = computed.value.displayColumns.get(id)
     public fun filterValues(id: GridColumnId): GridFilterValues {
         computed.checkMutation()
@@ -566,10 +728,29 @@ public class DataGridState<Row> public constructor(
             case Some(val values) -> return values
             case None -> {}
         }
-        val values = collectGridFilterValues(source, definition)
+        val values =
+            when (external) {
+                case Some(val config) -> gridExternalFilterValues(config, query, definition)
+                case None -> collectGridFilterValues(source, definition)
+            }
         filterCandidates.put(id, values)
         return values
     }
+    internal fun filterOperations(id: GridColumnId): Array<GridFilterOperator>? =
+        when (external) {
+            case Some(val source) -> Some(gridExternalFilter(source, id)?.operations ?: [])
+            case None -> None
+        }
+    internal fun canFilter(id: GridColumnId): Boolean =
+        sourceColumn(id).filterable && (filterOperations(id)?.size ?: 1L) > 0L
+    internal fun firstFilterOperation(id: GridColumnId): GridFilterOperator =
+        when (filterOperations(id)) {
+            case Some(val values) -> {
+                gridRequire(values.size > 0L, "external column has no filter operations");
+                values[0L]
+            }
+            case None -> GridFilterOperator.Equal
+        }
     internal fun filterValuesCurrent(id: GridColumnId, values: GridFilterValues): Boolean {
         computed.value
         return when (filterCandidates[id]) {
@@ -605,6 +786,7 @@ public class DataGridState<Row> public constructor(
         for (observer in observers.toArray())
             if (!observer.closed)
                 observer.action()
+        externalController.synchronize()
     }
 
     public fun setQuery(value: GridQuery) {
@@ -714,6 +896,7 @@ public class DataGridState<Row> public constructor(
     }
     public fun replaceData(source: TableSource<Row>) {
         computed.checkMutation()
+        gridRequire(!isExternal, "external records are replaced by request completion or acceptRow")
         val old = computed.value
         if (source === old.source)
             return
@@ -800,12 +983,15 @@ public class DataGridState<Row> public constructor(
                 }
             )
         val nextStates =
-            when (next.pivot) {
-                case Some(val value) -> gridReconcileColumns(
+            when (next.resultHeaders) {
+                case Some(val resultHeaders) -> gridReconcileColumns(
                     presentation.value,
-                    value.schema.columns,
-                    value.schema.headers,
-                    gridPivotResetOrder(old, next, presentation.value)
+                    next.displayColumns,
+                    resultHeaders,
+                    if (isExternal)
+                        false
+                    else
+                        gridPivotResetOrder(old, next, presentation.value)
                 )
                 case None -> nextSourceStates
             }
@@ -848,7 +1034,8 @@ public class DataGridState<Row> public constructor(
         val old = computed.value
         if (old.pins.same(value))
             return
-        gridCheckPinnedRows(old.source, value)
+        if (!isExternal)
+            gridCheckPinnedRows(old.source, value)
         val next =
             gridCompute(
                 old.source,
@@ -933,12 +1120,12 @@ public class DataGridState<Row> public constructor(
             if (!old.pivotMode)
                 sourcePresentation = presentation.value
             val states =
-                when (next.pivot) {
-                    case Some(val value) -> gridReconcileColumns(
+                when (next.resultHeaders) {
+                    case Some(val headers) -> gridReconcileColumns(
                         presentation.value,
-                        value.schema.columns,
-                        value.schema.headers,
-                        gridPivotResetOrder(old, next, presentation.value)
+                        next.displayColumns,
+                        headers,
+                        !isExternal && gridPivotResetOrder(old, next, presentation.value)
                     )
                     case None -> gridReconcileColumns(
                         sourcePresentation,
@@ -953,6 +1140,8 @@ public class DataGridState<Row> public constructor(
         computed.value = next
     }
     private fun notify(old: GridQuery, next: GridQuery) {
+        if (isExternal && old != next)
+            filterCandidates.clear()
         changed()
         if (old == next)
             return

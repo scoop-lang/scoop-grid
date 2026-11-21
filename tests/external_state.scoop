@@ -1,0 +1,108 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+
+@Test
+private class GridExternalStateTest {
+    @Test
+    fun `restore retains remote identities and requests only the final declared query`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        val consumer = probe.attach(model)
+        val initial = probe.last
+        val saved =
+            GridViewState(
+                model.columnState,
+                query =
+                    GridQuery(
+                        sorting = [GridSort(GridColumnId("id"))],
+                        quickFilter = "remote",
+                        pagination = GridPagination.Page(7L, 2L)
+                    ),
+                pinnedRows = GridPinnedRows([ViewKey.Number(81L)]),
+                selectedRows = [ViewKey.Number(81L), ViewKey.Number(91L)]
+            )
+        val report = model.restoreViewState(saved)
+        assertEquals(0L, report.issues.size)
+        assertEquals(saved.query, model.query)
+        assertEquals(saved.query, probe.last.query)
+        assertEquals(externalRange(14L, 2L), probe.last.range)
+        assertEquals(2L, probe.requests.size)
+        assertEquals(1L, probe.notifications)
+        assertTrue(model.isRowSelected(ViewKey.Number(91L)))
+        assertFalse(initial.isActive)
+        model.restoreViewState(saved)
+        assertEquals(2L, probe.requests.size)
+        assertEquals(1L, probe.notifications)
+        consumer.close()
+    }
+
+    @Test
+    fun `undeclared filters are rejected or explicitly removed during restore`() {
+        val probe = ExternalProbe()
+        val source =
+            GridExternalSource<Long>(
+                {
+                    request ->
+                    probe.requests.add(request);
+                    None
+                },
+                filters = [GridExternalFilter(GridColumnId("id"), [GridFilterOperator.Greater])]
+            )
+        val model = DataGridState<Long>(columns = probe.columns(), external = Some(source))
+        val before = model.result
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(GridQuery(quickFilter = "undeclared"))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(
+                GridQuery(
+                    filter = GridFilter.Column(GridColumnId("id"), GridCondition.Missing(true))
+                )
+            )
+        }
+        assertTrue(before === model.result)
+        assertFalse(model.canFilter(GridColumnId("text")))
+        assertEquals(GridFilterOperator.Greater, model.firstFilterOperation(GridColumnId("id")))
+        val report =
+            model.restoreViewState(
+                GridViewState(
+                    model.columnState,
+                    GridQuery(
+                        filter = GridFilter.Column(GridColumnId("id"), GridCondition.Missing(true)),
+                        quickFilter = "undeclared"
+                    )
+                )
+            )
+        assertEquals(2L, report.issues.size)
+        assertEquals(GridFilter.All, model.query.filter)
+        assertEquals("", model.query.quickFilter)
+        assertEquals(0L, probe.requests.size)
+        assertFailsWith<IllegalArgumentException> { model.filterValues(GridColumnId("id")) }
+        assertFailsWith<IllegalArgumentException> {
+            DataGridState<Long>(
+                columns = probe.columns(),
+                external =
+                    Some(
+                        GridExternalSource<Long>(
+                            { _ -> None },
+                            filters =
+                                [GridExternalFilter(GridColumnId("id"), [GridFilterOperator.In])]
+                        )
+                    )
+            )
+        }
+    }
+
+    @Test
+    fun `position and range constructors reject actual boundaries`() {
+        assertFailsWith<IllegalArgumentException> { externalPosition(-1L) }
+        assertFailsWith<IllegalArgumentException> { externalRange(0L, 0L) }
+        assertFailsWith<IllegalArgumentException> { externalRange(Long.MAX_VALUE, 1L) }
+        assertFailsWith<IllegalArgumentException> {
+            externalPosition(0L, GridExternalBranch.Tree(ViewKey.Position))
+        }
+        assertEquals(Long.MAX_VALUE, externalRange(0L, Long.MAX_VALUE).end)
+    }
+}

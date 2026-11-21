@@ -30,6 +30,9 @@ private fun <Row> gridDelimited(
     headers: Boolean,
     terminalNewline: Boolean
 ): String {
+    val unavailable = rows.unavailable(0L, rows.count)
+    if (unavailable.size > 0L)
+        throw GridDataUnavailableException(unavailable)
     val exported = ArrayList<GridColumn<Row>>()
     for (column in columns)
         if (column.exportable)

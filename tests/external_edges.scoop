@@ -1,0 +1,122 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+
+@Test
+private class GridExternalEdgesTest {
+    @Test
+    fun `partial retries preserve the errors on the rest of a failed page`() {
+        val probe = ExternalProbe()
+        val model = probe.model(GridQuery(pagination = GridPagination.Page(0L, 6L)))
+        val consumer = probe.attach(model)
+        assertEquals(externalRange(0L, 6L), probe.last.range)
+        probe.last.fail("offline")
+        model.retryExternal(externalPosition(0L))
+        assertEquals(externalRange(0L, 2L), probe.last.range)
+        probe.last.complete(externalPage(0L, 2L, Some(6L)))
+        val missing = model.externalSnapshot!!.data(GridExternalBranch.Root)
+        assertEquals(1L, missing.failures.size)
+        assertEquals(externalRange(2L, 4L), missing.failures[0L].range)
+        model.loadExternal(externalPosition(3L))
+        assertEquals(2L, probe.requests.size)
+        model.retryExternal(externalPosition(4L))
+        probe.last.complete(externalPage(4L, 2L, Some(6L), true))
+        assertEquals(
+            externalRange(2L, 2L),
+            model.externalSnapshot!!.data(GridExternalBranch.Root).failures[0L].range
+        )
+        consumer.close()
+    }
+
+    @Test
+    fun `a synchronous out of range reply requests the actual final page once`() {
+        val probe = ExternalProbe()
+        val source =
+            GridExternalSource<Long>(
+                {
+                    request ->
+                    probe.requests.add(request)
+                    if (request.range.offset > 0L)
+                        request.complete(externalPage(0L, 0L, Some(2L), true))
+                    else
+                        request.complete(externalPage(0L, 2L, Some(2L), true))
+                    None
+                }
+            )
+        val model =
+            DataGridState<Long>(
+                columns = probe.columns(),
+                external = Some(source),
+                query = GridQuery(pagination = GridPagination.Page(7L, 2L))
+            )
+        val consumer = probe.attach(model)
+        assertEquals(2L, probe.requests.size)
+        assertEquals(GridPagination.Page(0L, 2L), model.query.pagination)
+        assertEquals(externalRange(0L, 2L), probe.last.range)
+        assertEquals(Some(ViewKey.Number(0L)), model.result.rows.infoAt(0L).dataKey)
+        consumer.close()
+    }
+
+    @Test
+    fun `cache eviction retains the ancestor path required by an active record`() {
+        val probe = ExternalProbe()
+        val model = probe.model(tree = true)
+        val consumer = probe.attach(model)
+        probe.last.complete(
+            GridExternalPage([externalItem(0L, true), externalItem(9L)], Some(2L), true)
+        )
+        model.setExpanded(GridRowKey.Data(ViewKey.Number(0L)), true)
+        probe.last.complete(externalPage(10L, 2L, Some(2L), true))
+        probe.retained.add(ViewKey.Number(10L))
+        model.evictExternal(externalRange(0L, 2L))
+        assertEquals(Some(1L), model.result.rows.indexOfKey(GridRowKey.Data(ViewKey.Number(10L))))
+        assertEquals(Some(0L), model.result.rows.indexOfKey(GridRowKey.Data(ViewKey.Number(0L))))
+        assertEquals(None, model.result.rows.indexOfKey(GridRowKey.Data(ViewKey.Number(9L))))
+        model.refreshExternal([ViewKey.Number(0L)])
+        assertEquals(0L, model.expandedRows.exceptions.size)
+        consumer.close()
+    }
+
+    @Test
+    fun `returned eligibility updates known selections while missing identities remain selected`() {
+        val probe = ExternalProbe()
+        val model =
+            DataGridState<Long>(
+                columns = probe.columns(),
+                external = Some(probe.source()),
+                rowSelection = GridRowSelectionMode.Multiple,
+                selectable = Some { row -> row % 2L == 0L }
+            )
+        model.setSelectedRows([ViewKey.Number(0L), ViewKey.Number(1L), ViewKey.Number(77L)])
+        val consumer = probe.attach(model)
+        probe.last.complete(externalPage(0L, 2L, Some(4L)))
+        assertTrue(model.isRowSelected(ViewKey.Number(0L)))
+        assertFalse(model.isRowSelected(ViewKey.Number(1L)))
+        assertTrue(model.isRowSelected(ViewKey.Number(77L)))
+        model.replaceExternalRow(ViewKey.Number(0L), 1L)
+        assertFalse(model.isRowSelected(ViewKey.Number(0L)))
+        assertTrue(model.isRowSelected(ViewKey.Number(77L)))
+        consumer.close()
+    }
+
+    @Test
+    fun `unloaded state transitions reuse row identity and sorted branch indexes`() {
+        val probe = ExternalProbe()
+        val model = probe.model()
+        val consumer = probe.attach(model)
+        probe.last.complete(externalPage(0L, 2L, Some(8L)))
+        val snapshot = model.externalSnapshot!!
+        model.loadExternal(externalPosition(4L))
+        val loading = model.externalSnapshot!!
+        assertTrue(snapshot.locations === loading.locations)
+        assertTrue(snapshot.children === loading.children)
+        assertTrue(
+            snapshot.data(GridExternalBranch.Root).indices ===
+                loading.data(GridExternalBranch.Root).indices
+        )
+        probe.last.fail("offline")
+        assertTrue(snapshot.locations === model.externalSnapshot!!.locations)
+        consumer.close()
+    }
+}

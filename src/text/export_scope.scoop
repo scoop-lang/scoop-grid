@@ -6,7 +6,7 @@ import scoop.ui.ViewKey
 import scoop.ui.component.TableSource
 
 public enum GridExportScope {
-    CurrentPage, SelectedRows, AllFiltered
+    CurrentPage, SelectedRows, AllFiltered, LoadedRows
 }
 
 public enum GridExportData {
@@ -80,6 +80,10 @@ private fun <Row> gridExportRows(
     selection: GridSelectedRows,
     options: GridCsvOptions
 ): GridRowSource<Row> {
+    when (snapshot.external) {
+        case Some(_) -> return gridExternalExportRows(snapshot, selection, options)
+        case None -> {}
+    }
     if (options.scope == GridExportScope.SelectedRows) {
         if (options.includePinnedRows)
             return GridDataRows(GridPickedRows(snapshot.source, selection.keys))

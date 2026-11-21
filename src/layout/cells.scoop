@@ -51,18 +51,16 @@ internal class GridRowCells<Row>(
         val column = columns.columns[columnIndex]
         val labelColumn =
             when (row) {
-                case Data(_, _) -> when (session.currentModel?.treeData ?: None) {
-                    case Some(val tree) -> {
-                        val preferred = tree.column
-                        val index =
-                            when (preferred) {
-                                case Some(val id) -> columns.indexOf(id) ?: 0L
-                                case None -> 0L
-                            }
-                        Some(columns.columns[spans.span(index).column].id)
-                    }
-                    case None -> None
-                }
+                case Data(_, _) -> if (session.currentModel?.isTree ?: false) {
+                    val preferred = session.currentModel?.treeColumn ?: None
+                    val index =
+                        when (preferred) {
+                            case Some(val id) -> columns.indexOf(id) ?: 0L
+                            case None -> 0L
+                        }
+                    Some(columns.columns[spans.span(index).column].id)
+                } else
+                    None
                 else -> row.labelColumn(columns.columns)
             }
         return component(

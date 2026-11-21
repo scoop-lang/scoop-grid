@@ -11,7 +11,8 @@ public class GridAggregationLabels public constructor(
     public val value: (String, String, String) -> String =
         { column, operation, value -> f"${column} · ${operation}：${value}" },
     public val missing: String = "—",
-    public val error: (String) -> String = { message -> f"计算错误：${message}" }
+    public val error: (String) -> String = { message -> f"计算错误：${message}" },
+    public val unknownRecords: String = "服务端聚合 · 记录总数未知"
 )
 
 public class GridAggregationSummaryProps<Row> public constructor(
@@ -31,7 +32,12 @@ public class GridAggregationSummary<Row> public constructor(
         val labels = input.labels
         return column {
             add(
-                aggregateLabel(labels.records(result.totalRows)) {
+                aggregateLabel(
+                    if (input.state.isExternal && (result.external?.recordTotal ?: None) == None)
+                        labels.unknownRecords
+                    else
+                        labels.records(result.totalRows)
+                ) {
                     fonts = input.fonts
                     theme = input.theme
                     semantics = ComponentSemantics(automationId = Some("grid-aggregate-count"))

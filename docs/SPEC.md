@@ -144,6 +144,24 @@ CSV 的 Records 范围仅包含匹配业务记录，Displayed 保留实际展开
 
 原生层级只为详情发布一条父表行，内容容器使用普通 Group，内部表格拥有自己的行。详情没有父网格的单元格地址，不参与单格编辑、矩形端点、查找、复制、统计或 CSV。行列浏览跳过详情，详情中的控件沿自身 Tab 顺序操作；父格上的 Alt＋Down 或 `handle.focusDetail(parent)` 定位已展开的详情，沿原惰性焦点路径进入首个实际控件，没有控件时聚焦详情容器。该定位同样先完成父网格的当前编辑，返回 true 表示请求已接受；实际显露和焦点等待 Accepted 帧。未被内部编辑器、输入法或弹层处理的 Escape 返回父格。跨过详情的单矩形仍只复制和统计实际数据格。保存／恢复包括展开 key 与以 Detail key 表示的阅读位置；不序列化 View 或内部子网格状态，最近单元格焦点不能指向详情。
 
+## 外部结果与区间加载
+
+外部模式由 `DataGridState(columns = ..., external = Some(GridExternalSource(...)))` 创建；本地 `source` 与外部来源不能同时提供记录。应用通过列定义声明排序、分组、透视和聚合能力，通过 `GridExternalFilter(column, operations, values)` 声明允许的筛选方式与完整候选，通过来源的 `quickFilter` 声明快速筛选。未声明的入口不显示或不可用，模型动作同样拒绝；校验只检查查询结构和类型，不在已加载记录上执行服务端查询。
+
+`GridExternalRequest<Row>` 提供完整查询、`GridExternalRange(branch, offset, count)` 与当前固定记录配置；分支为 Root、Group(path) 或 Tree(parentKey)。应用在原请求上调用 `complete(GridExternalPage<Row>)` 或 `fail(message)`，只能完成一次且须在 owner 线程执行。加载回调返回可选取消函数，可调用应用自己的 Job.cancel。查询替换、分支关闭和最后一个挂载结束使对应请求失效，并调用取消函数；迟到完成返回 false，不安装旧结果。同步完成同样支持，异常结果不发布半份状态。
+
+`GridExternalPage` 交付真实 `GridExternalItem<Row>`，每项为 Data／Group／Total 逻辑行以及明确的子项、路径上下文和可选完整组成员身份；不使用空业务 Row 代表组或汇总。`total` 是本分支的兄弟总数，None 表示未知，`end` 表示这段结果达到末端；非末段必须交齐请求条数。根结果可一起提供总计、匹配记录数、当前查询的固定记录和完整 `GridExternalColumns<Row>`。外部透视首次根结果必须提供结果列；列、行、聚合一次发布。聚合值通过 `gridProvidedAggregate<T>` 绑定列与操作，保留具体 T、格式化及精确数值操作；结果列不读取业务 Row。
+
+已知总数使用稀疏区间，远端元数据不会展开全部位置。未知总数只呈现已交付的有限前缀和一个后续加载入口，末端确认后收敛；各层分支分别计数。分页请求根页，展开后请求该分支，正文滚动按 Accepted 的可见范围与 overscan 请求缺失块。初始挂载及查询动作通过正常 owner 调度发起；测量、scene、draw、文字和原生元数据查询都不调用应用加载器。已有数据、在途请求和失败区间均不重复请求；失败只由明确的重试动作继续。
+
+未加载位置使用 `GridRowKey.Unloaded(GridExternalPosition)` 与 `GridLoadRow`，没有业务 key、单元格或编辑／选择资格。`DataGridHandle.focusPosition(position, column)` 保存当前查询中的定位意图，先沿普通惰性条目路径纵向显露加载行；真实行到达后解析为实际单元格并显露目标列。查询变化、外部焦点转移、取消和卸载结束旧意图。等待位置上的 Escape 取消定位并回到仍有效的原单元格，否则回网格入口。原生离屏读取只描述当前位置；显式 Realize／Reveal／Focus 可以沿实际准备和 Accepted 路径请求该位置。
+
+`GridResult.external` 明确给出已加载数、根总数／记录总数的已知性和本页是否还有后续；未知总数不显示为完整的零条结果。外部来源的完整记录数以 `external.recordTotal` 为准；没有完整计数时，普通 `totalRows` 仅反映缓存中可用的业务记录，不代表远端全集。查找只搜索当前呈现的已加载行，控件明确标注范围。集合候选仅使用应用提供的完整值。复制、统计和 CSV 先检查所请求的范围，缺口以 `GridDataUnavailableException` 携带具体区间或缺失业务 key 返回，不跳过缺口生成部分成功结果；系统复制将此转换为结构化 Unavailable 结果并保留剪贴板。CSV 的 LoadedRows 明确导出当前已加载记录／呈现行；AllFiltered 只有完整结果可得时可用。
+
+页／范围选择入口按实际覆盖标注“选择当前页”或“选择已加载行”。组全选只在全部成员身份及选择资格已知时启用。换页、过滤隐藏与 `evictExternal(range)` 不清除稳定 key 选择；缓存回收保留活动编辑、焦点、固定记录和在途定位所需的数据。`refreshExternal(deletedKeys)` 明确开始当前查询的新请求，并只按应用确认的删除 key 清理业务状态。
+
+外部单格提交使用 `GridCommit.acceptRow(row)` 更新原稳定 key 的应用确认记录；不在客户端猜测服务端的新排序／筛选位置。改变查询成员或顺序的保存由应用明确刷新结果。来源记录被刷新替换、列消失、禁用和卸载继续使用已有编辑生命周期；迟到保存不能重建已结束的 UI 会话。
+
 ## 视图状态保存与恢复
 
 `model.saveViewState()` 返回 `GridViewState`，保存当前列顺序／显隐／逻辑宽度／冻结、完整查询、固定行、业务行选择、展开配置和唯一矩形。它只含普通数据，没有来源、Row、View、回调、编辑草稿或在途请求；应用负责持久化。可显式附带 `readingPosition` 和 `focusedCell`。挂载后的 `handle.saveViewState(includePosition = true, includeFocus = true)` 可取得最近 Accepted 的阅读锚点及最近成功单元格，未挂载返回 None。

@@ -1,0 +1,103 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+
+internal class ExternalProbe {
+    val requests = ArrayList<GridExternalRequest<Long>>()
+    var cancelled = 0L
+    var reads = 0L
+    var forbidReads = false
+    var notifications = 0L
+    val retained = ArrayList<ViewKey>()
+    fun source(tree: Boolean = false): GridExternalSource<Long> =
+        GridExternalSource<Long>(
+            {
+                request ->
+                requests.add(request);
+                Some { cancelled += 1L }
+            },
+            blockSize = 2L,
+            quickFilter = true,
+            filters =
+                [
+                    GridExternalFilter(
+                        GridColumnId("id"),
+                        [GridFilterOperator.Equal, GridFilterOperator.Greater]
+                    )
+                ],
+            treeColumn =
+                if (tree)
+                    Some(GridColumnId("id"))
+                else
+                    None
+        )
+    fun columns(): Array<GridColumn<Long>> =
+        [
+            gridColumn<Long, Long>(
+                GridColumnId("id"),
+                "ID",
+                {
+                    value ->
+                    assertFalse(forbidReads, Some("external query evaluated a local record"))
+                    reads += 1L
+                    value
+                },
+                gridLongValues(),
+                groupable = true,
+                pivotable = true,
+                aggregations = [gridSumLongAggregation()]
+            ),
+            gridColumn<Long, String>(
+                GridColumnId("text"),
+                "Text",
+                { value -> f"记录 ${value}" },
+                gridTextValues()
+            )
+        ]
+    fun model(query: GridQuery = GridQuery(), tree: Boolean = false): DataGridState<Long> =
+        DataGridState<Long>(
+            columns = columns(),
+            query = query,
+            external = Some(source(tree)),
+            rowSelection = GridRowSelectionMode.Multiple,
+            onQueryChange = Some { _ -> notifications += 1L }
+        )
+    val last: GridExternalRequest<Long> get() = requests[requests.size - 1L]
+    fun attach(model: DataGridState<Long>): Closeable =
+        model.attachExternal {
+            Array<GridRowKey>(retained.size) { at -> GridRowKey.Data(retained[at]) }
+        }
+}
+
+internal fun externalPosition(
+    offset: Long,
+    branch: GridExternalBranch = GridExternalBranch.Root
+): GridExternalPosition = GridExternalPosition(branch, offset)
+
+internal fun externalRange(
+    offset: Long,
+    count: Long,
+    branch: GridExternalBranch = GridExternalBranch.Root
+): GridExternalRange = GridExternalRange(branch, offset, count)
+
+internal fun externalItem(value: Long, children: Boolean = false): GridExternalItem<Long> =
+    GridExternalItem(GridRow.Data(value, ViewKey.Number(value)), children)
+
+internal fun externalPage(
+    start: Long,
+    count: Long,
+    total: Long? = None,
+    end: Boolean = false
+): GridExternalPage<Long> =
+    GridExternalPage(
+        Array<GridExternalItem<Long>>(count) { index -> externalItem(start + index) },
+        total,
+        end
+    )
+
+internal fun externalAddress(value: Long, column: String = "id"): GridCellAddress =
+    GridCellAddress(ViewKey.Number(value), GridColumnId(column))
+
+internal fun externalPath(value: Long): GridGroupPath =
+    GridGroupPath([GridGroupPart(GridColumnId("id"), GridLiteral.Integer(value))])

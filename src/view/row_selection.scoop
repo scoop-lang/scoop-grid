@@ -97,7 +97,20 @@ internal class GridSelectionView<Row>(
                 theme = Some(view.theme)
                 semantics =
                     ComponentSemantics(
-                        name = Some(view.labels.selectPage),
+                        name =
+                            Some(
+                                if (
+                                    view.model.isExternal &&
+                                        (
+                                            view.model.query.pagination ==
+                                                GridPagination.Disabled ||
+                                                !(view.model.result.external?.pageComplete ?: false)
+                                        )
+                                )
+                                    view.labels.selectLoaded
+                                else
+                                    view.labels.selectPage
+                            ),
                         automationId = Some("grid-page-selection")
                     )
             }

@@ -92,7 +92,16 @@ public class GridPager<Row> public constructor(
                 else
                     labels.size
         val choices = ArrayList<Choice<GridPagination>>()
-        choices.add(Choice(ViewKey.Text("all"), GridPagination.Disabled, labels.all))
+        choices.add(
+            Choice(
+                ViewKey.Text("all"),
+                GridPagination.Disabled,
+                if (model.isExternal)
+                    labels.ranges
+                else
+                    labels.all
+            )
+        )
         var listed = false
         for (size in input.pageSizes) {
             val choice = GridPagination.Page(0L, size)
@@ -108,32 +117,35 @@ public class GridPager<Row> public constructor(
                 case Disabled -> {}
             }
         val status =
-            if (query.pagination == GridPagination.Disabled || result.pageCount == 0L)
-                if (treePages)
-                    labels.treeRoots(result.rootCount, result.totalRows)
-                else
-                    if (rootPages)
-                        labels.roots(result.rootCount, result.totalRows)
-                    else
-                        labels.rows(result.totalRows)
+            if (model.isExternal)
+                labels.loaded(result.external!!, page())
             else
-                if (treePages)
-                    labels.treeRootStatus(
-                        result.rootCount,
-                        result.totalRows,
-                        page(),
-                        result.pageCount
-                    )
+                if (query.pagination == GridPagination.Disabled || result.pageCount == 0L)
+                    if (treePages)
+                        labels.treeRoots(result.rootCount, result.totalRows)
+                    else
+                        if (rootPages)
+                            labels.roots(result.rootCount, result.totalRows)
+                        else
+                            labels.rows(result.totalRows)
                 else
-                    if (rootPages)
-                        labels.rootStatus(
+                    if (treePages)
+                        labels.treeRootStatus(
                             result.rootCount,
                             result.totalRows,
                             page(),
                             result.pageCount
                         )
                     else
-                        labels.status(result.totalRows, page(), result.pageCount)
+                        if (rootPages)
+                            labels.rootStatus(
+                                result.rootCount,
+                                result.totalRows,
+                                page(),
+                                result.pageCount
+                            )
+                        else
+                            labels.status(result.totalRows, page(), result.pageCount)
         return column {
             add(
                 queryRow {

@@ -16,8 +16,12 @@ internal fun <Row> gridRestoreDetails(
                 ViewKey.Position ||
                 !seen.add(key) ||
                 !previous.details.available ||
-                previous.source.indexOfKey(key) ==
-                None
+                (
+                    previous.external?.source?.blockSize ==
+                        None &&
+                        previous.source.indexOfKey(key) ==
+                        None
+                )
         )
             issues.add(GridRestoreIssue(GridStatePart.Detail(key), "详情重复、父记录已移除或未声明详情"))
         else

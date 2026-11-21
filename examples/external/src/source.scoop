@@ -1,0 +1,91 @@
+package scoop.grid.examples.external
+
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal struct InventoryRecord(val id: Long, val name: String, val quantity: Long)
+
+internal class InventoryTicket {
+    var cancelled = false
+}
+
+/** The application simulates a service with a complete dataset and ordinary local queries. */
+internal class InventoryService {
+    private var rows =
+        TableRows(
+            Array<TableRecord<InventoryRecord>>(2000L) {
+                index -> TableRecord(
+                    ViewKey.Number(index),
+                    InventoryRecord(index, f"商品 ${index + 1L}", index % 97L)
+                )
+            }
+        )
+    private var cachedQuery: GridQuery? = None
+    private var cachedResult: GridResult<InventoryRecord>? = None
+    fun result(query: GridQuery, columns: Array<GridColumn<InventoryRecord>>): GridResult<
+        InventoryRecord
+    > {
+        val all = query.withPagination(GridPagination.Disabled)
+        if (cachedQuery == Some(all))
+            return cachedResult!!
+        val value = DataGridState(rows, columns, all).result
+        cachedQuery = Some(all)
+        cachedResult = Some(value)
+        return value
+    }
+    fun save(record: InventoryRecord) {
+        val previous = rows
+        rows =
+            TableRows(
+                Array<TableRecord<InventoryRecord>>(previous.count) {
+                    index ->
+                    val key = previous.keyAt(index)
+                    TableRecord(
+                        key,
+                        if (key == ViewKey.Number(record.id))
+                            record
+                        else
+                            previous.rowAt(index)
+                    )
+                }
+            )
+        cachedQuery = None
+        cachedResult = None
+    }
+    fun page(
+        request: GridExternalRequest<InventoryRecord>,
+        columns: Array<GridColumn<InventoryRecord>>,
+        known: Boolean
+    ): GridExternalPage<InventoryRecord> {
+        val value = result(request.query, columns)
+        val start = request.range.offset
+        val remaining =
+            if (start < value.rows.count)
+                value.rows.count - start
+            else
+                0L
+        val count =
+            if (request.range.count < remaining)
+                request.range.count
+            else
+                remaining
+        val fixed = ArrayList<TableRecord<InventoryRecord>>()
+        for (keys in [request.pinnedRows.top, request.pinnedRows.bottom])
+            for (key in keys) {
+                val index = rows.indexOfKey(key) ?: continue
+                fixed.add(TableRecord(key, rows.rowAt(index)))
+            }
+        return GridExternalPage(
+            Array<GridExternalItem<InventoryRecord>>(count) {
+                index -> GridExternalItem(value.rows.rowAt(start + index))
+            },
+            if (known || start > value.rows.count)
+                Some(value.rows.count)
+            else
+                None,
+            start + count == value.rows.count || start > value.rows.count,
+            pinned = Some(TableRows(fixed.toArray()))
+        )
+    }
+}

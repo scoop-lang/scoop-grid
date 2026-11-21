@@ -1,0 +1,250 @@
+package scoop.grid
+
+import scoop.collections.*
+import scoop.math.min
+import scoop.math.max
+import scoop.text.*
+import scoop.ui.ViewKey
+
+private struct GridExternalSegment(
+    val branch: GridExternalBranch,
+    val start: Long,
+    val count: Long,
+    val level: Long
+)
+
+/** Loaded hierarchy nodes split sparse sibling ranges; gaps never become an array of rows. */
+internal class GridExternalRows<Row>(
+    val snapshot: GridExternalSnapshot<Row>,
+    rootStart: Long,
+    rootCount: Long,
+    private val expanded: GridExpandedRows
+): GridRowSource<Row> {
+    private val segments = ArrayList<GridExternalSegment>()
+    private val ends = ArrayList<Long>()
+    private val positions = HashMap<ViewKey, Long>()
+    private val loaded = ArrayList<Long>()
+    private var length = 0L
+    init {
+        val stack = ArrayList<GridExternalSegment>()
+        if (rootCount > 0L)
+            stack.add(GridExternalSegment(GridExternalBranch.Root, rootStart, rootCount, 0L))
+        while (stack.size > 0L) {
+            val visit = stack.removeAt(stack.size - 1L)
+            val data = snapshot.data(visit.branch)
+            val stop = visit.start + visit.count
+            var split = false
+            var at = data.lowerBound(visit.start)
+            while (at < data.indices.size && data.indices[at] < stop) {
+                val offset = data.indices[at]
+                val item = data.items[offset]!!
+                val child = item.branch
+                if (child?.parent != None && expanded.contains(item.row.key)) {
+                    append(
+                        GridExternalSegment(
+                            visit.branch,
+                            visit.start,
+                            offset - visit.start + 1L,
+                            visit.level
+                        )
+                    )
+                    if (offset + 1L < stop)
+                        stack.add(
+                            GridExternalSegment(
+                                visit.branch,
+                                offset + 1L,
+                                stop - offset - 1L,
+                                visit.level
+                            )
+                        )
+                    val next = child!!
+                    val count = snapshot.data(next).extent
+                    if (count > 0L)
+                        stack.add(GridExternalSegment(next, 0L, count, visit.level + 1L))
+                    split = true
+                    break
+                }
+                at += 1L
+            }
+            if (!split)
+                append(visit)
+        }
+    }
+    private fun append(segment: GridExternalSegment) {
+        gridRequire(
+            segment.count <= Long.MAX_VALUE - length,
+            "external flattened row count overflow"
+        )
+        val data = snapshot.data(segment.branch)
+        var at = data.lowerBound(segment.start)
+        while (at < data.indices.size && data.indices[at] - segment.start < segment.count) {
+            val offset = data.indices[at]
+            val item = data.items[offset]!!
+            val index = length + offset - segment.start
+            positions.put(item.row.key.viewKey, index)
+            loaded.add(index)
+            at += 1L
+        }
+        length += segment.count
+        segments.add(segment)
+        ends.add(length)
+    }
+    public override val count: Long get() = length
+    private fun segmentAt(index: Long): Long {
+        gridRequire(index >= 0L && index < count, "external row index is out of range")
+        var left = 0L
+        var right = ends.size
+        while (left < right) {
+            val middle = left + (right - left) / 2L
+            if (ends[middle] <= index)
+                left = middle + 1L
+            else
+                right = middle
+        }
+        return left
+    }
+    private fun beginning(at: Long): Long =
+        if (at == 0L)
+            0L
+        else
+            ends[at - 1L]
+    fun position(index: Long): GridExternalPosition {
+        val at = segmentAt(index)
+        val segment = segments[at]
+        return GridExternalPosition(segment.branch, segment.start + index - beginning(at))
+    }
+    fun indexOfPosition(value: GridExternalPosition): Long? {
+        for (at in 0L ..< segments.size) {
+            val segment = segments[at]
+            if (
+                segment.branch ==
+                    value.branch &&
+                    value.offset >=
+                    segment.start &&
+                    value.offset -
+                    segment.start <
+                    segment.count
+            )
+                return Some(beginning(at) + value.offset - segment.start)
+        }
+        return None
+    }
+    public override fun infoAt(index: Long): GridRowInfo {
+        val at = position(index)
+        val data = snapshot.data(at.branch)
+        return data.items[at.offset]?.row?.info ?:
+            GridRowInfo.Unloaded(GridLoadRow(at, data.state(at)))
+    }
+    public override fun rowAt(index: Long): GridRow<Row> {
+        val at = position(index)
+        val data = snapshot.data(at.branch)
+        return data.items[at.offset]?.row ?: GridRow.Unloaded(GridLoadRow(at, data.state(at)))
+    }
+    public override fun keyAt(index: Long): ViewKey = infoAt(index).key.viewKey
+    public override fun indexOfKey(key: ViewKey): Long? {
+        when (val loaded = positions[key]) {
+            case Some(_) -> return loaded;
+            case None -> {}
+        }
+        val text =
+            when (key) {
+                case Text(val value) -> value;
+                else -> return None
+            }
+        if (!text.startsWith("u"))
+            return None
+        for (at in 0L ..< segments.size) {
+            val segment = segments[at]
+            val prefix = f"u${segment.branch.encoded}:"
+            if (!text.startsWith(prefix))
+                continue
+            val offset = text.substring(prefix.charLength).toLongOrNone() ?: continue
+            if (offset < segment.start || offset - segment.start >= segment.count)
+                continue
+            if (snapshot.data(segment.branch).items.containsKey(offset))
+                return None
+            return Some(beginning(at) + offset - segment.start)
+        }
+        return None
+    }
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? {
+        val segment = segments[segmentAt(index)]
+        val at = position(index)
+        val item = snapshot.data(at.branch).items[at.offset]
+        val expansion =
+            when (item) {
+                case Some(val row) -> if (row.hasChildren)
+                    Some(expanded.contains(row.row.key))
+                else
+                    None
+                case None -> None
+            }
+        return if (snapshot.source.treeColumn != None || snapshot.query.grouping.size > 0L)
+            Some(
+                GridRowHierarchy(
+                    segment.level,
+                    segment.branch.parent,
+                    expansion,
+                    item?.contextOnly ?: false
+                )
+            )
+        else
+            None
+    }
+    public override fun unavailable(start: Long, count: Long): Array<GridExternalRange> {
+        gridRequire(
+            start >= 0L && count >= 0L && start <= this.count && count <= this.count - start,
+            "invalid external result range"
+        )
+        val result = ArrayList<GridExternalRange>()
+        if (count == 0L)
+            return []
+        var at = segmentAt(start)
+        while (at < segments.size && beginning(at) < start + count) {
+            val segment = segments[at]
+            val begin = max(start, beginning(at))
+            val end = min(start + count, ends[at])
+            val range =
+                GridExternalRange(
+                    segment.branch,
+                    segment.start + begin - beginning(at),
+                    end - begin
+                )
+            for (gap in snapshot.data(segment.branch).missing(range))
+                result.add(gap)
+            at += 1L
+        }
+        return result.toArray()
+    }
+    fun available(): GridRowSource<Row> = GridExternalAvailable(this, loaded.toArray())
+    fun records(): GridExternalRecords<Row> {
+        val result = ArrayList<(ViewKey, Row)>()
+        for (index in loaded)
+            when (rowAt(index)) {
+                case Data(val row, val key) -> {
+                    if (!(hierarchyAt(index)?.contextOnly ?: false))
+                        result.add((key, row))
+                }
+                else -> {}
+            }
+        return GridExternalRecords(result.toArray())
+    }
+}
+
+private class GridExternalAvailable<Row>(
+    private val source: GridRowSource<Row>,
+    private val indices: Array<Long>
+): GridRowSource<Row> {
+    private val positions = HashMap<ViewKey, Long>()
+    init {
+        for (at in 0L ..< indices.size)
+            positions.put(source.keyAt(indices[at]), at)
+    }
+    public override val count: Long get() = indices.size
+    public override fun infoAt(index: Long): GridRowInfo = source.infoAt(indices[index])
+    public override fun rowAt(index: Long): GridRow<Row> = source.rowAt(indices[index])
+    public override fun keyAt(index: Long): ViewKey = source.keyAt(indices[index])
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? =
+        source.hierarchyAt(indices[index])
+    public override fun indexOfKey(key: ViewKey): Long? = positions[key]
+}

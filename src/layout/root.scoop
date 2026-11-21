@@ -6,6 +6,8 @@ import scoop.math.min
 import scoop.surface.*
 import scoop.ui.*
 import scoop.ui.style.ThemeSource
+import scoop.window.LogicalKey
+import scoop.window.NamedKey
 
 internal class GridRootProps<Row>(
     val input: DataGridProps<Row>,
@@ -69,7 +71,10 @@ Element<GridRootLayout<Row>>(scope) {
         props.value.session.mount(scope, viewport)
         props.value.session.entry = Some(entry)
         scope.resource {
-            scope.input.observeActivity { props.value.session.editing.focusChanged() }
+            scope.input.observeActivity {
+                props.value.session.editing.focusChanged()
+                props.value.session.externalDriver.activity()
+            }
         }
     }
     public override fun update(): UiInvalidation {
@@ -177,6 +182,13 @@ Element<GridRootLayout<Row>>(scope) {
         if (context.phase != RoutedPhase.Default || !props.value.input.enabled)
             return
         when (event) {
+            case Keyboard(val key) -> if (
+                gridPlainKey(key) &&
+                    key.logicalKey ==
+                    LogicalKey.Named(NamedKey.Escape) &&
+                    props.value.session.externalDriver.escape()
+            )
+                context.consume()
             case Pointer(InputPointerEvent.Wheel(_, _, val phase, val momentum)) ->
             viewport.consumeScroll(
                 context,

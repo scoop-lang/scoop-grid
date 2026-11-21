@@ -1,0 +1,95 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+
+@Test
+private class GridExternalHierarchyTest {
+    @Test
+    fun `tree sibling counts are flattened only under open loaded parents`() {
+        val probe = ExternalProbe()
+        val model = probe.model(tree = true)
+        val consumer = probe.attach(model)
+        probe.last.complete(
+            GridExternalPage([externalItem(0L, true), externalItem(9L)], Some(2L), true)
+        )
+        val parent = GridRowKey.Data(ViewKey.Number(0L))
+        assertEquals(2L, model.result.rows.count)
+        assertTrue(model.setExpanded(parent, true))
+        val branch = GridExternalBranch.Tree(ViewKey.Number(0L))
+        assertEquals(externalRange(0L, 2L, branch), probe.last.range)
+        assertEquals(3L, model.result.rows.count)
+        val pending = probe.last
+        assertTrue(model.setExpanded(parent, false))
+        assertEquals(1L, probe.cancelled)
+        assertFalse(pending.complete(externalPage(10L, 2L, Some(100L))))
+        assertTrue(model.setExpanded(parent, true))
+        assertTrue(probe.last.complete(externalPage(10L, 2L, Some(100L))))
+        assertEquals(102L, model.result.rows.count)
+        assertEquals(Some(parent), model.result.rows.hierarchyAt(1L)!!.parent)
+        assertEquals(1L, model.result.rows.hierarchyAt(99L)!!.level)
+        assertEquals(Some(ViewKey.Number(9L)), model.result.rows.infoAt(101L).dataKey)
+        assertEquals(Some(2L), model.result.external!!.rootTotal)
+        assertEquals(None, model.result.external!!.recordTotal)
+        val requests = probe.requests.size
+        model.setExpanded(parent, false)
+        model.setExpanded(parent, true)
+        assertEquals(requests, probe.requests.size)
+        val missing = model.result.rows.unavailable(0L, model.result.rows.count)
+        assertEquals(1L, missing.size)
+        assertEquals(externalRange(2L, 98L, branch), missing[0L])
+        consumer.close()
+    }
+
+    @Test
+    fun `group selection requires complete known identities and selectable records`() {
+        val probe = ExternalProbe()
+        val model = probe.model(GridQuery(grouping = [GridColumnId("id")]))
+        val consumer = probe.attach(model)
+        val path = externalPath(7L)
+        val group = gridExternalGroup(path, "Same label", Some(2L))
+        probe.last.complete(
+            GridExternalPage(
+                [
+                    GridExternalItem<Long>(
+                        GridRow.Group(group),
+                        true,
+                        members = Some([ViewKey.Number(10L), ViewKey.Number(11L)])
+                    )
+                ],
+                Some(1L),
+                true
+            )
+        )
+        assertEquals(0L, model.groupSelectableRows(path))
+        assertFalse(model.selectGroupRows(path, true))
+        assertTrue(model.setExpanded(GridRowKey.Group(path), true))
+        assertEquals(GridExternalBranch.Group(path), probe.last.range.branch)
+        probe.last.complete(externalPage(10L, 2L, Some(2L), true))
+        assertEquals(2L, model.groupSelectableRows(path))
+        assertTrue(model.selectGroupRows(path, true))
+        assertTrue(model.isRowSelected(ViewKey.Number(10L)))
+        assertTrue(model.isRowSelected(ViewKey.Number(11L)))
+        model.setExpanded(GridRowKey.Group(path), false)
+        assertEquals(2L, model.groupSelectableRows(path))
+        consumer.close()
+    }
+
+    @Test
+    fun `unicode tree keys round trip through sparse unloaded positions`() {
+        val probe = ExternalProbe()
+        val model = probe.model(tree = true)
+        val consumer = probe.attach(model)
+        val key = ViewKey.Text("父亲🙂:1")
+        probe.last.complete(
+            GridExternalPage([GridExternalItem(GridRow.Data(8L, key), true)], Some(1L), true)
+        )
+        model.setExpanded(GridRowKey.Data(key), true)
+        val position = externalPosition(0L, GridExternalBranch.Tree(key))
+        val row = GridRowKey.Unloaded(position)
+        assertEquals(row, model.result.rows.infoAt(1L).key)
+        assertEquals(Some(1L), model.result.rows.indexOfKey(row))
+        assertTrue(row.viewKey != GridRowKey.Data(row.viewKey).viewKey)
+        consumer.close()
+    }
+}

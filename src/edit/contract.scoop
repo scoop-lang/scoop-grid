@@ -49,7 +49,8 @@ public class GridChange<Row, T> internal constructor(
 public class GridCommit<Row> internal constructor(
     private val available: () -> Boolean,
     private val accepted: (TableSource<Row>) -> Boolean,
-    private val rejected: (String) -> Boolean
+    private val rejected: (String) -> Boolean,
+    private val acceptedRow: ((Row) -> Boolean)? = None
 ) {
     private val guard = state(Unit)
     private var resolved = false
@@ -71,6 +72,16 @@ public class GridCommit<Row> internal constructor(
             return false
         resolved = true
         return rejected(message)
+    }
+    /** Installs the application-confirmed record under the original external business key. */
+    public fun acceptRow(row: Row): Boolean {
+        guard.checkMutation()
+        if (!isActive)
+            return false
+        val accept =
+            acceptedRow ?: throw IllegalStateException(Some("acceptRow requires external results"))
+        resolved = true
+        return accept(row)
     }
     internal fun invalidate() {
         resolved = true

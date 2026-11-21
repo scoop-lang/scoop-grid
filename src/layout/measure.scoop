@@ -33,8 +33,8 @@ internal fun <Row> gridMeasureRows(
         var scroll = viewport.layout(size, content)
         val old = scroll.snapshot.offset
         var adjusted: Point? = None
-        when (input.session.preparing) {
-            case Some(val target) -> when (input.rows.indexOfKey(target.row)) {
+        when (input.session.bodyFocus?.pendingItem ?: None) {
+            case Some(val key) -> when (input.rows.indexOfKey(key)) {
                 case Some(val index) -> {
                     val top = bands.bodyPosition(index)
                     val height = rows.index.extent(index)
@@ -50,11 +50,14 @@ internal fun <Row> gridMeasureRows(
                                 else
                                     old.y
                     val x =
-                        when (input.columns.indexOf(target.column)) {
-                            case Some(val at) -> {
-                                val span =
-                                    input.rows.spansFor(input.rows.source.rowAt(index)).span(at)
-                                columns.reveal(span.column, old.x, span.count)
+                        when (input.session.preparing) {
+                            case Some(val target) -> when (input.columns.indexOf(target.column)) {
+                                case Some(val at) -> {
+                                    val span =
+                                        input.rows.spansFor(input.rows.source.rowAt(index)).span(at)
+                                    columns.reveal(span.column, old.x, span.count)
+                                }
+                                case None -> old.x
                             }
                             case None -> old.x
                         }
@@ -63,7 +66,7 @@ internal fun <Row> gridMeasureRows(
                 case None -> {}
             }
             case None -> when (
-                if (input.session.requested == None)
+                if (!input.session.pending)
                     anchor
                 else
                     None
@@ -79,7 +82,7 @@ internal fun <Row> gridMeasureRows(
                 case None -> {}
             }
         }
-        if (restored != None && input.session.requested == None) {
+        if (restored != None && !input.session.pending) {
             val value = restored!!
             adjusted =
                 Some(

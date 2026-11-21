@@ -1,0 +1,254 @@
+package scoop.grid
+
+import scoop.ui.*
+
+public struct GridPositionTarget(
+    val position: GridExternalPosition,
+    val column: GridColumnId
+): Equals<GridPositionTarget> {
+    public override operator fun equals(other: GridPositionTarget): Boolean =
+        position == other.position && column == other.column
+}
+
+private class GridExternalIntent(
+    val epoch: GridExternalEpoch,
+    val target: GridPositionTarget,
+    val anchor: GridCellAddress?,
+    val origin: GridCellAddress?
+)
+
+private class GridExternalBinding<Row>(val model: DataGridState<Row>, val scope: ComponentScope) {
+    var consumer: Closeable? = None
+    var observation: Closeable? = None
+    var closed = false
+    fun close() {
+        closed = true
+        observation?.close()
+        observation = None
+        consumer?.close()
+        consumer = None
+    }
+}
+
+/** Layout records demand, and accepted owner callbacks deliver it to the application. */
+internal class GridExternalDriver<Row>(private val session: GridSession<Row>) {
+    private var binding: GridExternalBinding<Row>? = None
+    private val intent = state<GridExternalIntent?>(None)
+    val pending: GridPositionTarget? get() = intent.value?.target
+    fun update(model: DataGridState<Row>, scope: ComponentScope) {
+        when (binding) {
+            case Some(val value) -> if (value.model === model)
+                return;
+            case None -> {}
+        }
+        close()
+        if (!model.isExternal)
+            return
+        val value = GridExternalBinding(model, scope)
+        binding = Some(value)
+        scope.application.proxy().post {
+            _ -> if (!value.closed && scope.isMounted)
+                scope.dispatch {
+                    value.observation = Some(model.observe { changed() })
+                    value.consumer = Some(model.attachExternal { retained() })
+                }
+        }
+    }
+    private fun retained(): Array<GridRowKey> {
+        val keys = ArrayList<GridRowKey>()
+        for (address in [session.focused, session.editingCell, session.requested])
+            when (address?.row) {
+                case Some(val key) -> keys.add(key);
+                case None -> {}
+            }
+        when (val request = intent.value) {
+            case Some(val target) -> {
+                when (target.origin) {
+                    case Some(val address) -> keys.add(address.row);
+                    case None -> {}
+                }
+                when (target.target.position.branch.parent) {
+                    case Some(val parent) -> keys.add(parent);
+                    case None -> {}
+                }
+                val snapshot = binding?.model?.externalSnapshot ?: None
+                val item =
+                    snapshot?.data(target.target.position.branch)?.items?.get(
+                        target.target.position.offset
+                    ) ?:
+                        None
+                when (item?.row?.key) {
+                    case Some(val key) -> keys.add(key);
+                    case None -> {}
+                }
+            }
+            case None -> {}
+        }
+        return keys.toArray()
+    }
+    private fun changed() {
+        val request = intent.value ?: return
+        val model = binding?.model ?: return
+        val snapshot = model.externalSnapshot ?: return
+        if (
+            snapshot.epoch !==
+                request.epoch ||
+                !snapshot.open(request.target.position.branch, model.expandedRows)
+        ) {
+            session.cancel()
+            return
+        }
+        if (
+            snapshot.data(request.target.position.branch).items.containsKey(
+                request.target.position.offset
+            ) &&
+                session.hasGridFocus &&
+                session.focused ==
+                None
+        )
+            session.entry?.requestFocus()
+    }
+    fun focus(
+        position: GridExternalPosition,
+        column: GridColumnId,
+        anchor: GridCellAddress? = None
+    ): Boolean {
+        val value = binding ?: return false
+        val model = value.model
+        val snapshot = model.externalSnapshot ?: return false
+        if (
+            !session.active ||
+                !session.enabled ||
+                !session.inputEnabled ||
+                !model.visibleColumn(column) ||
+                value.closed ||
+                !snapshot.open(position.branch, model.expandedRows)
+        )
+            return false
+        val data = snapshot.data(position.branch)
+        if (position.offset >= data.extent)
+            return false
+        when (session.commitEdit()) {
+            case NoEdit -> {};
+            case Committed -> {};
+            else -> return false
+        }
+        val latest = model.externalSnapshot ?: return false
+        if (!session.usesModel(model) || latest.epoch !== snapshot.epoch)
+            return false
+        when (data.items[position.offset]) {
+            case Some(val item) -> {
+                val address = GridCellAddress(item.row.key, column)
+                if (model.result.rows.indexOfKey(item.row.key) == None)
+                    return false
+                if (anchor != None)
+                    model.setCellRange(Some(GridCellRange(anchor!!, address)))
+                return session.focus(address)
+            }
+            case None -> {}
+        }
+        if (model.result.rows.indexOfKey(GridRowKey.Unloaded(position)) == None)
+            return false
+        val origin = session.focused
+        session.cancel()
+        session.entry?.requestFocus()
+        intent.value =
+            Some(
+                GridExternalIntent(
+                    snapshot.epoch,
+                    GridPositionTarget(position, column),
+                    anchor,
+                    origin
+                )
+            )
+        session.bodyFocus?.requestFocus(GridRowKey.Unloaded(position).viewKey)
+        if (!model.loadExternal(position)) {
+            cancel();
+            return false
+        }
+        return true
+    }
+    fun accept(plan: GridMeasurePlan, input: GridRootProps<Row>) {
+        val value = binding ?: return
+        if (
+            value.closed ||
+                !session.enabled ||
+                input.input.state !==
+                value.model ||
+                input.rows.source !==
+                value.model.result.rows
+        )
+            return
+        changed()
+        when (intent.value) {
+            case Some(val request) -> {
+                val position = request.target.position
+                val snapshot = value.model.externalSnapshot!!
+                when (snapshot.data(position.branch).items[position.offset]) {
+                    case Some(val item) -> {
+                        val address = GridCellAddress(item.row.key, request.target.column)
+                        if (value.model.result.rows.indexOfKey(item.row.key) != None) {
+                            intent.value = None
+                            when (request.anchor) {
+                                case Some(val anchor) -> value.model.setCellRange(
+                                    Some(GridCellRange(anchor, address))
+                                );
+                                case None -> {}
+                            }
+                            session.requestCell(address)
+                        } else
+                            cancel()
+                    }
+                    case None -> {}
+                }
+            }
+            case None -> {}
+        }
+        for (
+            index in plan.bands.visible(
+                plan.scroll.presentationOffset.y,
+                plan.overscan,
+                plan.columns.viewport
+            )
+        ) {
+            if (input.rows.source !== value.model.result.rows)
+                break
+            when (input.rows.source.infoAt(index)) {
+                case Unloaded(val load) -> value.model.loadExternal(load.position)
+                else -> {}
+            }
+        }
+    }
+    fun activity() {
+        if (intent.value?.target == None)
+            return
+        if (!session.hasGridFocus || session.focused != None)
+            cancel()
+    }
+    fun cancel() {
+        intent.value = None
+    }
+    fun escape(): Boolean {
+        val request = intent.value ?: return false
+        session.cancel()
+        val model = binding?.model ?: return true
+        when (request.origin) {
+            case Some(val address) -> if (
+                model.result.rows.indexOfKey(address.row) !=
+                    None &&
+                    model.visibleColumn(address.column)
+            ) {
+                session.requestCell(address)
+                return true
+            }
+            case None -> {}
+        }
+        session.entry?.requestFocus()
+        return true
+    }
+    fun close() {
+        cancel()
+        binding?.close()
+        binding = None
+    }
+}

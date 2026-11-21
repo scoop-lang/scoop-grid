@@ -126,6 +126,7 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
                 case Group(_) -> return false
                 case Total(_) -> return false
                 case Detail(_, _) -> return false
+                case Unloaded(_) -> return false
             }
         if (!editing.editable(row) || !session.independent(row, column.id))
             return false
@@ -178,6 +179,7 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
                 case Group(_) -> return None
                 case Total(_) -> return None
                 case Detail(_, _) -> return None
+                case Unloaded(_) -> return None
             }
         if (!editing.editable(row) || !session.independent(row, column.id))
             return None
@@ -317,7 +319,11 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
                     GridCommit<Row>(
                         { owns(edit) && edit.submitting },
                         { source -> accept(edit, source, after) },
-                        { message -> reject(edit, message) }
+                        { message -> reject(edit, message) },
+                        if (model!!.isExternal)
+                            Some { row -> acceptRow(edit, row, after) }
+                        else
+                            None
                     )
                 try {
                     apply(completion)
@@ -347,6 +353,25 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
         accepting = true
         try {
             model!!.replaceData(source)
+        } catch (error: Throwable) {
+            if (owns(edit))
+                edit.status.value = GridDraftStatus.Ready
+            throw error
+        } finally {
+            accepting = false
+        }
+        if (!owns(edit))
+            return false
+        finish(edit, GridEditEndReason.Accepted, restoreAfter(after))
+        after?.invoke()
+        return true
+    }
+    private fun acceptRow(edit: GridActiveEdit<Row>, row: Row, after: (() -> Unit)?): Boolean {
+        if (!owns(edit) || !edit.submitting)
+            return false
+        accepting = true
+        try {
+            model!!.replaceExternalRow(edit.address.row.dataKey!!, row)
         } catch (error: Throwable) {
             if (owns(edit))
                 edit.status.value = GridDraftStatus.Ready

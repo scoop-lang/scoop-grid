@@ -380,12 +380,14 @@ internal class RangeProbe: Closeable {
         when (result) {
             case Copied -> {}
             case Rejected(val reason) -> fail(Some(reason))
+            case Unavailable(val error) -> fail(error.message)
         }
     }
     fun rejected(result: GridCopyResult) {
         when (result) {
             case Rejected(_) -> {}
             case Copied -> fail(Some("unexpected copy success"))
+            case Unavailable(val error) -> fail(error.message)
         }
     }
     public override fun close() {

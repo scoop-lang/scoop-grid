@@ -19,12 +19,18 @@ internal fun <Row> gridRestoreView(
     selectable: ((Row) -> Boolean)?
 ): GridRestoredView<Row> {
     val issues = ArrayList<GridRestoreIssue>()
+    val external = previous.external?.source
+    val retainMissing =
+        when (external) {
+            case Some(_) -> true;
+            case None -> false
+        }
     val pins =
         GridPinnedRows(
-            gridRestorePins(saved.pinnedRows.top, previous.source, issues),
-            gridRestorePins(saved.pinnedRows.bottom, previous.source, issues)
+            gridRestorePins(saved.pinnedRows.top, previous.source, issues, retainMissing),
+            gridRestorePins(saved.pinnedRows.bottom, previous.source, issues, retainMissing)
         )
-    val query = gridRestoreQuery(saved.query, previous.columns, issues, previous.treeMode)
+    val query = gridRestoreQuery(saved.query, previous.columns, issues, previous.treeMode, external)
     val expanded =
         when (previous.tree) {
             case Some(val tree) -> gridTreeExpansion(
@@ -32,7 +38,10 @@ internal fun <Row> gridRestoreView(
                 tree.topology,
                 Some(issues)
             )
-            case None -> gridRestoreExpansion(saved.expandedRows, query.grouping, issues)
+            case None -> if (retainMissing && previous.treeMode)
+                gridExternalTreeExpansion(saved.expandedRows, Some(issues))
+            else
+                gridRestoreExpansion(saved.expandedRows, query.grouping, issues)
         }
     val next =
         gridCompute(
@@ -45,14 +54,21 @@ internal fun <Row> gridRestoreView(
             previous.treeData,
             Some(gridRestoreDetails(saved.expandedDetails, previous, issues))
         )
-    val nextHeaders = next.pivot?.schema?.headers ?: headers
+    val nextHeaders = next.resultHeaders ?: headers
     val defaults = gridReconcileColumns(presentation, next.displayColumns, nextHeaders)
     val states =
         gridRestoreColumns(saved.columns, defaults, next.displayColumns, nextHeaders, issues)
     if (next.query.pagination != query.pagination)
         issues.add(GridRestoreIssue(GridStatePart.Pagination, "页码已按恢复后的结果调整"))
     val selected =
-        gridRestoreSelection(saved.selectedRows, previous.source, selectionMode, selectable, issues)
+        gridRestoreSelection(
+            saved.selectedRows,
+            next.source,
+            selectionMode,
+            selectable,
+            issues,
+            retainMissing
+        )
     val range =
         when (saved.cellRange) {
             case Some(val value) -> {
@@ -109,11 +125,12 @@ internal fun <Row> gridRestoreView(
 private fun <Row> gridRestorePins(
     keys: Array<ViewKey>,
     source: TableSource<Row>,
-    issues: ArrayList<GridRestoreIssue>
+    issues: ArrayList<GridRestoreIssue>,
+    retainMissing: Boolean
 ): Array<ViewKey> {
     val kept = ArrayList<ViewKey>()
     for (key in keys) {
-        if (source.indexOfKey(key) == None)
+        if (!retainMissing && source.indexOfKey(key) == None)
             issues.add(GridRestoreIssue(GridStatePart.PinnedRow(key), "固定记录已移除"))
         else
             kept.add(key)
@@ -126,7 +143,8 @@ private fun <Row> gridRestoreSelection(
     source: TableSource<Row>,
     mode: GridRowSelectionMode,
     selectable: ((Row) -> Boolean)?,
-    issues: ArrayList<GridRestoreIssue>
+    issues: ArrayList<GridRestoreIssue>,
+    retainMissing: Boolean
 ): GridSelectedRows {
     val kept = ArrayList<ViewKey>()
     val seen = HashSet<ViewKey>()
@@ -136,15 +154,14 @@ private fun <Row> gridRestoreSelection(
             key ==
                 ViewKey.Position ||
                 !seen.add(key) ||
-                index ==
-                None ||
+                (!retainMissing && index == None) ||
                 mode ==
                 GridRowSelectionMode.Disabled ||
                 (mode == GridRowSelectionMode.Single && kept.size > 0L)
         if (invalid) {
             issues.add(GridRestoreIssue(GridStatePart.SelectedRow(key), "选择重复、记录已移除或不符合当前选择模式"))
         } else
-            if (selectable?.invoke(source.rowAt(index!!)) ?: true) {
+            if (index == None || (selectable?.invoke(source.rowAt(index!!)) ?: true)) {
                 kept.add(key)
             } else {
                 issues.add(GridRestoreIssue(GridStatePart.SelectedRow(key), "记录当前不可选择"))
