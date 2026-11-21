@@ -18,7 +18,9 @@ public class DataGridState<Row> public constructor(
     private val selectable: ((Row) -> Boolean)? = None,
     public val onSelectionChange: ((Array<ViewKey>) -> Unit)? = None,
     expandedRows: GridExpandedRows = GridExpandedRows(),
-    treeData: GridTreeData<Row>? = None
+    treeData: GridTreeData<Row>? = None,
+    details: GridDetails<Row>? = None,
+    expandedDetails: Array<ViewKey> = []
 ) {
     private val computed =
         state(
@@ -29,7 +31,8 @@ public class DataGridState<Row> public constructor(
                 None,
                 gridCheckPinnedRows(source, pinnedRows),
                 expandedRows,
-                treeData
+                treeData,
+                Some(GridDetailState(details, expandedDetails).check(source))
             )
         )
     private val headerState =
@@ -452,7 +455,8 @@ public class DataGridState<Row> public constructor(
             cellRange,
             readingPosition,
             focusedCell,
-            expandedRows
+            expandedRows,
+            expandedDetails
         )
     public fun restoreViewState(value: GridViewState): GridRestoreReport {
         computed.checkMutation()
@@ -487,6 +491,60 @@ public class DataGridState<Row> public constructor(
         if (!gridArrayEqual(priorSelection.keys, next.selectedRows))
             onSelectionChange?.invoke(next.selectedRows)
         return restored.report
+    }
+    public val details: GridDetails<Row>? get() = computed.value.details.definition
+    public val expandedDetails: Array<ViewKey> get() = computed.value.details.keys
+    public fun isDetailExpanded(key: ViewKey): Boolean = computed.value.details.contains(key)
+    public fun setDetails(value: GridDetails<Row>?) {
+        computed.checkMutation()
+        val keys =
+            when (value) {
+                case Some(_) -> expandedDetails
+                case None -> []
+            }
+        updateDetails(GridDetailState(value, keys))
+    }
+    public fun setExpandedDetails(keys: Array<ViewKey>) {
+        computed.checkMutation()
+        val old = computed.value
+        val next = GridDetailState(old.details.definition, keys).check(old.source)
+        if (computed.value !== old)
+            throw IllegalStateException(Some("准备详情期间模型已更新，请重试"))
+        updateDetails(next)
+    }
+    public fun setDetailExpanded(key: ViewKey, value: Boolean): Boolean {
+        computed.checkMutation()
+        val old = computed.value
+        if (!old.details.available || key == ViewKey.Position || old.source.indexOfKey(key) == None)
+            return false
+        if (computed.value !== old)
+            throw IllegalStateException(Some("准备详情期间模型已更新，请重试"))
+        updateDetails(old.details.changed(key, value))
+        return true
+    }
+    private fun updateDetails(value: GridDetailState<Row>) {
+        val old = computed.value
+        if (old.details.same(value))
+            return
+        val next =
+            GridComputed(
+                old.source,
+                old.columns,
+                old.query,
+                old.baseResult,
+                old.pins,
+                old.filtered,
+                old.expanded,
+                old.groups,
+                old.tree,
+                old.pivot,
+                value
+            )
+        if (computed.value !== old)
+            throw IllegalStateException(Some("准备详情期间模型已更新，请重试"))
+        publishComputed(next)
+        clearCellRange()
+        changed()
     }
     public val result: GridResult<Row> get() = computed.value.result
     public val pinnedRows: GridPinnedRows get() = computed.value.pins

@@ -1,0 +1,194 @@
+package scoop.grid.examples.details
+
+import scoop.collections.HashMap
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as detailColumn
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+
+private struct Order(val id: Long, val customer: String, val region: String, val status: String)
+
+private class DetailExample(scope: ComponentScope): Component(scope) {
+    private val cards = HashMap<Long, OrderDetail>()
+    private val handle = DataGridHandle()
+    private val rows =
+        TableRows(
+            Array<TableRecord<Order>>(24L) {
+                index -> TableRecord(
+                    ViewKey.Number(index),
+                    Order(
+                        index,
+                        f"客户 ${index + 1L}",
+                        if (index % 2L == 0L)
+                            "华东"
+                        else
+                            "华南",
+                        if (index % 3L == 0L)
+                            "备货中"
+                        else
+                            "配送中"
+                    )
+                )
+            }
+        )
+    private val model =
+        DataGridState(
+            rows,
+            [
+                gridColumn<Order, Long>(
+                    GridColumnId("id"),
+                    "订单号",
+                    { row -> row.id + 10001L },
+                    gridLongValues(),
+                    TableColumnSize(GridTrack.Fixed(130.0))
+                ),
+                gridColumn<Order, String>(
+                    GridColumnId("customer"),
+                    "客户与明细",
+                    { row -> row.customer },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fraction(1.0))
+                ),
+                gridColumn<Order, String>(
+                    GridColumnId("region"),
+                    "区域",
+                    { row -> row.region },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(130.0)),
+                    groupable = true
+                ),
+                gridColumn<Order, String>(
+                    GridColumnId("status"),
+                    "状态",
+                    { row -> row.status },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(150.0))
+                )
+            ],
+            GridQuery(pagination = GridPagination.Page(0L, 10L)),
+            rowSelection = GridRowSelectionMode.Multiple,
+            details =
+                Some(
+                    GridDetails(
+                        { row -> detail(row.id).view() },
+                        Some(GridColumnId("customer")),
+                        "交付明细"
+                    )
+                ),
+            expandedDetails = [ViewKey.Number(0L)]
+        )
+    private fun detail(id: Long): OrderDetail {
+        when (val old = cards[id]) {
+            case Some(val value) -> return value;
+            case None -> {}
+        }
+        val next = OrderDetail(id)
+        cards.put(id, next)
+        return next
+    }
+    public override fun render(): View {
+        val example = this
+        val model = this.model
+        val handle = this.handle
+        val theme = currentThemeSource().read(scope)
+        val pinned = model.pinnedRows.top.size > 0L
+        return styled(
+            row {
+                item(
+                    detailColumn {
+                        label("订单工作台 · 主从详情")
+                        label("Alt＋Enter 展开或收起，Alt＋↓ 进入详情；Escape 返回父行")
+                        row {
+                            button(
+                                "展开首单",
+                                {
+                                    handle.setDetailExpanded(ViewKey.Number(0L), true);
+                                    Unit
+                                }
+                            )
+                            button(
+                                "进入首单详情",
+                                {
+                                    handle.focusDetail(ViewKey.Number(0L));
+                                    Unit
+                                }
+                            )
+                            button("收起全部", { model.setExpandedDetails([]) })
+                            button(
+                                if (pinned)
+                                    "解除首单固定"
+                                else
+                                    "固定首单",
+                                {
+                                    handle.pinRow(
+                                        ViewKey.Number(0L),
+                                        if (pinned)
+                                            GridRowPin.None
+                                        else
+                                            GridRowPin.Top
+                                    )
+                                    Unit
+                                }
+                            )
+                            spacing = 6.0
+                        }
+                        add(gridQuickFilter(model) { this.handle = Some(handle) })
+                        add(
+                            dataGrid(model) {
+                                this.handle = Some(handle)
+                                height = 500.0;
+                                rowHeight = 42.0;
+                                selectionCheckboxes = true
+                                labels = GridLabels(name = "订单与交付详情")
+                            }
+                        )
+                        add(
+                            gridPager(model) {
+                                this.handle = Some(handle);
+                                pageSizes = [5L, 10L, 24L]
+                            }
+                        )
+                        label(
+                            f"${model.result.totalRows} 条订单 · 当前呈现 ${model.result.detailCount} 个详情"
+                        )
+                        spacing = 10.0
+                    }
+                ) { grow = 1.0 }
+                frame(gridColumnsPanel(model, handle) { height = 610.0 }) { width = Some(290.0) }
+                spacing = 18.0;
+                padding = Insets.all(12.0);
+                alignment = CrossAlignment.Start
+            }
+        ) { style { background = Some(Paint(theme.tokens.palette.background.background)) } }
+    }
+}
+
+fun main() {
+    context(ThemeSource(shadcnTheme())) {
+        UiHost(onRootError = { _, error -> throw error }) {
+            host,
+            active,
+            event -> when (event) {
+                case Resumed -> host.attach(
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid — Order details";
+                            size = LogicalSize(1260.0, 840.0)
+                        }
+                    ),
+                    { scope -> DetailExample(scope) }
+                )
+                case Window(_, WindowEvent.CloseRequested) -> active.requestExit()
+                else -> {}
+            }
+        }.use {
+            host -> Application(
+                applicationOptions { lastWindowPolicy = LastWindowPolicy.Exit }
+            ).run(host)
+        }
+    }
+}

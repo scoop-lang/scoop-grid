@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、透视、按层级展开、小计与总计。公开合同见 [SPEC.md](docs/SPEC.md)，详情和外部结果继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、透视、按层级展开、小计与总计，以及普通或嵌套主从详情。公开合同见 [SPEC.md](docs/SPEC.md)，外部结果继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -48,6 +48,10 @@ fun main() {
 
 `model.columns` 和 `model.headers` 描述当前透视结果，`model.sourceColumns`／`sourceColumn(id)` 描述筛选和聚合使用的原业务字段。结果列 ID 的 `key` 明确区分 Source、Pivot 与 PivotLabel，透视身份包括完整维度值及度量操作；`model.setPivot(None)` 恢复业务列配置。列面板的分析设置可以选择字段、重排维度及切换聚合，结果列继续支持列虚拟化、冻结、调宽和状态恢复。[透视示例](examples/pivot/src/main.scoop) 展示按区域／渠道分析的年度季度销售。
 
+主从详情通过 `DataGridState(..., details = Some(GridDetails<Row>(content, column, label)), expandedDetails = [parentKey])` 声明。content 返回普通 View，可包含输入、菜单和应用自行创建的嵌套 DataGrid；应用自行决定备注、已保存子数据等是否跨挂载保留。详情沿可见宽度测量自然高度，跟随父行固定，不占分页名额或增加业务统计，不参与父网格的复制、查找、CSV 或单格编辑。
+
+`handle.setDetailExpanded(parentKey, value)`、展开按钮和 Alt＋Enter 使用父网格的编辑门控；`handle.focusDetail(parentKey)` 或 Alt＋Down 进入已展开详情，未被内部控件处理的 Escape 返回父行。收起或替换详情会结束子编辑器、弹层及在途保存；真实删除父记录时焦点回网格入口。直接模型操作为 `setDetails`、`setDetailExpanded` 和 `setExpandedDetails`，视图快照保留展开 key 与阅读位置。[订单示例](examples/details/README.md) 展示独立备注、优先级选择、可编辑交付子表与父行固定。
+
 本地模型验证：
 
 ```sh
@@ -90,7 +94,7 @@ scoop test --release .
 
 `gridAggregationSummary(model)` 显示整个筛选结果的记录数与总计，可放入 footer；翻页、排序、固定和选行不会改变聚合成员或重新聚合。`model.result.aggregates.total(id)` 返回 Value／Missing／Failed，未配置返回 None；`numericTotal(id)` 返回成功数值的 BigDecimal。Long 求和保留整数精度，超出 Long 范围时明确失败；count 只数非缺值，全缺值的其他操作返回 Missing。可空列使用 `nullableGridAggregation(...)`。内置 Double／BigDecimal 的求和与平均值，以及 `gridAggregation<T, A, R>` 的自定义累加器／结果格式化，见 [聚合合同](docs/SPEC.md#类型化聚合)。操作 title、列面板 Labels 和 `GridAggregationLabels` 分别配置名称、选择器及总计文案。十万行示例默认汇总金额，修改金额后总计随数据更新。
 
-`model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "全部筛选结果")))` 把全筛选集总计显示为正文结果行，After 放在正文末尾，Hidden 隐藏。它不占分页名额，与业务行共用布局、焦点、矩形、复制和查找，保持只读；固定行不改变聚合成员。`GridCellAddress(GridRowKey.Total(GridTotalKey.AllFiltered), columnId)` 定位总计。`result.rows.rowAt(index)` 返回完整的 Data／Group／Total 变体，`infoAt` 与 `rowKeyAt` 只读取元数据；原始业务数据仍从 pageRows／ordered 访问。CSV 缺省导出业务记录；指定 `GridCsvOptions(data = GridExportData.Displayed)` 包含已启用的总计，可用 includeTotals 排除。十万行示例在首部固定记录之后直接显示总计。
+`model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "全部筛选结果")))` 把全筛选集总计显示为正文结果行，After 放在正文末尾，Hidden 隐藏。它不占分页名额，与业务行共用布局、焦点、矩形、复制和查找，保持只读；固定行不改变聚合成员。`GridCellAddress(GridRowKey.Total(GridTotalKey.AllFiltered), columnId)` 定位总计。`result.rows.rowAt(index)` 返回完整的 Data／Group／Total／Detail 变体，`infoAt` 与 `rowKeyAt` 只读取元数据；原始业务数据仍从 pageRows／ordered 访问。CSV 缺省导出业务记录；指定 `GridCsvOptions(data = GridExportData.Displayed)` 包含已启用的总计，可用 includeTotals 排除。十万行示例在首部固定记录之后直接显示总计。
 
 
 `gridFind(handle) { ... }` 提供真实查找输入框、上一项／下一项和结果提示，Enter 查找下一项。它在当前呈现结果与可见逻辑列的数据文字中定位，不改变筛选／排序／分页。默认忽略 ASCII 大小写，Unicode 原文保留；可配置 `matchCase`、`wrap`、`labels`、字体／主题／焦点与 `onResult`。连续操作从上次匹配继续，修改文字重新开始；组合输入期间不提交查找。未命中或编辑校验拒绝时保留原范围，成功时清除矩形并显露匹配格。

@@ -137,6 +137,8 @@ internal class GridRangeDrag<Row>(private val session: GridSession<Row>): Closea
         val plan = layout.plan
         val hit =
             gridRangeHit(plan.columns, plan.bands, plan.scroll.presentationOffset, point) ?: return
+        if (!move.source.rowKeyAt(hit.row).hasCells)
+            return
         val column =
             when (layout.input.rows.columnSpans) {
                 case Some(_) -> layout.input.rows.spansFor(move.source.rowAt(hit.row)).span(

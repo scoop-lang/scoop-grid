@@ -1,0 +1,95 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.*
+
+@Test
+private class GridDetailsHierarchyTest {
+    @Test
+    fun `details follow fixed parents without changing page membership or selection counts`() {
+        val model =
+            DataGridState(
+                DetailSource(6L),
+                detailColumns(),
+                query = GridQuery(pagination = GridPagination.Page(0L, 2L)),
+                pinnedRows = GridPinnedRows([ViewKey.Number(3L)], [ViewKey.Number(5L)]),
+                rowSelection = GridRowSelectionMode.Multiple,
+                details = Some(detailDefinition<Long>()),
+                expandedDetails = [ViewKey.Number(0L), ViewKey.Number(3L), ViewKey.Number(5L)]
+            )
+        assertEquals(7L, model.result.rows.count)
+        assertEquals(2L, model.result.topCount)
+        assertEquals(2L, model.result.bottomCount)
+        assertEquals(2L, model.result.pageRows.count)
+        assertEquals(6L, model.result.totalRows)
+        assertEquals(3L, model.result.pageCount)
+        assertEquals(2L, model.pageSelectableRows)
+        assertEquals(Some(1L), model.result.rows.indexOfKey(detailKey(3L)))
+        assertEquals(Some(6L), model.result.rows.indexOfKey(detailKey(5L)))
+        model.selectPageRows(true)
+        assertEquals(2L, model.selectedRowKeys.size)
+        model.setPagination(GridPagination.Page(1L, 2L))
+        assertEquals(2L, model.result.detailCount)
+        assertEquals(3L, model.expandedDetails.size)
+        assertEquals(None, model.result.rows.indexOfKey(detailKey(0L)))
+        model.setPagination(GridPagination.Page(0L, 2L))
+        assertEquals(3L, model.result.detailCount)
+        model.replaceData(DetailSource(4L))
+        assertEquals(2L, model.expandedDetails.size)
+        assertFalse(model.isDetailExpanded(ViewKey.Number(5L)))
+    }
+
+    @Test
+    fun `group collapse suspends sparse details while totals and grouping caches stay intact`() {
+        val source = GroupingSource(groupingRecords())
+        val model =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                groupingQuery(false),
+                details = Some(detailDefinition<GroupingRecord>()),
+                expandedDetails = [ViewKey.Number(0L)]
+            )
+        assertEquals(0L, model.result.detailCount)
+        val aggregates = model.result.aggregates
+        source.reads.forbidden = true
+        val group = GridRowKey.Group(groupingPath(Some(10L)))
+        assertTrue(model.setExpanded(group, true))
+        assertEquals(1L, model.result.detailCount)
+        val parent = model.result.rows.indexOfKey(GridRowKey.Data(ViewKey.Number(0L)))!!
+        assertEquals(Some(parent + 1L), model.result.rows.indexOfKey(detailKey(0L)))
+        assertTrue(aggregates === model.result.aggregates)
+        assertTrue(model.setExpanded(group, false))
+        assertEquals(0L, model.result.detailCount)
+        assertTrue(model.isDetailExpanded(ViewKey.Number(0L)))
+    }
+
+    @Test
+    fun `tree branches and pivot suspend details without turning generated rows into parents`() {
+        val tree = treeModel()
+        tree.setDetails(Some(detailDefinition<TreeRecord>()))
+        tree.setExpandedDetails([ViewKey.Number(10L), ViewKey.Number(13L)])
+        assertEquals(2L, tree.result.detailCount)
+        tree.setExpanded(treeKey(10L), false)
+        assertEquals(1L, tree.result.detailCount)
+        assertTrue(tree.isDetailExpanded(ViewKey.Number(13L)))
+        tree.setExpanded(treeKey(10L), true)
+        assertEquals(2L, tree.result.detailCount)
+        val at = tree.result.rows.indexOfKey(detailKey(13L))!!
+        assertEquals(3L, tree.result.rows.hierarchyAt(at)!!.level)
+        val source = PivotSource(pivotRecords())
+        val pivot =
+            DataGridState(
+                source,
+                pivotColumns(source.reads),
+                details = Some(detailDefinition<PivotRecord>()),
+                expandedDetails = [ViewKey.Number(0L)]
+            )
+        assertEquals(1L, pivot.result.detailCount)
+        pivot.setQuery(pivotQuery())
+        assertEquals(0L, pivot.result.detailCount)
+        assertTrue(pivot.isDetailExpanded(ViewKey.Number(0L)))
+        pivot.setQuery(GridQuery())
+        assertEquals(1L, pivot.result.detailCount)
+    }
+}

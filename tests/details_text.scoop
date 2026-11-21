@@ -1,0 +1,95 @@
+package scoop.grid
+
+import scoop.math.BigDecimal
+import scoop.math.BigInteger
+import scoop.test.*
+import scoop.ui.*
+
+@Test
+private class GridDetailsTextTest {
+    @Test
+    fun `copy statistics find and CSV skip detail payloads and preserve real row counts`() {
+        val source = DetailSource(3L)
+        val model =
+            DataGridState(
+                source,
+                detailColumns(),
+                details = Some(detailDefinition<Long>()),
+                expandedDetails = [ViewKey.Number(0L), ViewKey.Number(2L)]
+            )
+        val range = GridCellRange(detailAddress(0L), detailAddress(2L))
+        assertTrue(model.setCellRange(Some(range)))
+        assertEquals(Some("0\n1\n2"), model.copyText())
+        assertEquals(3L, source.reads)
+        val stats = model.rangeStatistics()!!
+        assertEquals(3L, stats.rowCount)
+        assertEquals(BigInteger(3L), stats.count)
+        assertEquals(BigDecimal(3L), stats.sum)
+        assertEquals(6L, source.reads)
+        assertEquals(Some(GridFindMatch(detailAddress(1L), false)), model.findCell("1"))
+        assertEquals(8L, source.reads)
+        val csv = "ID,Text\r\n0,记录 0\r\n1,记录 1\r\n2,记录 2\r\n"
+        assertEquals(csv, gridCsv(model.result.rows, model.columns))
+        assertEquals(11L, source.reads)
+        assertEquals("0\t记录 0\n1\t记录 1\n2\t记录 2", gridTsv(model.result.rows, model.columns))
+        assertEquals(14L, source.reads)
+        assertEquals(csv, model.exportCsv(GridCsvOptions(data = GridExportData.Displayed)))
+        val detail = GridCellAddress(detailKey(0L), GridColumnId("id"))
+        assertFalse(model.setCellRange(Some(GridCellRange(detail, detailAddress(1L)))))
+        model.clearCellRange()
+        assertEquals(None, model.copyText(Some(detail)))
+        assertEquals(
+            Some(GridFindMatch(detailAddress(0L), false)),
+            model.findCell("0", Some(detail))
+        )
+    }
+
+    @Test
+    fun `row page edge and Tab navigation skip details including the final item`() {
+        val model =
+            DataGridState(
+                DetailSource(3L),
+                detailColumns(),
+                details = Some(detailDefinition<Long>()),
+                expandedDetails = [ViewKey.Number(0L), ViewKey.Number(2L)]
+            )
+        val rows = model.result.rows
+        assertEquals(5L, rows.count)
+        assertEquals(
+            Some(GridCellIndex(2L, 0L)),
+            gridNextResultCell(GridCellIndex(0L, 0L), rows, 2L, 1L, GridNavigation.Row(1L))
+        )
+        assertEquals(
+            Some(GridCellIndex(0L, 0L)),
+            gridNextResultCell(GridCellIndex(2L, 0L), rows, 2L, 1L, GridNavigation.Row(-1L))
+        )
+        assertEquals(
+            Some(GridCellIndex(3L, 1L)),
+            gridNextResultCell(GridCellIndex(2L, 1L), rows, 2L, 2L, GridNavigation.Page(true))
+        )
+        assertEquals(
+            Some(GridCellIndex(0L, 1L)),
+            gridNextResultCell(GridCellIndex(3L, 1L), rows, 2L, 2L, GridNavigation.Page(false))
+        )
+        assertEquals(
+            Some(GridCellIndex(3L, 1L)),
+            gridNextResultCell(GridCellIndex(0L, 0L), rows, 2L, 1L, GridNavigation.Edge(true, true))
+        )
+        assertEquals(
+            Some(GridCellIndex(2L, 0L)),
+            gridNextResultCell(GridCellIndex(0L, 1L), rows, 2L, 1L, GridNavigation.Tab(false))
+        )
+        assertEquals(
+            Some(GridCellIndex(0L, 1L)),
+            gridNextResultCell(GridCellIndex(2L, 0L), rows, 2L, 1L, GridNavigation.Tab(true))
+        )
+        assertEquals(
+            None,
+            gridNextResultCell(GridCellIndex(3L, 1L), rows, 2L, 1L, GridNavigation.Tab(false))
+        )
+        assertEquals(
+            Some(GridCellIndex(3L, 0L)),
+            gridNextResultCell(GridCellIndex(3L, 0L), rows, 2L, 1L, GridNavigation.Row(1L))
+        )
+    }
+}

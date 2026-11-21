@@ -72,7 +72,10 @@ internal fun <Row> gridFindCell(
         return None
     val afterRow =
         when (after) {
-            case Some(val address) -> rows.indexOfKey(address.row)
+            case Some(val address) -> if (address.row.hasCells)
+                rows.indexOfKey(address.row)
+            else
+                None
             case None -> None
         }
     val beginning =
@@ -106,7 +109,7 @@ internal fun <Row> gridFindCell(
     var labelColumn: GridColumnId? = None
     while (true) {
         val column = columns[at.column]
-        if (column.exportable) {
+        if (column.exportable && rows.rowKeyAt(at.row).hasCells) {
             if (cachedIndex != at.row) {
                 cachedRow = Some(rows.rowAt(at.row))
                 cachedIndex = at.row

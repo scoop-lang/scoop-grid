@@ -30,14 +30,17 @@ internal fun gridMeasureColumnContent(
     return GridColumnMeasured(probe.fit, width)
 }
 
-internal fun gridMeasureContentRows(
+internal fun <Row> gridMeasureContentRows(
     context: LazyMeasureContext,
     constraints: Constraints,
     plan: GridMeasurePlan,
-    probe: GridColumnProbe
+    probe: GridColumnProbe,
+    source: GridRowSource<Row>
 ): LayoutResult<Rect> {
     var width = 0.0
     for (index in probe.rows) {
+        if (!source.rowKeyAt(index).hasCells)
+            continue
         val height = plan.rows.index.extent(index)
         val row =
             context.measureItem(index, Constraints(minHeight = height, maxHeight = Some(height)))

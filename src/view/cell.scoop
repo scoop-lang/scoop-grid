@@ -19,7 +19,8 @@ internal class GridDataCellProps<Row>(
     val range: GridCellRangeBounds?,
     val labels: GridLabels,
     val labelColumn: GridColumnId?,
-    val hierarchy: GridRowHierarchy?
+    val hierarchy: GridRowHierarchy?,
+    val details: GridDetails<Row>? = None
 )
 
 /** One stable cell element hosts either its display content or its actual editor. */
@@ -152,10 +153,15 @@ internal class GridDataCell<Row>(
                                             child
                                         ) ?:
                                             child
+                                    val content =
+                                        if (browsing)
+                                            gridDetailCell(input, selected)
+                                        else
+                                            selected
                                     if (input.labelColumn == Some(input.column.id) && browsing)
-                                        gridTreeCell(input, selected)
+                                        gridTreeCell(input, content)
                                     else
-                                        selected
+                                        content
                                 }
                                 case Group(val group) -> if (
                                     input.labelColumn == Some(input.column.id)
@@ -164,6 +170,9 @@ internal class GridDataCell<Row>(
                                 else
                                     child
                                 case Total(_) -> child
+                                case Detail(_, _) -> throw IllegalStateException(
+                                    Some("detail content cannot be mounted as a cell")
+                                )
                             }
                         ]
                     )

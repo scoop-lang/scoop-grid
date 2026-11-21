@@ -1,0 +1,129 @@
+package scoop.grid.examples.details
+
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as detailColumn
+import scoop.ui.component.select as detailSelect
+import scoop.ui.component.input as detailInput
+import scoop.ui.text.TextEditorState
+
+private struct OrderItem(val product: String, val quantity: Long, val owner: String)
+
+/** The application explicitly owns each nested model and its persisted note. */
+internal class OrderDetail(val number: Long) {
+    val notes = TextEditorState("请在到货前联系收货人。")
+    val priority = state<Long?>(Some(1L))
+    val handle = DataGridHandle()
+    private var rows =
+        TableRows(
+            [
+                TableRecord(ViewKey.Number(0L), OrderItem("桌面工作站", number % 4L + 1L, "陈琳")),
+                TableRecord(ViewKey.Number(1L), OrderItem("显示器", number % 3L + 2L, "李明")),
+                TableRecord(ViewKey.Number(2L), OrderItem("配件套装", number % 4L + 3L, "王华"))
+            ]
+        )
+    private val model =
+        DataGridState(
+            rows,
+            columns(),
+            GridQuery(
+                aggregations =
+                    [GridAggregationSelection(GridColumnId("quantity"), GridAggregateId("sum"))],
+                totals = GridTotals(GridTotalPlacement.After, "合计")
+            )
+        )
+    private fun columns(): Array<GridColumn<OrderItem>> {
+        val detail = this
+        return [
+            gridColumn<OrderItem, String>(
+                GridColumnId("product"),
+                "交付项目",
+                { row -> row.product },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fraction(1.0))
+            ),
+            gridColumn<OrderItem, Long>(
+                GridColumnId("quantity"),
+                "数量 · F2 编辑",
+                { row -> row.quantity },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(180.0)),
+                edit =
+                    Some(
+                        gridEdit<OrderItem, Long>(
+                            { value -> gridLongEditor(value) },
+                            {
+                                edit, completion ->
+                                val next =
+                                    TableRows(
+                                        Array<TableRecord<OrderItem>>(detail.rows.count) {
+                                            at ->
+                                            val key = detail.rows.keyAt(at)
+                                            TableRecord(
+                                                key,
+                                                if (edit.address.row.dataKey == Some(key))
+                                                    OrderItem(
+                                                        edit.row.product,
+                                                        edit.value,
+                                                        edit.row.owner
+                                                    )
+                                                else
+                                                    detail.rows.rowAt(at)
+                                            )
+                                        }
+                                    )
+                                if (completion.accept(next))
+                                    detail.rows = next
+                            },
+                            validate =
+                                {
+                                    _,
+                                    value -> if (value > 0L)
+                                        None
+                                    else
+                                        Some("数量必须大于零")
+                                }
+                        )
+                    ),
+                aggregations = [gridSumLongAggregation()]
+            ),
+            gridColumn<OrderItem, String>(
+                GridColumnId("owner"),
+                "负责人",
+                { row -> row.owner },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fixed(140.0))
+            )
+        ]
+    }
+    fun view(): View {
+        val detail = this
+        return detailColumn {
+            row {
+                label(f"订单 ${detail.number + 10001L} · 交付明细")
+                item(
+                    detailSelect(detail.priority.binding()) {
+                        width = Some(140.0)
+                        item(Choice(ViewKey.Text("normal"), 1L, "普通优先级"))
+                        item(Choice(ViewKey.Text("urgent"), 2L, "加急处理"))
+                    }
+                ) { shrink = 0.0 }
+                spacing = 16.0
+                alignment = CrossAlignment.Center
+            }
+            add(detailInput(detail.notes) { placeholder = "配送备注" })
+            add(
+                dataGrid(detail.model) {
+                    handle = Some(detail.handle)
+                    height = 224.0;
+                    rowHeight = 38.0;
+                    headerHeight = 36.0
+                    labels = GridLabels(name = "订单交付明细")
+                }
+            )
+            label("数量可以独立编辑；关闭详情会结束当前草稿，已保存的数量与备注保留。")
+            spacing = 8.0
+        }
+    }
+}

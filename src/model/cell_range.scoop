@@ -46,6 +46,8 @@ internal fun <Row> gridCellRangeBounds(
     rows: GridRowSource<Row>,
     columns: GridSpanColumns
 ): GridCellRangeBounds? {
+    if (!range.anchor.row.hasCells || !range.end.row.hasCells)
+        return None
     val firstRow = rows.indexOfKey(range.anchor.row) ?: return None
     val lastRow = rows.indexOfKey(range.end.row) ?: return None
     val firstColumn = columns.indexOf(range.anchor.column) ?: return None

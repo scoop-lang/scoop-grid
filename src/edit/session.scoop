@@ -125,6 +125,7 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
                 case Data(val row, _) -> row
                 case Group(_) -> return false
                 case Total(_) -> return false
+                case Detail(_, _) -> return false
             }
         if (!editing.editable(row) || !session.independent(row, column.id))
             return false
@@ -176,6 +177,7 @@ internal class GridEditCoordinator<Row>(private val session: GridSession<Row>) {
                 case Data(val row, _) -> row
                 case Group(_) -> return None
                 case Total(_) -> return None
+                case Detail(_, _) -> return None
             }
         if (!editing.editable(row) || !session.independent(row, column.id))
             return None

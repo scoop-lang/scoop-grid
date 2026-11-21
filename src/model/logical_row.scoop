@@ -22,12 +22,13 @@ public enum GridTotalKey: Equals<GridTotalKey>, Hash {
 }
 
 public enum GridRowKey: Equals<GridRowKey>, Hash {
-    Data(ViewKey), Group(GridGroupPath), Total(GridTotalKey)
+    Data(ViewKey), Group(GridGroupPath), Total(GridTotalKey), Detail(ViewKey)
     public override operator fun equals(other: GridRowKey): Boolean =
         when ((this, other)) {
             case(Data(val a), Data(val b)) -> a == b
             case(Group(val a), Group(val b)) -> a == b
             case(Total(val a), Total(val b)) -> a == b
+            case(Detail(val a), Detail(val b)) -> a == b
             else -> false
         }
     public override fun hash(): Long =
@@ -35,6 +36,7 @@ public enum GridRowKey: Equals<GridRowKey>, Hash {
             case Data(val key) -> key.hash() xor 1L
             case Group(val path) -> path.hash() xor 2L
             case Total(val key) -> key.hash() xor 3L
+            case Detail(val key) -> key.hash() xor 4L
         }
     public val viewKey: ViewKey get() =
         when (this) {
@@ -55,6 +57,18 @@ public enum GridRowKey: Equals<GridRowKey>, Hash {
                 )
             }
             case Group(val path) -> ViewKey.Text(f"g${path.encoded}")
+            case Detail(val key) -> when (key) {
+                case Number(val value) -> ViewKey.Text(f"x:n${value}")
+                case Text(val value) -> ViewKey.Text(f"x:t${value}")
+                case Position -> throw IllegalArgumentException(
+                    Some("details require an explicit parent key")
+                )
+            }
+        }
+    public val hasCells: Boolean get() =
+        when (this) {
+            case Detail(_) -> false
+            else -> true
         }
     public val dataKey: ViewKey? get() =
         when (this) {
@@ -90,12 +104,13 @@ public class GridTotalRow internal constructor(
 
 /** Metadata access never materializes a business record. */
 public enum GridRowInfo {
-    Data(ViewKey), Group(GridGroupRow), Total(GridTotalRow)
+    Data(ViewKey), Group(GridGroupRow), Total(GridTotalRow), Detail(GridDetailRow)
     public val key: GridRowKey get() =
         when (this) {
             case Data(val key) -> GridRowKey.Data(key)
             case Group(val group) -> GridRowKey.Group(group.path)
             case Total(val total) -> GridRowKey.Total(total.key)
+            case Detail(val detail) -> GridRowKey.Detail(detail.parent)
         }
     public val dataKey: ViewKey? get() = key.dataKey
     public val label: String? get() =
@@ -103,21 +118,24 @@ public enum GridRowInfo {
             case Data(_) -> None
             case Group(val group) -> Some(group.label)
             case Total(val total) -> Some(total.label)
+            case Detail(val detail) -> Some(detail.label)
         }
 }
 
 public enum GridRow<Row> {
-    Data(Row, ViewKey), Group(GridGroupRow), Total(GridTotalRow)
+    Data(Row, ViewKey), Group(GridGroupRow), Total(GridTotalRow), Detail(Row, GridDetailRow)
     public val info: GridRowInfo get() =
         when (this) {
             case Data(_, val key) -> GridRowInfo.Data(key)
             case Group(val group) -> GridRowInfo.Group(group)
             case Total(val total) -> GridRowInfo.Total(total)
+            case Detail(_, val detail) -> GridRowInfo.Detail(detail)
         }
     public val key: GridRowKey get() = info.key
     public fun text(column: GridColumn<Row>, labelColumn: GridColumnId? = None): String? =
         when (this) {
             case Data(val row, _) -> column.text(row)
+            case Detail(_, _) -> None
             case Group(val group) -> {
                 val display = group.aggregates.total(column.id)
                 val text = gridAggregateText(display)
@@ -149,10 +167,12 @@ public enum GridRow<Row> {
             case Data(val row, _) -> column.numericValue(row)
             case Group(val group) -> group.aggregates.numericTotal(column.id)
             case Total(val total) -> total.aggregates.numericTotal(column.id)
+            case Detail(_, _) -> None
         }
     internal fun labelColumn(columns: Array<GridColumn<Row>>): GridColumnId? {
         return when (this) {
             case Data(_, _) -> None
+            case Detail(_, _) -> None
             case Total(val total) -> gridRowLabelColumn(columns, total.aggregates)
             case Group(val group) -> {
                 for (column in columns)
@@ -175,10 +195,11 @@ public interface GridRowSource<Row>: TableSource<GridRow<Row>> {
     public fun hierarchyAt(index: Long): GridRowHierarchy? = None
     public fun rowKeyAt(index: Long): GridRowKey = infoAt(index).key
     public fun indexOfKey(key: GridRowKey): Long? =
-        if (key.dataKey == Some(ViewKey.Position))
-            None
-        else
-            indexOfKey(key.viewKey)
+        when (key) {
+            case Data(ViewKey.Position) -> None
+            case Detail(ViewKey.Position) -> None
+            else -> indexOfKey(key.viewKey)
+        }
 }
 
 private fun gridAggregateText(value: GridAggregateDisplay?): String =

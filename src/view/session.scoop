@@ -30,6 +30,7 @@ internal class GridSession<Row>: GridMount {
     var entry: FocusHandle? = None
     val editing = GridEditCoordinator<Row>(this)
     private val hierarchyActions = GridHierarchyActions<Row>(this)
+    val detailActions = GridDetailActions<Row>(this)
     val columnActions = GridColumnActions<Row>(this)
     val columnReorder = GridColumnReorder<Row>(this)
     val rangeDrag = GridRangeDrag<Row>(this)
@@ -209,6 +210,9 @@ internal class GridSession<Row>: GridMount {
     }
     public override fun setExpanded(key: GridRowKey, value: Boolean): GridRowActionResult =
         hierarchyActions.expand(key, value)
+    public override fun setDetailExpanded(key: ViewKey, value: Boolean): GridRowActionResult =
+        detailActions.expand(key, value)
+    public override fun focusDetail(key: ViewKey): Boolean = detailActions.focus(key)
     public override fun selectGroupRows(path: GridGroupPath, value: Boolean): GridRowActionResult {
         if (!enabled || !inputEnabled)
             return GridRowActionResult.Rejected("网格未启用")
@@ -350,9 +354,9 @@ internal class GridSession<Row>: GridMount {
                 else -> range.column
             }
         val next =
-            gridNextCell(
+            gridNextResultCell(
                 GridCellIndex(row, start),
-                source.count,
+                source,
                 plan.columns.size,
                 pageRows,
                 command
@@ -408,7 +412,8 @@ internal class GridSession<Row>: GridMount {
         val scope = owner ?: return false
         return scope.isMounted && scope.input.isEnabledInHierarchy
     }
-    public override val pending: Boolean get() = requested != None
+    public override val pending: Boolean get() =
+        requested != None || (bodyFocus?.isPending ?: false)
     val preparing: GridCellAddress? get() {
         val focus = bodyFocus ?: return None
         val row = focus.pendingItem ?: return None
@@ -498,6 +503,7 @@ internal class GridSession<Row>: GridMount {
         onPasteResult = input.input.onPasteResult
         onCopyResult = input.input.onCopyResult
         editing.update(input.input)
+        detailActions.update(input.input.state)
         columnReorder.update(input)
         rangeDrag.update(input)
         columnSizing.update(input)
@@ -538,6 +544,7 @@ internal class GridSession<Row>: GridMount {
         columnReorder.close()
         rangeDrag.close()
         columnActions.close()
+        detailActions.close()
         editing.close()
         reference?.unbind(this)
         reference = None
@@ -553,6 +560,8 @@ internal class GridSession<Row>: GridMount {
         entry = None
     }
     private fun valid(address: GridCellAddress): Boolean {
+        if (!address.row.hasCells)
+            return false
         val source = rows ?: return false
         val plan = currentSpanColumns() ?: return false
         return enabled &&
@@ -574,6 +583,8 @@ internal class GridSession<Row>: GridMount {
         return Some(next)
     }
     private fun span(address: GridCellAddress): GridCellSpan? {
+        if (!address.row.hasCells)
+            return None
         val source = rows ?: return None
         val row = source.indexOfKey(address.row) ?: return None
         val columns = currentSpanColumns() ?: return None
@@ -584,6 +595,7 @@ internal class GridSession<Row>: GridMount {
                     case Data(val value, _) -> columns.resolve(resolve(value)).span(at)
                     case Group(_) -> GridCellSpan(at)
                     case Total(_) -> GridCellSpan(at)
+                    case Detail(_, _) -> return None
                 }
                 case None -> GridCellSpan(at)
             }
@@ -639,7 +651,10 @@ internal class GridSession<Row>: GridMount {
             entry?.requestFocus()
             return
         }
-        val at = source.indexOfKey(address.row) ?: min(index, source.count - 1L)
+        val candidate = source.indexOfKey(address.row) ?: min(index, source.count - 1L)
+        val at =
+            gridCellRow(source, candidate, true) ?:
+                (gridCellRow(source, candidate, false) ?: return)
         if (model?.visibleColumn(address.column) ?: false) {
             requestCell(GridCellAddress(source.rowKeyAt(at), address.column))
             return

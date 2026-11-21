@@ -33,7 +33,11 @@ internal fun <Row> gridRangeStatistics(
     var sum = BigDecimal.ZERO
     var minimum: BigDecimal? = None
     var maximum: BigDecimal? = None
+    var rowCount = 0L
     for (index in bounds.firstRow .. bounds.lastRow) {
+        if (!rows.rowKeyAt(index).hasCells)
+            continue
+        rowCount += 1L
         val row = rows.rowAt(index)
         for (column in columns) {
             val value = row.numericValue(column) ?: continue
@@ -45,7 +49,7 @@ internal fun <Row> gridRangeStatistics(
     }
     return GridRangeStatistics(
         range,
-        bounds.lastRow - bounds.firstRow + 1L,
+        rowCount,
         columns.size,
         count,
         sum,

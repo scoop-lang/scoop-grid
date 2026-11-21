@@ -106,7 +106,9 @@ public class DataGrid<Row> public constructor(
                         case Some(_) -> true
                         case None -> false
                     }
-                }
+                },
+                input.state.details,
+                result.detailCount > 0L
             )
         val header =
             GridHeaderCells(

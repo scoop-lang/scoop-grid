@@ -1,0 +1,51 @@
+package scoop.grid
+
+/** Non-cell items never become a cell endpoint, including at a page or Tab boundary. */
+internal fun <Row> gridCellRow(source: GridRowSource<Row>, start: Long, forward: Boolean): Long? {
+    var at = start
+    while (at >= 0L && at < source.count) {
+        if (source.rowKeyAt(at).hasCells)
+            return Some(at)
+        if (forward) {
+            if (at == source.count - 1L)
+                break
+            at += 1L
+        } else {
+            if (at == 0L)
+                break
+            at -= 1L
+        }
+    }
+    return None
+}
+
+internal fun <Row> gridNextResultCell(
+    current: GridCellIndex,
+    source: GridRowSource<Row>,
+    columns: Long,
+    page: Long,
+    command: GridNavigation
+): GridCellIndex? {
+    val next = gridNextCell(current, source.count, columns, page, command) ?: return None
+    if (source.rowKeyAt(next.row).hasCells)
+        return Some(next)
+    val forward =
+        when (command) {
+            case Row(val step) -> step > 0L
+            case Page(val down) -> down
+            case Tab(val reverse) -> !reverse
+            case Edge(val end, _) -> !end
+            case Column(_) -> return Some(current)
+        }
+    when (val target = gridCellRow(source, next.row, forward)) {
+        case Some(val row) -> return Some(GridCellIndex(row, next.column))
+        case None -> {}
+    }
+    return when (command) {
+        case Tab(_) -> None
+        else -> when (val target = gridCellRow(source, next.row, !forward)) {
+            case Some(val row) -> Some(GridCellIndex(row, next.column))
+            case None -> None
+        }
+    }
+}

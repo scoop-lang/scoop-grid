@@ -1,0 +1,127 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+import scoop.collections.sortWith
+import scoop.comparisons.comparatorOf
+import scoop.ui.ViewKey
+
+internal class GridDetailPosition(val parentIndex: Long, val info: GridDetailRow)
+
+/** A sparse insertion map; unopened records keep the original lazy source. */
+internal class GridDetailSource<Row>(
+    private val source: GridRowSource<Row>,
+    val positions: Array<GridDetailPosition>
+): GridRowSource<Row> {
+    private val details = HashMap<ViewKey, Long>()
+    public override val count: Long = source.count + positions.size
+    init {
+        for (at in 0L ..< positions.size)
+            details.put(GridRowKey.Detail(positions[at].info.parent).viewKey, at)
+    }
+    private fun detailIndex(at: Long): Long = positions[at].parentIndex + at + 1L
+    private fun before(index: Long): Long {
+        var first = 0L
+        var end = positions.size
+        while (first < end) {
+            val middle = first + (end - first) / 2L
+            if (detailIndex(middle) < index)
+                first = middle + 1L
+            else
+                end = middle
+        }
+        return first
+    }
+    private fun locate(index: Long): Long {
+        gridRequire(index >= 0L && index < count, "detail row index is out of range")
+        return before(index)
+    }
+    public override fun infoAt(index: Long): GridRowInfo {
+        val at = locate(index)
+        return if (at < positions.size && detailIndex(at) == index)
+            GridRowInfo.Detail(positions[at].info)
+        else
+            source.infoAt(index - at)
+    }
+    public override fun keyAt(index: Long): ViewKey = infoAt(index).key.viewKey
+    public override fun rowAt(index: Long): GridRow<Row> {
+        val at = locate(index)
+        if (at < positions.size && detailIndex(at) == index) {
+            val detail = positions[at]
+            return when (source.rowAt(detail.parentIndex)) {
+                case Data(val row, _) -> GridRow.Detail(row, detail.info)
+                else -> throw IllegalStateException(Some("detail parent is not a business record"))
+            }
+        }
+        return source.rowAt(index - at)
+    }
+    public override fun indexOfKey(key: ViewKey): Long? {
+        when (details[key]) {
+            case Some(val at) -> return Some(detailIndex(at))
+            case None -> {}
+        }
+        val original = source.indexOfKey(key) ?: return None
+        var first = 0L
+        var end = positions.size
+        while (first < end) {
+            val middle = first + (end - first) / 2L
+            if (positions[middle].parentIndex < original)
+                first = middle + 1L
+            else
+                end = middle
+        }
+        return Some(original + first)
+    }
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? {
+        val at = locate(index)
+        if (at < positions.size && detailIndex(at) == index) {
+            val detail = positions[at]
+            val parent = source.hierarchyAt(detail.parentIndex)
+            return Some(
+                GridRowHierarchy(
+                    (parent?.level ?: 0L) + 1L,
+                    Some(GridRowKey.Data(detail.info.parent))
+                )
+            )
+        }
+        return source.hierarchyAt(index - at)
+    }
+}
+
+internal fun <Row> gridDetailResult(
+    result: GridResult<Row>,
+    details: GridDetailState<Row>
+): GridResult<Row> {
+    val definition = details.definition ?: return result
+    if (details.keys.size == 0L)
+        return result
+    val positions = ArrayList<GridDetailPosition>()
+    var top = 0L
+    var bottom = 0L
+    for (key in details.keys) {
+        val index = result.rows.indexOfKey(GridRowKey.Data(key)) ?: continue
+        positions.add(GridDetailPosition(index, GridDetailRow(key, definition.label)))
+        if (index < result.topCount)
+            top += 1L
+        if (index >= result.rows.count - result.bottomCount)
+            bottom += 1L
+    }
+    if (positions.size == 0L)
+        return result
+    gridRequire(result.rows.count <= Long.MAX_VALUE - positions.size, "detail row count overflow")
+    positions.sortWith(
+        comparatorOf<GridDetailPosition> { a, b -> a.parentIndex.compareTo(b.parentIndex) }
+    )
+    return GridResult(
+        GridDetailSource(result.rows, positions.toArray()),
+        result.pageRows,
+        result.ordered,
+        result.totalRows,
+        result.pageCount,
+        result.topCount + top,
+        result.bottomCount + bottom,
+        result.aggregates,
+        result.rootCount,
+        result.pageUnit,
+        positions.size
+    )
+}

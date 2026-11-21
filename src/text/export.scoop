@@ -45,8 +45,11 @@ private fun <Row> gridDelimited(
         }
     }
     val exportedColumns = exported.toArray()
+    var written = false
     for (rowIndex in 0L ..< rows.count) {
-        if (headers || rowIndex > 0L)
+        if (!rows.rowKeyAt(rowIndex).hasCells)
+            continue
+        if (headers || written)
             output.append(newline)
         val row = rows.rowAt(rowIndex)
         val labelColumn = row.labelColumn(exportedColumns)
@@ -61,8 +64,9 @@ private fun <Row> gridDelimited(
                     )
             appendGridField(output, text, delimiter)
         }
+        written = true
     }
-    if (terminalNewline && (headers || rows.count > 0L))
+    if (terminalNewline && (headers || written))
         output.append(newline)
     return output.toString()
 }

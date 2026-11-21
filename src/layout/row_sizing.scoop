@@ -141,6 +141,20 @@ internal class GridRowConfiguration<Row>(
                 !gridSameRowSizing(input.rows.policy.mode, next.input.rows.policy.mode)
         )
             return false
+        if (input.rows.hasDetails != next.input.rows.hasDetails)
+            return false
+        if (
+            input.rows.hasDetails &&
+                (
+                    columns.viewport !=
+                        next.columns.viewport ||
+                        input.columns !==
+                        next.input.columns ||
+                        fontRevision !=
+                        next.fontRevision
+                )
+        )
+            return false
         if (!input.rows.policy.content)
             return true
         return input.columns ===
@@ -185,7 +199,12 @@ internal class GridRowMeasurements<Row> {
             configuration = Some(next)
             return extents!!
         }
-        val fresh = GridRowExtents(input.rows.count, next.estimate, input.rows.policy.variable)
+        val fresh =
+            GridRowExtents(
+                input.rows.count,
+                next.estimate,
+                input.rows.policy.variable || input.rows.hasDetails
+            )
         if (sameShape && fresh.index.variable) {
             for ((key, height) in extents!!.known) {
                 when (input.rows.indexOfKey(key)) {

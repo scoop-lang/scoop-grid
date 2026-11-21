@@ -1,0 +1,119 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.style.ThemeSource
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.accessibility.SemanticItemKey
+
+@Test
+private class GridDetailsLayoutTest {
+    @Test
+    fun `fixed business rows admit sparse natural detail heights and invalidate on viewport width`() {
+        FontCollection(false).use {
+            fonts ->
+            val source = DetailSource(100000000L)
+            val model =
+                DataGridState(
+                    source,
+                    detailColumns(),
+                    details = Some(detailDefinition<Long>()),
+                    expandedDetails = [ViewKey.Number(7L)]
+                )
+            val theme = ThemeSource(shadcnTheme())
+            val columns =
+                GridColumnsPlan(
+                    model.columns,
+                    model.columnState,
+                    GridAppearance(theme.current.value, fonts, LayoutDirection.Ltr)
+                )
+            val session = GridSession<Long>()
+            val scroll = ScrollState()
+            fun input(): GridRootProps<Long> =
+                GridRootProps(
+                    DataGridProps(model, rowHeight = 32.0),
+                    columns,
+                    GridRows(
+                        model.result.rows,
+                        columns,
+                        session,
+                        GridRowPolicy(GridRowSizing.Fixed, columns),
+                        details = model.details,
+                        hasDetails = model.result.detailCount > 0L
+                    ),
+                    scroll,
+                    session,
+                    theme,
+                    None
+                )
+            val heights = GridRowMeasurements<Long>()
+            val first = heights.prepare(input(), columns.resolve(500.0))
+            assertTrue(first.index.variable)
+            first.record(8L, detailKey(7L).viewKey, 160.0)
+            assertEquals(32.0, first.index.extent(7L))
+            assertEquals(160.0, first.index.extent(8L))
+            heights.accept(
+                GridRowReading(
+                    model,
+                    model.result.rows,
+                    scroll,
+                    scroll.requestRevision,
+                    Some(GridReadingAnchor(detailKey(7L).viewKey, 8L, 12.0))
+                )
+            )
+            model.setDetailExpanded(ViewKey.Number(0L), true)
+            val moved = heights.prepare(input(), columns.resolve(500.0))
+            assertEquals(160.0, moved.index.extent(9L))
+            assertEquals(9L, heights.anchor(input())!!.index)
+            val resized = heights.prepare(input(), columns.resolve(400.0))
+            assertEquals(0L, resized.known.size)
+            assertEquals(32.0, resized.index.extent(9L))
+            model.setExpandedDetails([])
+            assertFalse(heights.prepare(input(), columns.resolve(400.0)).index.variable)
+            assertEquals(0L, source.reads)
+            heights.close()
+        }
+    }
+
+    @Test
+    fun `detail accessibility metadata does not expose cells or read its payload`() {
+        FontCollection(false).use {
+            fonts ->
+            val source = DetailSource(100000000L)
+            val model =
+                DataGridState(
+                    source,
+                    detailColumns(),
+                    details = Some(detailDefinition<Long>()),
+                    expandedDetails = [ViewKey.Number(99999999L)]
+                )
+            val theme = ThemeSource(shadcnTheme())
+            val columns =
+                GridColumnsPlan(
+                    model.columns,
+                    model.columnState,
+                    GridAppearance(theme.current.value, fonts, LayoutDirection.Ltr)
+                )
+            val rows =
+                GridRows(
+                    model.result.rows,
+                    columns,
+                    GridSession<Long>(),
+                    GridRowPolicy(GridRowSizing.Fixed, columns),
+                    details = model.details,
+                    hasDetails = true
+                )
+            val semantics = rows.semantics()
+            val info = semantics.describe(100000000L)!!
+            assertEquals(Some("Record details"), info.name)
+            assertFalse(info.selectable)
+            assertEquals(Some(1L), info.hierarchyLevel)
+            assertEquals(None, info.expanded)
+            val key = gridSelectionItemKey(detailKey(99999999L).viewKey)
+            for (at in 0L ..< columns.columns.size)
+                assertEquals(None, semantics.grid!!.describe(key, at)?.name)
+            assertEquals(0L, source.reads)
+        }
+    }
+}

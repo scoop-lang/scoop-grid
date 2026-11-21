@@ -35,7 +35,8 @@ internal class GridRowCells<Row>(
     private val selection: GridSelectionView<Row>?,
     private val range: GridCellRangeBounds?,
     private val labels: GridLabels,
-    private val hierarchy: GridRowHierarchy?
+    private val hierarchy: GridRowHierarchy?,
+    private val details: GridDetails<Row>? = None
 ): ItemSource {
     public override val count: Long get() = spans.count
     public override fun keyAt(index: Long): ViewKey =
@@ -81,7 +82,21 @@ internal class GridRowCells<Row>(
                 range,
                 labels,
                 labelColumn,
-                hierarchy
+                hierarchy,
+                when (details) {
+                    case Some(val value) -> {
+                        val preferred =
+                            when (value.column) {
+                                case Some(val id) -> columns.indexOf(id) ?: 0L
+                                case None -> 0L
+                            }
+                        if (spans.span(preferred).column == columnIndex)
+                            Some(value)
+                        else
+                            None
+                    }
+                    case None -> None
+                }
             ),
             { props, scope -> GridDataCell(props, scope) }
         )
@@ -567,6 +582,27 @@ internal class GridCell<Row>(
                 )
             context.consume()
             return
+        }
+        if (handle.hasFocus && gridDetailShortcut(key) && (session?.editingCell ?: None) == None) {
+            val parent = address.row.dataKey
+            val model = session?.currentModel ?: None
+            when ((parent, model)) {
+                case(Some(val id), Some(val current)) -> when (current.details) {
+                    case Some(_) -> {
+                        starter?.cancel()
+                        if (!key.isRepeat) {
+                            if (key.logicalKey == LogicalKey.Named(NamedKey.Enter))
+                                session?.setDetailExpanded(id, !current.isDetailExpanded(id))
+                            else
+                                session?.focusDetail(id)
+                        }
+                        context.consume()
+                        return
+                    }
+                    case None -> {}
+                }
+                else -> {}
+            }
         }
         if (gridPlainKey(key)) {
             if (

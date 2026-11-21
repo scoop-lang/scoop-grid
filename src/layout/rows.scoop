@@ -22,7 +22,9 @@ internal class GridRows<Row>(
     val selection: GridSelectionView<Row>? = None,
     val range: GridCellRangeBounds? = None,
     val labels: GridLabels = GridLabels(),
-    val busy: Boolean = false
+    val busy: Boolean = false,
+    val details: GridDetails<Row>? = None,
+    val hasDetails: Boolean = false
 ): ItemSource {
     public override val count: Long get() = source.count
     public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
@@ -30,6 +32,18 @@ internal class GridRows<Row>(
     public override fun build(index: Long): View {
         val row = source.rowAt(index)
         val key = source.rowKeyAt(index)
+        when (row) {
+            case Detail(val value, val info) -> {
+                val definition =
+                    details ?: throw IllegalStateException(Some("detail row requires content"))
+                return element(
+                    GridDetailProps(info, index, session, columns.appearance, enabled),
+                    { props, scope -> GridDetailView(props, scope) },
+                    [definition.content(value)]
+                )
+            }
+            else -> {}
+        }
         val spans = spansFor(row)
         val cells =
             GridRowCells(
@@ -44,7 +58,8 @@ internal class GridRows<Row>(
                 selection,
                 range,
                 labels,
-                source.hierarchyAt(index)
+                source.hierarchyAt(index),
+                details
             )
         return lazyElement(
             cells,
@@ -60,9 +75,55 @@ internal class GridRows<Row>(
             }
             case Group(_) -> GridRowSpans(columns.columns.size)
             case Total(_) -> GridRowSpans(columns.columns.size)
+            case Detail(_, _) -> GridRowSpans(0L)
         }
     fun indexOfKey(key: GridRowKey): Long? = source.indexOfKey(key)
     private fun labelColumn(row: GridRow<Row>): GridColumnId? = row.labelColumn(columns.columns)
+    private fun expanded(info: GridRowInfo, hierarchy: GridRowHierarchy?): Boolean? {
+        when (val value = hierarchy?.expanded ?: None) {
+            case Some(_) -> return value
+            case None -> {}
+        }
+        val key = info.dataKey ?: return None
+        return when (details) {
+            case Some(_) -> session.currentModel?.isDetailExpanded(key)
+            case None -> None
+        }
+    }
+    private fun expand(key: ViewKey, value: Boolean): SemanticActionResult {
+        val model = session.currentModel ?: return SemanticActionResult.Unavailable
+        if (model.result.rows !== source)
+            return SemanticActionResult.Unavailable
+        val index = source.indexOfKey(key) ?: return SemanticActionResult.Unavailable
+        val row = source.rowKeyAt(index)
+        val result =
+            if (model.canExpand(row))
+                session.setExpanded(row, value)
+            else
+                when (row.dataKey) {
+                    case Some(val parent) -> session.setDetailExpanded(parent, value)
+                    case None -> return SemanticActionResult.Unavailable
+                }
+        return when (result) {
+            case Applied -> SemanticActionResult.Completed
+            case Rejected(_) -> SemanticActionResult.Rejected
+        }
+    }
+    private fun cellProperties(key: SemanticItemKey, column: Long): SemanticItemProperties? {
+        val at = source.indexOfKey(gridRowKey(key)) ?: return None
+        if (!source.rowKeyAt(at).hasCells)
+            return None
+        val row = source.rowAt(at)
+        val span = spansFor(row).span(column)
+        return Some(
+            SemanticItemProperties(
+                value = row.text(columns.columns[column], labelColumn(row)),
+                enabled = enabled,
+                focusable = true,
+                selected = Some(range?.intersects(at, span.column, span.count) ?: false)
+            )
+        )
+    }
     fun semantics(): ItemSemantics {
         val selected = ArrayList<SemanticItemKey>()
         when (selection) {
@@ -89,8 +150,18 @@ internal class GridRows<Row>(
                                 info.label,
                         enabled = enabled,
                         focusable = true,
-                        hierarchyLevel = hierarchy?.level,
-                        expanded = hierarchy?.expanded ?: None,
+                        hierarchyLevel =
+                            when (hierarchy) {
+                                case Some(val value) -> Some(value.level)
+                                case None -> when (details) {
+                                    case Some(_) -> if (info.dataKey != None)
+                                        Some(0L)
+                                    else
+                                        None
+                                    case None -> None
+                                }
+                            },
+                        expanded = expanded(info, hierarchy),
                         selectable = info.dataKey != None && !(hierarchy?.contextOnly ?: false),
                         selected =
                             when (info.dataKey) {
@@ -121,27 +192,7 @@ internal class GridRows<Row>(
                     }
                     case None -> None
                 },
-            setExpanded =
-                Some {
-                    key, next ->
-                    val current = session.currentModel
-                    when (current) {
-                        case Some(val model) -> if (model.result.rows === source) {
-                            val index = source.indexOfKey(key)
-                            when (index) {
-                                case Some(val at) -> when (
-                                    session.setExpanded(source.rowKeyAt(at), next)
-                                ) {
-                                    case Applied -> SemanticActionResult.Completed
-                                    case Rejected(_) -> SemanticActionResult.Rejected
-                                }
-                                case None -> SemanticActionResult.Unavailable
-                            }
-                        } else
-                            SemanticActionResult.Unavailable
-                        case None -> SemanticActionResult.Unavailable
-                    }
-                },
+            setExpanded = Some { key, next -> expand(key, next) },
             grid =
                 Some(
                     SemanticGrid(
@@ -153,34 +204,7 @@ internal class GridRows<Row>(
                                 Some(column.title)
                             )
                         },
-                        {
-                            key, column ->
-                            val index = source.indexOfKey(gridRowKey(key))
-                            when (index) {
-                                case Some(val at) -> {
-                                    val row = source.rowAt(at)
-                                    val span = spansFor(row).span(column)
-                                    Some(
-                                        SemanticItemProperties(
-                                            value =
-                                                row.text(columns.columns[column], labelColumn(row)),
-                                            enabled = enabled,
-                                            focusable = true,
-                                            selected =
-                                                Some(
-                                                    range?.intersects(
-                                                        at,
-                                                        span.column,
-                                                        span.count
-                                                    ) ?:
-                                                        false
-                                                )
-                                        )
-                                    )
-                                }
-                                case None -> None
-                            }
-                        },
+                        { key, column -> cellProperties(key, column) },
                         span =
                             when (columnSpans) {
                                 case Some(_) -> Some {
@@ -188,14 +212,27 @@ internal class GridRows<Row>(
                                     val index = source.indexOfKey(gridRowKey(key))
                                     when (index) {
                                         case Some(val at) -> {
-                                            val range = spansFor(source.rowAt(at)).span(column)
-                                            SemanticGridSpan(range.column, range.count)
+                                            if (source.rowKeyAt(at).hasCells) {
+                                                val range = spansFor(source.rowAt(at)).span(column)
+                                                SemanticGridSpan(range.column, range.count)
+                                            } else
+                                                SemanticGridSpan(column)
                                         }
                                         case None -> SemanticGridSpan(column)
                                     }
                                 }
                                 case None -> None
-                            }
+                            },
+                        hasCells =
+                            if (hasDetails)
+                                Some {
+                                    key -> when (val index = source.indexOfKey(gridRowKey(key))) {
+                                        case Some(val at) -> source.rowKeyAt(at).hasCells
+                                        case None -> false
+                                    }
+                                }
+                            else
+                                None
                     )
                 )
         )
@@ -245,7 +282,13 @@ internal class GridBody<Row>(
     ): LayoutResult<Rect> {
         val plan = context.input<GridMeasurePlan>()
         when (plan.probe) {
-            case Some(val probe) -> return gridMeasureContentRows(context, constraints, plan, probe)
+            case Some(val probe) -> return gridMeasureContentRows(
+                context,
+                constraints,
+                plan,
+                probe,
+                props.value.rows.source
+            )
             case None -> {}
         }
         val offset = plan.scroll.presentationOffset
@@ -391,6 +434,9 @@ internal class GridRowView<Row>(
                 case Data(val row, _) -> props.value.policy.height(row, plan.rows.estimate)
                 case Group(_) -> plan.rows.estimate
                 case Total(_) -> plan.rows.estimate
+                case Detail(_, _) -> throw IllegalStateException(
+                    Some("detail content uses its own row measure")
+                )
             }
         for (index in contributors) {
             val column = spans.columnIndex(index)

@@ -26,9 +26,13 @@ internal fun <Row> gridCopyText(
             )
         }
     }
+    var written = includeHeaders
     for (index in bounds.firstRow .. bounds.lastRow) {
-        if (includeHeaders || index != bounds.firstRow)
+        if (!rows.rowKeyAt(index).hasCells)
+            continue
+        if (written)
             output.append('\n')
+        written = true
         val row = rows.rowAt(index)
         val labelColumn = row.labelColumn(visibleColumns)
         for (at in 0L ..< columns.size) {

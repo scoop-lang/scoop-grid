@@ -1,0 +1,95 @@
+package scoop.grid.tests.details
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.ui.*
+import scoop.ui.component.button
+
+internal class DetailScene(private val probe: DetailProbe, scope: ComponentScope): Component(
+    scope
+) {
+    public override fun render(): View {
+        val probe = this.probe
+        return direction(
+            element(
+                DetailLayoutProps(
+                    probe,
+                    probe.model.result,
+                    probe.width.value,
+                    probe.enabled.value
+                ),
+                { props, scope -> DetailLayout(props, scope) },
+                [
+                    component(probe, { props, scope -> DetailGrid(props, scope) }),
+                    button("Outside grid", {}) { focus = FocusOptions(Some(probe.outside)) }
+                ]
+            ),
+            probe.direction.value
+        )
+    }
+}
+
+private class DetailGrid(private val props: Props<DetailProbe>, scope: ComponentScope): Component(
+    scope
+) {
+    init {
+        props.value.gridInput = Some(scope.input)
+    }
+    public override fun render(): View {
+        val probe = props.value
+        return dataGrid(probe.model) {
+            width = Some(probe.width.value);
+            height = 400.0;
+            rowHeight = 32.0;
+            headerHeight = 32.0
+            overscan = 32.0;
+            scroll = Some(probe.scroll);
+            handle = Some(probe.handle)
+            enabled = probe.enabled.value
+            labels = GridLabels(name = "Detail parent grid")
+        }
+    }
+}
+
+private class DetailLayoutProps(
+    val probe: DetailProbe,
+    val result: GridResult<DetailRecord>,
+    val width: Double,
+    val enabled: Boolean
+)
+
+private class DetailLayout(
+    private val props: Props<DetailLayoutProps>,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    init {
+        props.value.probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(props.value.width, 400.0)))
+        context.placeChild(0L, Point(12.0, 12.0))
+        context.measureChild(1L, Constraints(maxWidth = Some(220.0)))
+        context.placeChild(1L, Point(640.0, 24.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(900.0, 470.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val input = props.value
+        context.children()
+        context.onFrameComplete {
+            frame -> if (
+                frame.submission ==
+                    FrameSubmission.Accepted &&
+                    input.result ===
+                    input.probe.model.result &&
+                    input.width ==
+                    input.probe.width.value &&
+                    input.enabled ==
+                    input.probe.enabled.value
+            )
+                input.probe.accepted()
+        }
+    }
+}

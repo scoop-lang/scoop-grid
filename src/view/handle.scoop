@@ -155,6 +155,14 @@ public class DataGridHandle public constructor() {
         guard.checkMutation()
         return target?.setExpanded(key, value) ?: GridRowActionResult.Rejected("网格未挂载")
     }
+    public fun setDetailExpanded(key: ViewKey, value: Boolean): GridRowActionResult {
+        guard.checkMutation()
+        return target?.setDetailExpanded(key, value) ?: GridRowActionResult.Rejected("网格未挂载")
+    }
+    public fun focusDetail(key: ViewKey): Boolean {
+        guard.checkMutation()
+        return target?.focusDetail(key) ?: false
+    }
     public fun selectGroupRows(path: GridGroupPath, value: Boolean): GridRowActionResult {
         guard.checkMutation()
         return target?.selectGroupRows(path, value) ?: GridRowActionResult.Rejected("网格未挂载")
@@ -254,6 +262,8 @@ internal interface GridMount {
     fun pinRow(key: ViewKey, pin: GridRowPin): GridRowActionResult
     fun setRowSelected(key: ViewKey, value: Boolean, extend: Boolean): GridRowActionResult
     fun setExpanded(key: GridRowKey, value: Boolean): GridRowActionResult
+    fun setDetailExpanded(key: ViewKey, value: Boolean): GridRowActionResult
+    fun focusDetail(key: ViewKey): Boolean
     fun selectGroupRows(path: GridGroupPath, value: Boolean): GridRowActionResult
     fun selectPageRows(value: Boolean): GridRowActionResult
     fun clearRowSelection(): GridRowActionResult

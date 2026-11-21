@@ -1,0 +1,168 @@
+package scoop.grid.tests.details
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal fun DetailProbe.accepted() {
+    if (finished || waiting || waitingInput || !(window?.isFocused ?: false))
+        return
+    waiting = true
+    retry = false
+    when (phase) {
+        case _ if (phase == 8 || phase == 36 || phase == 47 || phase == 54) -> calls!!.post(
+            selectNode!!,
+            phase
+        )
+        case 40 -> calls!!.post(nativeRow!!, phase, 14)
+        case 43 -> calls!!.post(nativeRow!!, phase, 15)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun DetailProbe.completed(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(1, result, Some(f"native detail action at ${phase}"))
+    waiting = false
+    if (retry) {
+        frame!!.requestFrame();
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 1 -> assertTrue(handle.focusCell(detailAddress()))
+        case 2 -> key(36, "\r", 4)
+        case 4 -> {
+            assertTrue(model.setDetailExpanded(ViewKey.Number(50000L), true))
+        }
+        case 5 -> key(125, "\uf701", 4)
+        case 6 -> key(0, "a")
+        case 7 -> key(48, "\t")
+        case 10 -> key(53, "\u001b")
+        case 11 -> key(53, "\u001b")
+        case 12 -> key(125, "\uf701")
+        case 13 -> key(126, "\uf700")
+        case 14 -> model.pinRow(ViewKey.Number(0L), GridRowPin.Top)
+        case 15 -> scroll.scrollTo(Point(220.0, 120.0))
+        case 16 -> extra.value = 48.0
+        case 17 -> {
+            extra.value = 0.0;
+            width.value = 480.0;
+            direction.value = LayoutDirection.Rtl
+        }
+        case 18 -> enabled.value = false
+        case 19 -> {
+            enabled.value = true;
+            width.value = 600.0;
+            direction.value = LayoutDirection.Ltr
+            model.pinRow(ViewKey.Number(0L), GridRowPin.None)
+            scroll.scrollTo(Point(0.0, 0.0))
+        }
+        case 20 -> assertTrue(handle.focusDetail(ViewKey.Number(50000L)))
+        case 21 -> {
+            retired = Some(panel(50000L))
+            model.setDetailExpanded(ViewKey.Number(50000L), false)
+        }
+        case 22 -> assertTrue(handle.focusDetail(ViewKey.Number(0L)))
+        case 23 -> {
+            retired = Some(panel())
+            model.replaceData(DetailWindowSource(reads, first = 1L))
+        }
+        case 24 -> {
+            model.replaceData(DetailWindowSource(reads))
+            assertTrue(handle.beginEdit(detailAddress(column = "amount")))
+        }
+        case 25 -> {
+            editor!!.state.replaceAll("bad")
+            rejected(handle.setDetailExpanded(ViewKey.Number(0L), true))
+        }
+        case 26 -> {
+            editor!!.state.replaceAll("7")
+            assertEquals(GridEditAttempt.Pending, handle.commitEdit())
+            rejected(handle.setDetailExpanded(ViewKey.Number(0L), true))
+        }
+        case 27 -> assertTrue(pending!!.accept(DetailWindowSource(reads, amount = 7L)))
+        case 28 -> applied(handle.setDetailExpanded(ViewKey.Number(0L), true))
+        case 29 -> assertTrue(panel().handle.beginEdit(detailAddress(0L, "value")))
+        case 30 -> {
+            retired = Some(panel())
+            panel().editor!!.state.replaceAll("bad")
+            applied(handle.setDetailExpanded(ViewKey.Number(0L), false))
+        }
+        case 31 -> applied(handle.setDetailExpanded(ViewKey.Number(0L), true))
+        case 32 -> assertTrue(panel().handle.beginEdit(detailAddress(0L, "value")))
+        case 33 -> {
+            panel().editor!!.state.replaceAll("3")
+            assertEquals(GridEditAttempt.Pending, panel().handle.commitEdit())
+        }
+        case 34 -> {
+            retired = Some(panel())
+            applied(handle.setDetailExpanded(ViewKey.Number(0L), false))
+        }
+        case 35 -> {
+            assertFalse(
+                retired!!.pending!!.accept(TableRows([TableRecord(ViewKey.Number(0L), 3L)]))
+            )
+            applied(handle.setDetailExpanded(ViewKey.Number(0L), true))
+        }
+        case 38 -> {
+            retired = Some(panel())
+            model.setDetails(None)
+        }
+        case 39 -> {
+            model.setDetails(Some(definition(GridColumnId("name"))))
+            model.setColumnState(GridColumnState(GridColumnId("name"), visible = false))
+        }
+        case 42 -> assertTrue(handle.focusDetail(ViewKey.Number(0L)))
+        case 45 -> {
+            model.setColumnState(GridColumnState(GridColumnId("name")))
+            applied(handle.setDetailExpanded(ViewKey.Number(0L), true))
+        }
+        case 46 -> assertTrue(handle.focusDetail(ViewKey.Number(0L)))
+        case 49 -> {
+            retired = Some(panel())
+            model.setDetails(
+                Some(
+                    GridDetails<DetailRecord>(
+                        { _ -> empty() },
+                        column = Some(GridColumnId("name")),
+                        label = "Empty detail"
+                    )
+                )
+            )
+        }
+        case 50 -> assertTrue(handle.focusDetail(ViewKey.Number(0L)))
+        case 51 -> key(53, "\u001b")
+        case 52 -> model.setDetails(Some(definition(GridColumnId("name"))))
+        case 53 -> assertTrue(handle.focusDetail(ViewKey.Number(0L)))
+        case 56 -> {
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+            return
+        }
+        case 57 -> {
+            finished = true
+            application!!.requestExit()
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}
+
+private fun applied(value: GridRowActionResult) {
+    when (value) {
+        case Applied -> {};
+        case Rejected(val message) -> fail(Some(message))
+    }
+}
+
+private fun rejected(value: GridRowActionResult) {
+    when (value) {
+        case Rejected(_) -> {};
+        case Applied -> fail(Some("detail action bypassed edit gate"))
+    }
+}

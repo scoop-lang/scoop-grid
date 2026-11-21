@@ -42,7 +42,8 @@ internal fun <Row> gridRestoreView(
             Some(previous),
             pins,
             expanded,
-            previous.treeData
+            previous.treeData,
+            Some(gridRestoreDetails(saved.expandedDetails, previous, issues))
         )
     val nextHeaders = next.pivot?.schema?.headers ?: headers
     val defaults = gridReconcileColumns(presentation, next.displayColumns, nextHeaders)
@@ -72,7 +73,8 @@ internal fun <Row> gridRestoreView(
         when (saved.focusedCell) {
             case Some(val address) -> {
                 if (
-                    next.result.rows.indexOfKey(address.row) ==
+                    !address.row.hasCells ||
+                        next.result.rows.indexOfKey(address.row) ==
                         None ||
                         GridSpanColumns(states).indexOf(address.column) ==
                         None
@@ -96,7 +98,8 @@ internal fun <Row> gridRestoreView(
                 range,
                 position,
                 focus,
-                next.expanded
+                next.expanded,
+                next.details.keys
             ),
             issues.toArray()
         )

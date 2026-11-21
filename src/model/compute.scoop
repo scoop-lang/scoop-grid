@@ -11,14 +11,16 @@ internal class GridComputed<Row>(
     val source: TableSource<Row>,
     val columns: GridColumns<Row>,
     val query: GridQuery,
-    val result: GridResult<Row>,
+    val baseResult: GridResult<Row>,
     val pins: GridPinnedRows,
     val filtered: TableSource<Row>,
     val expanded: GridExpandedRows,
     val groups: GridGrouped<Row>? = None,
     val tree: GridTreeComputed<Row>? = None,
-    val pivot: GridPivoted<Row>? = None
+    val pivot: GridPivoted<Row>? = None,
+    val details: GridDetailState<Row> = GridDetailState<Row>()
 ) {
+    val result: GridResult<Row> = gridDetailResult(baseResult, details)
     val displayColumns: GridColumns<Row> get() = pivot?.schema?.columns ?: columns
     val pivotMode: Boolean get() = query.pivot != None
     val treeData: GridTreeData<Row>? get() = tree?.topology?.definition
@@ -36,7 +38,39 @@ internal fun <Row> gridCompute(
     previous: GridComputed<Row>?,
     pins: GridPinnedRows,
     expanded: GridExpandedRows,
-    treeData: GridTreeData<Row>? = None
+    treeData: GridTreeData<Row>? = None,
+    details: GridDetailState<Row>? = None
+): GridComputed<Row> {
+    val value = gridComputeBase(source, columns, query, previous, pins, expanded, treeData)
+    var configured = details ?: (previous?.details ?: GridDetailState<Row>())
+    when (previous) {
+        case Some(val old) -> if (old.source !== source)
+            configured = configured.surviving(source)
+        case None -> {}
+    }
+    return GridComputed(
+        value.source,
+        value.columns,
+        value.query,
+        value.baseResult,
+        value.pins,
+        value.filtered,
+        value.expanded,
+        value.groups,
+        value.tree,
+        value.pivot,
+        configured
+    )
+}
+
+private fun <Row> gridComputeBase(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    query: GridQuery,
+    previous: GridComputed<Row>?,
+    pins: GridPinnedRows,
+    expanded: GridExpandedRows,
+    treeData: GridTreeData<Row>?
 ): GridComputed<Row> {
     gridRequire(source.count >= 0L, "negative grid source count")
     val topology =

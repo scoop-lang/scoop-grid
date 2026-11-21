@@ -1,0 +1,115 @@
+package scoop.grid.tests.details
+
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+internal struct DetailRecord(val id: Long, val amount: Long)
+
+internal class DetailReads {
+    var rows = 0L
+    var views = 0L
+    var distantViews = 0L
+    var mounted = 0L
+    var unmounted = 0L
+}
+
+internal class DetailWindowSource(
+    val reads: DetailReads,
+    val first: Long = 0L,
+    val amount: Long = 1L
+): TableSource<DetailRecord> {
+    public override val count: Long get() = 100000L - first
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(first + index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val id) -> if (id >= first && id < 100000L)
+                Some(id - first)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): DetailRecord {
+        reads.rows += 1L
+        val id = first + index
+        return DetailRecord(
+            id,
+            if (id == 0L)
+                amount
+            else
+                id + 1L
+        )
+    }
+}
+
+internal fun detailAddress(id: Long = 0L, column: String = "id"): GridCellAddress =
+    GridCellAddress(ViewKey.Number(id), GridColumnId(column))
+
+internal fun DetailProbe.columns(): Array<GridColumn<DetailRecord>> {
+    val probe = this
+    return [
+        gridColumn<DetailRecord, Long>(
+            GridColumnId("id"),
+            "ID",
+            { row -> row.id },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(100.0))
+        ),
+        gridColumn<DetailRecord, String>(
+            GridColumnId("name"),
+            "Name",
+            { row -> f"Record ${row.id}" },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(180.0))
+        ),
+        gridColumn<DetailRecord, Long>(
+            GridColumnId("amount"),
+            "Amount",
+            { row -> row.amount },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(120.0)),
+            edit =
+                Some(
+                    gridEdit<DetailRecord, Long>(
+                        {
+                            value ->
+                            val editor = gridLongEditor(value)
+                            probe.editor = Some(editor)
+                            DetailEditor(editor, { options -> probe.options = Some(options) })
+                        },
+                        { _, completion -> probe.pending = Some(completion) }
+                    )
+                )
+        ),
+        gridColumn<DetailRecord, String>(
+            GridColumnId("note"),
+            "Note",
+            { _ -> "Wide data column" },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(320.0))
+        ),
+        gridColumn<DetailRecord, String>(
+            GridColumnId("end"),
+            "End",
+            { _ -> "End" },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(100.0))
+        )
+    ]
+}
+
+internal class DetailEditor<T>(
+    val editor: GridTextEditor<T>,
+    val observe: (GridEditorOptions) -> Unit
+): GridEditor<T> {
+    public override val composing: Boolean get() = editor.composing
+    public override fun candidate(): GridCandidate<T> = editor.candidate()
+    public override fun importText(text: String): String? = editor.importText(text)
+    public override fun cancelComposition() {
+        editor.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        observe(options)
+        return editor.view(options)
+    }
+}
