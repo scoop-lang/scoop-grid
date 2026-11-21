@@ -1,0 +1,272 @@
+package scoop.grid.tests.grouping
+
+import scoop.grid.*
+import scoop.platform.time.MonotonicTimeSource
+import scoop.test.*
+import scoop.tests.surface.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.time.Duration
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.window.*
+import scoop.window.native.*
+
+@Test
+private class GridGroupingWindowTest {
+    @Test
+    fun `native grouping shares expansion selection editing root pages and column controls`() {
+        val probe = GroupingProbe()
+        try {
+            context(ThemeSource(shadcnTheme())) {
+                UiHost { host, active, event -> probe.event(host, active, event) }.use {
+                    host -> Application().run(host)
+                }
+            }
+            assertTrue(probe.finished)
+            assertFalse(probe.handle.isAttached)
+            assertEquals(1, probe.submissions)
+        } catch (error: Throwable) {
+            println(probe.diagnostic)
+            groupingFailure(error)
+            throw error
+        } finally {
+            probe.close()
+        }
+    }
+}
+
+private fun groupingFailure(error: Throwable) {
+    if (error is ResourceUseException) {
+        groupingFailure(error.primaryFailure)
+        groupingFailure(error.cleanupFailure)
+    } else
+        if (error is AssertionFailure) {
+            println(
+                f"${error.location.file}:${error.location.line}: ${error.message ?: "assertion"}"
+            )
+        } else
+            if (error is Exception)
+                error.printStackTrace()
+}
+
+internal struct GroupingWindowRow(val index: Long, val amount: Long)
+
+internal class GroupingWindowSource(private val first: Long = 1L): TableSource<GroupingWindowRow> {
+    public override val count: Long get() = 1000L
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): GroupingWindowRow =
+        GroupingWindowRow(
+            index,
+            if (index == 0L)
+                first
+            else
+                index + 1L
+        )
+}
+
+internal fun groupWindowPath(value: Long): GridGroupPath =
+    GridGroupPath([GridGroupPart(GridColumnId("group"), GridLiteral.Integer(value))])
+
+internal class GroupingProbe: Closeable {
+    val handle = DataGridHandle()
+    val enabled = state(true)
+    var editor: GridTextEditor<Long>? = None
+    var options: GridEditorOptions? = None
+    var pending: GridCommit<GroupingWindowRow>? = None
+    var submissions = 0
+    var dataBuilds = 0L
+    val model =
+        DataGridState(
+            GroupingWindowSource(),
+            columns(),
+            GridQuery(
+                grouping = [GridColumnId("group")],
+                aggregations =
+                    [GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum"))],
+                totals = GridTotals(GridTotalPlacement.After, "All")
+            ),
+            rowSelection = GridRowSelectionMode.Multiple
+        )
+    val group = GridRowKey.Group(groupWindowPath(0L))
+    val far = GridRowKey.Group(groupWindowPath(400L))
+    val address = GridCellAddress(ViewKey.Number(0L), GridColumnId("amount"))
+    val groupAddress = GridCellAddress(group, GridColumnId("group"))
+    val groupAmount = GridCellAddress(group, GridColumnId("amount"))
+    var aggregate: GridAggregations? = None
+    var table: NativeNode? = None
+    var groupCell: NativeNode? = None
+    var groupRow: NativeNode? = None
+    var oldGroup: NativeNode? = None
+    var farRow: NativeNode? = None
+    var member: NativeNode? = None
+    var button: NativeNode? = None
+    var checkbox: NativeNode? = None
+    var selector: NativeNode? = None
+    var option: NativeNode? = None
+    var frame: ComponentScope? = None
+    var application: ActiveApplication? = None
+    var window: Window? = None
+    var ui: UiWindow? = None
+    var root: NativeNode? = None
+    var calls: NativeCalls? = None
+    var phase = 0
+    var waiting = false
+    var retry = false
+    var finished = false
+    val focused: Boolean get() = options?.focus?.hasFocus ?: false
+    val diagnostic: String get() =
+        f"grouping phase=${phase}, waiting=${waiting}, retry=${retry}, focus=${focused}, rows=${
+            model.result.rows.count
+        }, builds=${dataBuilds}, submitting=${handle.isSubmitting}"
+    private val retained = ArrayList<NativeNode>()
+    private val timeout = MonotonicTimeSource.now() + Duration.seconds(35L)
+
+    private fun columns(): Array<GridColumn<GroupingWindowRow>> {
+        val probe = this
+        return [
+            gridColumn<GroupingWindowRow, Long>(
+                GridColumnId("group"),
+                "Group",
+                { row -> row.index / 2L },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(290.0)),
+                groupable = true
+            ),
+            gridColumn<GroupingWindowRow, Long>(
+                GridColumnId("amount"),
+                "Amount",
+                { row -> row.amount },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(220.0)),
+                cell =
+                    Some {
+                        row ->
+                        probe.dataBuilds += 1L
+                        label(f"${row.amount}")
+                    },
+                edit =
+                    Some(
+                        gridEdit<GroupingWindowRow, Long>(
+                            {
+                                value ->
+                                val editor = gridLongEditor(value)
+                                probe.editor = Some(editor)
+                                GroupingEditor(editor, probe)
+                            },
+                            {
+                                _, completion ->
+                                probe.submissions += 1
+                                probe.pending = Some(completion)
+                            }
+                        )
+                    ),
+                aggregations = [gridSumLongAggregation()]
+            )
+        ]
+    }
+    fun event(host: UiHost, active: ActiveApplication, event: ApplicationEvent) {
+        when (event) {
+            case Resumed -> {
+                application = Some(active)
+                active.setControlFlow(ControlFlow.WaitUntil(timeout))
+                val native =
+                    active.createWindow(
+                        windowAttributes {
+                            title = "Scoop Grid grouping"
+                            size = LogicalSize(980.0, 780.0)
+                        }
+                    )
+                window = Some(native)
+                ui = host.attach(native, { scope -> GroupingScene(this, scope) })
+                @Unsafe
+                {
+                    native.acquireNativeWindow().use {
+                        lease -> @Unsafe
+                        {
+                            when (lease.handle) {
+                                case AppKit(_, val pointer) -> root =
+                                    Some(keep(NativeNode(nativeRoot(pointer)!!)))
+                            }
+                        }
+                    }
+                }
+                calls =
+                    Some(
+                        NativeCalls(active.proxy(), { tag -> inspect(tag) }) {
+                            tag,
+                            result -> completed(tag, result)
+                        }
+                    )
+                native.requestFocus()
+            }
+            case Window(_, WindowEvent.Focused(true)) -> frame?.requestFrame()
+            case NewEvents(StartCause.Deadline) -> fail(Some(diagnostic))
+            else -> {}
+        }
+    }
+    fun keep(node: NativeNode): NativeNode {
+        retained.add(node)
+        return node
+    }
+    fun named(id: String): NativeNode =
+        keep(root!!.find(id) ?: fail(Some(f"missing ${id} at ${phase}")))
+    fun find(node: NativeNode, role: String, name: String? = None): NativeNode? {
+        if (node.flag(0) && node.text(2, Some(role)) && (name == None || node.text(0, name)))
+            return Some(node)
+        for (index in 0L ..< node.count) {
+            val found = find(keep(node.child(index)), role, name)
+            when (found) {
+                case Some(_) -> return found
+                case None -> {}
+            }
+        }
+        return None
+    }
+    fun key(code: Int) {
+        assertTrue(sendSurfaceKey(window!!, code, true))
+        assertTrue(sendSurfaceKey(window!!, code, false))
+    }
+    fun applied(result: GridRowActionResult) {
+        when (result) {
+            case Applied -> {}
+            case Rejected(val reason) -> fail(Some(reason))
+        }
+    }
+    fun rejected(result: GridRowActionResult) {
+        when (result) {
+            case Rejected(_) -> {}
+            case Applied -> fail(Some("an invalid edit allowed collapsing"))
+        }
+    }
+    public override fun close() {
+        calls?.close()
+        for (node in retained)
+            node.close()
+    }
+}
+
+private class GroupingEditor(
+    private val editor: GridTextEditor<Long>,
+    private val probe: GroupingProbe
+): GridEditor<Long> {
+    public override val composing: Boolean get() = editor.composing
+    public override fun candidate(): GridCandidate<Long> = editor.candidate()
+    public override fun importText(text: String): String? = editor.importText(text)
+    public override fun cancelComposition() {
+        editor.cancelComposition()
+    }
+    public override fun view(options: GridEditorOptions): View {
+        probe.options = Some(options)
+        return editor.view(options)
+    }
+}

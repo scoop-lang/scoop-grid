@@ -1,0 +1,111 @@
+package scoop.grid
+
+import scoop.ui.component.TableSource
+
+internal struct GridPageRange(
+    val start: Long,
+    val count: Long,
+    val pages: Long,
+    val pagination: GridPagination
+)
+
+internal fun gridPageRange(count: Long, pagination: GridPagination): GridPageRange =
+    when (pagination) {
+        case Disabled -> GridPageRange(
+            0L,
+            count,
+            if (count == 0L)
+                0L
+            else
+                1L,
+            pagination
+        )
+        case Page(val requested, val size) -> {
+            val pages =
+                count /
+                    size +
+                    if (count % size == 0L)
+                        0L
+                    else
+                        1L
+            val page =
+                if (pages == 0L)
+                    0L
+                else
+                    if (requested >= pages)
+                        pages - 1L
+                    else
+                        requested
+            val start = page * size
+            GridPageRange(
+                start,
+                if (count - start < size)
+                    count - start
+                else
+                    size,
+                pages,
+                GridPagination.Page(page, size)
+            )
+        }
+    }
+
+internal fun <Row> gridPresentGroups(
+    groups: GridGrouped<Row>,
+    query: GridQuery,
+    expanded: GridExpandedRows,
+    pins: GridPinnedRows,
+    includeGroups: Boolean = true,
+    previous: GridComputed<Row>? = None
+): (GridResult<Row>, GridQuery) {
+    val bounds = gridPageRange(groups.order.roots.size, query.pagination)
+    val roots = Array<Long>(bounds.count) { at -> groups.order.roots[bounds.start + at] }
+    val start =
+        if (roots.size == 0L)
+            0L
+        else
+            groups.order.starts[roots[0L]]
+    var count = 0L
+    for (root in roots)
+        count += groups.topology.nodes[root].count
+    val cached =
+        when (previous) {
+            case Some(val old) -> if (
+                old.result.ordered ===
+                    groups.order.rows &&
+                    old.query.pagination ==
+                    bounds.pagination
+            )
+                Some(old.result.pageRows)
+            else
+                None
+            case None -> None
+        }
+    val page: TableSource<Row> =
+        cached ?:
+            when (query.pagination) {
+                case Disabled -> groups.order.rows
+                case Page(_, _) -> GridPageRows(groups.order.rows, start, count)
+            }
+    val rows = GridGroupedRows(groups, roots, expanded, query.groupTotals, includeGroups)
+    val result =
+        gridComposeResult(
+            rows,
+            page,
+            groups.order.rows,
+            groups.topology.source.count,
+            bounds.pages,
+            pins,
+            groups.aggregates,
+            query.totals,
+            groups.order.roots.size,
+            GridPageUnit.Roots,
+            Some(groups)
+        )
+    return (
+        result,
+        if (query.pagination == bounds.pagination)
+            query
+        else
+            query.withPagination(bounds.pagination)
+    )
+}

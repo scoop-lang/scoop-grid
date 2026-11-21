@@ -8,7 +8,7 @@ internal fun <Row> gridCopyText(
     columns: Array<GridColumn<Row>>,
     bounds: GridCellRangeBounds,
     includeHeaders: Boolean,
-    labelColumn: GridColumnId?
+    visibleColumns: Array<GridColumn<Row>>
 ): String {
     val output = StringBuilder()
     if (includeHeaders) {
@@ -30,6 +30,7 @@ internal fun <Row> gridCopyText(
         if (includeHeaders || index != bounds.firstRow)
             output.append('\n')
         val row = rows.rowAt(index)
+        val labelColumn = row.labelColumn(visibleColumns)
         for (at in 0L ..< columns.size) {
             if (at > 0L)
                 output.append('\t')

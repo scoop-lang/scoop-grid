@@ -16,39 +16,103 @@ internal fun <Row> gridPinResult(
     aggregates: GridAggregations,
     totals: GridTotals = GridTotals()
 ): GridResult<Row> {
+    return gridComposeResult(
+        GridDataRows(page),
+        page,
+        ordered,
+        total,
+        pages,
+        pins,
+        aggregates,
+        totals,
+        total,
+        GridPageUnit.Records,
+        None
+    )
+}
+
+internal fun <Row> gridComposeResult(
+    logical: GridRowSource<Row>,
+    page: TableSource<Row>,
+    ordered: TableSource<Row>,
+    total: Long,
+    pages: Long,
+    pins: GridPinnedRows,
+    aggregates: GridAggregations,
+    totals: GridTotals,
+    rootCount: Long,
+    pageUnit: GridPageUnit,
+    groups: GridGrouped<Row>?
+): GridResult<Row> {
     val top = GridPickedRows(ordered, pins.top)
     val bottom = GridPickedRows(ordered, pins.bottom)
     if (top.count == 0L && bottom.count == 0L)
         return GridResult(
-            gridTotalRows(GridDataRows(page), aggregates, totals),
+            gridTotalRows(logical, aggregates, totals),
             page,
             ordered,
             total,
             pages,
             0L,
             0L,
-            aggregates
+            aggregates,
+            rootCount,
+            pageUnit
         )
     val omitted = ArrayList<Long>()
     for (fixed in [top, bottom])
         for (index in 0L ..< fixed.count)
-            when (page.indexOfKey(fixed.keyAt(index))) {
+            when (logical.indexOfKey(GridRowKey.Data(fixed.keyAt(index)))) {
                 case Some(val at) -> omitted.add(at)
                 case None -> {}
             }
     omitted.sortWith(comparatorOf<Long> { a, b -> a.compareTo(b) })
     val body =
         if (omitted.size == 0L)
-            page
+            logical
         else
-            GridUnpinnedRows(page, omitted.toArray())
+            GridUnpinnedLogicalRows(logical, omitted.toArray())
     val rows =
         GridCombinedRows(
-            GridDataRows(top),
-            gridTotalRows(GridDataRows(body), aggregates, totals),
-            GridDataRows(bottom)
+            gridPinnedData(top, groups),
+            gridTotalRows(body, aggregates, totals),
+            gridPinnedData(bottom, groups)
         )
-    return GridResult(rows, page, ordered, total, pages, top.count, bottom.count, aggregates)
+    return GridResult(
+        rows,
+        page,
+        ordered,
+        total,
+        pages,
+        top.count,
+        bottom.count,
+        aggregates,
+        rootCount,
+        pageUnit
+    )
+}
+
+private fun <Row> gridPinnedData(
+    source: TableSource<Row>,
+    groups: GridGrouped<Row>?
+): GridRowSource<Row> =
+    when (groups) {
+        case Some(val value) -> GridGroupedDataRows(source, value)
+        case None -> GridDataRows(source)
+    }
+
+private class GridUnpinnedLogicalRows<Row>(
+    private val source: GridRowSource<Row>,
+    omitted: Array<Long>
+): GridRowSource<Row> {
+    private val rows = GridUnpinnedRows(source, omitted)
+    public override val count: Long get() = rows.count
+    public override fun keyAt(index: Long): ViewKey = rows.keyAt(index)
+    public override fun rowAt(index: Long): GridRow<Row> = rows.rowAt(index)
+    public override fun indexOfKey(key: ViewKey): Long? = rows.indexOfKey(key)
+    public override fun infoAt(index: Long): GridRowInfo = source.infoAt(rows.sourceIndex(index))
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? =
+        source.hierarchyAt(rows.sourceIndex(index))
 }
 
 internal class GridPickedRows<Row>(
@@ -78,7 +142,7 @@ private class GridUnpinnedRows<Row>(
     private val omitted: Array<Long>
 ): TableSource<Row> {
     public override val count: Long get() = source.count - omitted.size
-    private fun sourceIndex(index: Long): Long {
+    fun sourceIndex(index: Long): Long {
         gridRequire(index >= 0L && index < count, "grid row index is out of range")
         var left = 0L
         var right = omitted.size

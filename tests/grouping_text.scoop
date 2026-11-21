@@ -1,0 +1,137 @@
+package scoop.grid
+
+import scoop.math.BigDecimal
+import scoop.text.contains
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+private fun groupingTextModel(): DataGridState<(Long, Long)> {
+    val source =
+        TableRows<(Long, Long)>(
+            [
+                TableRecord(ViewKey.Number(0L), (10L, 4L)),
+                TableRecord(ViewKey.Number(1L), (2L, 3L)),
+                TableRecord(ViewKey.Number(2L), (10L, 1L))
+            ]
+        )
+    val columns: Array<GridColumn<(Long, Long)>> =
+        [
+            gridColumn<(Long, Long), Long>(
+                GridColumnId("region"),
+                "Region",
+                {
+                    row ->
+                    val(region, _) = row;
+                    region
+                },
+                gridLongValues(),
+                groupable = true
+            ),
+            gridColumn<(Long, Long), Long>(
+                GridColumnId("amount"),
+                "Amount",
+                {
+                    row ->
+                    val(_, amount) = row;
+                    amount
+                },
+                gridLongValues(),
+                aggregations = [gridSumLongAggregation()]
+            )
+        ]
+    return DataGridState(
+        source,
+        columns,
+        GridQuery(
+            grouping = [GridColumnId("region")],
+            aggregations =
+                [GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum"))],
+            groupTotals = GridTotals(GridTotalPlacement.After, "Subtotal"),
+            totals = GridTotals(GridTotalPlacement.After, "All")
+        ),
+        rowSelection = GridRowSelectionMode.Multiple,
+        expandedRows = GridExpandedRows(true)
+    )
+}
+
+@Test
+private class GridGroupingTextTest {
+    @Test
+    fun `group displayed CSV follows expansion and independently includes groups totals and records`() {
+        val model = groupingTextModel()
+        assertEquals("Region,Amount\r\n2,3\r\n10,4\r\n10,1\r\n", model.exportCsv())
+        assertEquals(
+            "Region,Amount\r\n2 (1),3\r\n2,3\r\n2 Subtotal,3\r\n10 (2),5\r\n10,4\r\n10,1\r\n10 Subtotal,5\r\nAll,8\r\n",
+            model.exportCsv(GridCsvOptions(data = GridExportData.Displayed))
+        )
+        assertEquals(
+            "Region,Amount\r\n2,3\r\n2 Subtotal,3\r\n10,4\r\n10,1\r\n10 Subtotal,5\r\nAll,8\r\n",
+            model.exportCsv(GridCsvOptions(data = GridExportData.Displayed, includeGroups = false))
+        )
+        assertEquals(
+            model.exportCsv(),
+            model.exportCsv(
+                GridCsvOptions(
+                    data = GridExportData.Displayed,
+                    includeGroups = false,
+                    includeTotals = false
+                )
+            )
+        )
+        assertTrue(model.setExpanded(GridRowKey.Group(groupingPath(Some(10L))), false))
+        model.setPagination(GridPagination.Page(0L, 1L))
+        assertEquals(
+            "Region,Amount\r\n2 (1),3\r\n2,3\r\n2 Subtotal,3\r\nAll,8\r\n",
+            model.exportCsv(GridCsvOptions(data = GridExportData.Displayed))
+        )
+        assertEquals(
+            "Region,Amount\r\n2 (1),3\r\n2,3\r\n2 Subtotal,3\r\n10 (2),5\r\nAll,8\r\n",
+            model.exportCsv(
+                GridCsvOptions(scope = GridExportScope.AllFiltered, data = GridExportData.Displayed)
+            )
+        )
+        assertEquals(
+            "Region,Amount\r\n2,3\r\n10,4\r\n10,1\r\n",
+            model.exportCsv(GridCsvOptions(scope = GridExportScope.AllFiltered))
+        )
+        model.setSelectedRows([ViewKey.Number(0L), ViewKey.Number(1L)])
+        assertEquals(
+            "Region,Amount\r\n10,4\r\n2,3\r\n",
+            model.exportCsv(
+                GridCsvOptions(
+                    scope = GridExportScope.SelectedRows,
+                    data = GridExportData.Displayed
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `group copy find numeric statistics and hidden label columns share the same displayed value`() {
+        val model = groupingTextModel()
+        val group = GridRowKey.Group(groupingPath(Some(2L)))
+        val region = GridColumnId("region")
+        val amount = GridColumnId("amount")
+        val label = GridCellAddress(group, region)
+        val value = GridCellAddress(group, amount)
+        assertEquals(Some("2 (1)"), model.copyText(Some(label)))
+        assertEquals(Some(label), model.findCell("2 (1)")?.address)
+        assertTrue(
+            model.setCellRange(
+                Some(GridCellRange(value, GridCellAddress(ViewKey.Number(1L), amount)))
+            )
+        )
+        assertEquals(Some("3\n3"), model.copyText())
+        assertEquals(BigDecimal(6L), model.rangeStatistics()!!.sum)
+        model.clearCellRange()
+        model.setColumnState(GridColumnState(region, visible = false))
+        assertEquals(Some("2 (1) · 3"), model.copyText(Some(value)))
+        assertEquals(Some(value), model.findCell("2 (1)")?.address)
+        assertTrue(
+            model.exportCsv(GridCsvOptions(data = GridExportData.Displayed)).contains(
+                "2 (1) · 3\r\n"
+            )
+        )
+    }
+}

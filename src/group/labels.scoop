@@ -1,0 +1,17 @@
+package scoop.grid
+
+public class GridGroupingLabels public constructor(
+    public val none: String = "不分组",
+    public val level: (Long) -> String = { index -> f"第 ${index} 级分组" },
+    public val levelName: (String) -> String = { column -> f"${column} 列分组层级" },
+    public val value: String = "分组值",
+    public val metric: (String) -> String = { column -> f"${column} 聚合值" },
+    public val sortName: (String) -> String = { column -> f"${column} 同级组排序依据" },
+    public val directionName: (String) -> String = { column -> f"${column} 同级组排序方向" },
+    public val ascending: String = "升序",
+    public val descending: String = "降序",
+    public val hiddenTotals: String = "隐藏组小计",
+    public val beforeTotals: String = "组内开头显示小计",
+    public val afterTotals: String = "组内末尾显示小计",
+    public val totalsName: String = "分组小计位置"
+)

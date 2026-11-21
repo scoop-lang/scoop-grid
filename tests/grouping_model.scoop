@@ -1,0 +1,257 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+@Test
+private class GridGroupingModelTest {
+    @Test
+    fun `group metric missing and failed results follow valid values in both directions`() {
+        val source =
+            GroupingSource(
+                [
+                    GroupingRecord(Some(10L), "", Some(Long.MAX_VALUE), "a"),
+                    GroupingRecord(Some(2L), "", None, "b"),
+                    GroupingRecord(Some(10L), "", Some(1L), "c"),
+                    GroupingRecord(Some(0L), "", Some(7L), "d"),
+                    GroupingRecord(Some(20L), "", Some(-3L), "e")
+                ]
+            )
+        val model = DataGridState(source, groupingColumns(source.reads), groupingQuery(false))
+        for (descending in [false, true]) {
+            model.setQuery(
+                model.query.withGroupSorting(
+                    [
+                        GridGroupSort(
+                            GridColumnId("region"),
+                            GridGroupSortBy.Aggregate(GridColumnId("amount")),
+                            if (descending)
+                                GridSortDirection.Descending
+                            else
+                                GridSortDirection.Ascending
+                        )
+                    ]
+                )
+            )
+            val expected =
+                if (descending)
+                    [0L, 20L, 2L, 10L]
+                else
+                    [20L, 0L, 2L, 10L]
+            for (at in 0L ..< expected.size)
+                assertEquals(
+                    GridRowKey.Group(groupingPath(Some(expected[at]))),
+                    model.result.rows.rowKeyAt(at)
+                )
+        }
+        assertEquals(
+            Some(GridAggregateDisplay.Missing),
+            groupingInfo(model.result.rows, groupingPath(Some(2L)))
+            .aggregates.total(GridColumnId("amount"))
+        )
+        when (
+            groupingInfo(model.result.rows, groupingPath(Some(10L))).aggregates.total(
+                GridColumnId("amount")
+            )
+        ) {
+            case Some(GridAggregateDisplay.Failed(_)) -> {}
+            else -> fail(Some("overflow was not represented as an aggregate failure"))
+        }
+        assertEquals(5L, source.reads.amounts)
+    }
+
+    @Test
+    fun `group identities separate typed values paths labels and business namespaces`() {
+        val id = GridColumnId("a:😀")
+        val literals: Array<GridLiteral> =
+            [
+                GridLiteral.Empty,
+                GridLiteral.Text(""),
+                GridLiteral.Text("0"),
+                GridLiteral.Integer(0L),
+                GridLiteral.Number(0.0),
+                GridLiteral.BooleanValue(false)
+            ]
+        val keys = HashSet<ViewKey>()
+        for (value in literals) {
+            val path = GridGroupPath([GridGroupPart(id, value)])
+            val key = GridRowKey.Group(path)
+            assertTrue(keys.add(key.viewKey))
+            assertTrue(keys.add(GridRowKey.Total(GridTotalKey.Group(path)).viewKey))
+            assertTrue(keys.add(GridRowKey.Data(key.viewKey).viewKey))
+            assertEquals(key, GridRowKey.Group(GridGroupPath([GridGroupPart(id, value)])))
+        }
+        val zero = GridGroupPath([GridGroupPart(id, GridLiteral.Number(0.0))])
+        val negative = GridGroupPath([GridGroupPart(id, GridLiteral.Number(-0.0))])
+        assertEquals(zero, negative)
+        assertEquals(zero.hash(), negative.hash())
+        assertEquals(GridRowKey.Group(zero).viewKey, GridRowKey.Group(negative).viewKey)
+        val a = groupingPath(Some(2L), Some("same"))
+        val b = groupingPath(Some(10L), Some("same"))
+        assertTrue(a != b)
+        assertTrue(GridRowKey.Group(a).viewKey != GridRowKey.Group(b).viewKey)
+        assertEquals(Some(groupingPath(Some(2L))), a.parent)
+    }
+
+    @Test
+    fun `group ordering uses original types while repeated display labels stay distinct`() {
+        val source = GroupingSource(groupingRecords())
+        val model = DataGridState(source, groupingColumns(source.reads, true), groupingQuery(false))
+        assertEquals(GridPageUnit.Roots, model.result.pageUnit)
+        assertEquals(4L, model.result.rootCount)
+        assertEquals(7L, model.result.totalRows)
+        assertEquals(4L, model.result.rows.count)
+        val expected: Array<Long?> = [Some(0L), Some(2L), Some(10L), None]
+        for (at in 0L ..< expected.size) {
+            val key = GridRowKey.Group(groupingPath(expected[at]))
+            assertEquals(key, model.result.rows.rowKeyAt(at))
+            assertEquals(Some(at), model.result.rows.indexOfKey(key))
+            assertEquals(
+                Some(
+                    if (at == 3L)
+                        ""
+                    else
+                        "Region"
+                ),
+                model.result.rows.infoAt(at).label
+            )
+            assertEquals(Some(false), model.result.rows.hierarchyAt(at)!!.expanded)
+        }
+        model.setQuery(
+            model.query.withGroupSorting(
+                [GridGroupSort(GridColumnId("region"), direction = GridSortDirection.Descending)]
+            )
+        )
+        assertEquals(GridRowKey.Group(groupingPath(Some(10L))), model.result.rows.rowKeyAt(0L))
+        assertEquals(GridRowKey.Group(groupingPath(None)), model.result.rows.rowKeyAt(3L))
+    }
+
+    @Test
+    fun `group aggregation preserves input order and presentation changes reuse typed results`() {
+        val source = GroupingSource(groupingRecords())
+        val model =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                groupingQuery(),
+                expandedRows = GridExpandedRows(true)
+            )
+        assertEquals(7L, source.reads.amounts)
+        val grand = model.result.aggregates
+        assertEquals(Some(GridAggregateDisplay.Value("abcdefg")), grand.total(GridColumnId("note")))
+        assertEquals(Some(GridAggregateDisplay.Value("26")), grand.total(GridColumnId("amount")))
+        val region = groupingInfo(model.result.rows, groupingPath(Some(10L)))
+        val team = groupingInfo(model.result.rows, groupingPath(Some(10L), Some("same")))
+        assertEquals(3L, region.count)
+        assertEquals(2L, team.count)
+        assertEquals(
+            Some(GridAggregateDisplay.Value("acg")),
+            region.aggregates.total(GridColumnId("note"))
+        )
+        assertEquals(
+            Some(GridAggregateDisplay.Value("ag")),
+            team.aggregates.total(GridColumnId("note"))
+        )
+        source.reads.forbidden = true
+        val key = GridRowKey.Group(region.path)
+        assertTrue(model.setExpanded(key, false))
+        assertTrue(model.setExpanded(key, true))
+        model.setQuery(model.query.withGroupTotals(GridTotals(GridTotalPlacement.After)))
+        model.setPagination(GridPagination.Page(2L, 1L))
+        model.pinRow(ViewKey.Number(0L), GridRowPin.Top)
+        for (index in 0L ..< model.result.rows.count) {
+            val rows = model.result.rows
+            assertEquals(Some(index), rows.indexOfKey(rows.rowKeyAt(index)))
+            rows.hierarchyAt(index)
+        }
+        assertTrue(grand === model.result.aggregates)
+        assertTrue(region === groupingInfo(model.result.rows, region.path))
+        assertEquals(7L, source.reads.amounts)
+        source.reads.forbidden = false
+    }
+
+    @Test
+    fun `group metric ordering and leaf sorting are independent and missing values stay last`() {
+        val source = GroupingSource(groupingRecords())
+        val model =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                groupingQuery().withSorting(
+                    [GridSort(GridColumnId("amount"), GridSortDirection.Descending)]
+                ).withGroupSorting(
+                    [
+                        GridGroupSort(
+                            GridColumnId("region"),
+                            GridGroupSortBy.Aggregate(GridColumnId("amount")),
+                            GridSortDirection.Descending
+                        ),
+                        GridGroupSort(
+                            GridColumnId("team"),
+                            direction = GridSortDirection.Descending
+                        )
+                    ]
+                ),
+                expandedRows = GridExpandedRows(true)
+            )
+        groupingAssertKeys(groupingDataKeys(model.result.rows), [0L, 6L, 2L, 4L, 1L, 3L, 5L])
+        assertEquals(GridRowKey.Group(groupingPath(Some(10L))), model.result.rows.rowKeyAt(0L))
+        val aggregateReads = source.reads.amounts
+        val grand = model.result.aggregates
+        model.setQuery(
+            model.query.withSorting([]).withGroupSorting(
+                [
+                    GridGroupSort(
+                        GridColumnId("region"),
+                        GridGroupSortBy.Aggregate(GridColumnId("note"))
+                    )
+                ]
+            )
+        )
+        assertEquals(aggregateReads, source.reads.amounts)
+        assertTrue(grand === model.result.aggregates)
+        assertEquals(GridRowKey.Group(groupingPath(Some(10L))), model.result.rows.rowKeyAt(0L))
+    }
+
+    @Test
+    fun `group root pages keep descendants subtotals and fixed members together`() {
+        val source = GroupingSource(groupingRecords())
+        val query =
+            groupingQuery(false).withPagination(GridPagination.Page(1L, 1L))
+            .withGroupTotals(GridTotals(GridTotalPlacement.After, "Subtotal"))
+            .withTotals(GridTotals(GridTotalPlacement.After, "All"))
+        val model =
+            DataGridState(
+                source,
+                groupingColumns(source.reads),
+                query,
+                pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(3L)])
+            )
+        assertEquals(4L, model.result.pageCount)
+        assertEquals(2L, model.result.pageRows.count)
+        assertEquals(4L, model.result.rows.count)
+        val path = groupingPath(Some(2L))
+        assertTrue(model.setExpanded(GridRowKey.Group(path), true))
+        val rows = model.result.rows
+        assertEquals(6L, rows.count)
+        assertEquals(GridRowKey.Data(ViewKey.Number(0L)), rows.rowKeyAt(0L))
+        assertEquals(GridRowKey.Group(path), rows.rowKeyAt(1L))
+        assertEquals(GridRowKey.Data(ViewKey.Number(1L)), rows.rowKeyAt(2L))
+        assertEquals(GridRowKey.Total(GridTotalKey.Group(path)), rows.rowKeyAt(3L))
+        assertEquals(GridRowKey.Total(GridTotalKey.AllFiltered), rows.rowKeyAt(4L))
+        assertEquals(GridRowKey.Data(ViewKey.Number(3L)), rows.rowKeyAt(5L))
+        assertEquals(Some(GridRowKey.Group(path)), rows.hierarchyAt(5L)!!.parent)
+        assertEquals(
+            Some(GridAggregateDisplay.Value("3")),
+            groupingInfo(rows, path).aggregates.total(GridColumnId("amount"))
+        )
+        assertEquals(
+            Some(GridAggregateDisplay.Value("26")),
+            model.result.aggregates.total(GridColumnId("amount"))
+        )
+        model.setPage(99L)
+        assertEquals(GridPagination.Page(3L, 1L), model.query.pagination)
+    }
+}

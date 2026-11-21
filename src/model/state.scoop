@@ -16,7 +16,8 @@ public class DataGridState<Row> public constructor(
     pinnedRows: GridPinnedRows = GridPinnedRows(),
     public val rowSelection: GridRowSelectionMode = GridRowSelectionMode.Disabled,
     private val selectable: ((Row) -> Boolean)? = None,
-    public val onSelectionChange: ((Array<ViewKey>) -> Unit)? = None
+    public val onSelectionChange: ((Array<ViewKey>) -> Unit)? = None,
+    expandedRows: GridExpandedRows = GridExpandedRows()
 ) {
     private val computed =
         state(
@@ -25,7 +26,8 @@ public class DataGridState<Row> public constructor(
                 GridColumns(columns),
                 query,
                 None,
-                gridCheckPinnedRows(source, pinnedRows)
+                gridCheckPinnedRows(source, pinnedRows),
+                expandedRows
             )
         )
     private val headerState =
@@ -45,6 +47,7 @@ public class DataGridState<Row> public constructor(
     private var rangeColumns: GridSpanColumns? = None
     private var selectionAnchor: ViewKey? = None
     private var selectablePage: GridSelectablePage<Row>? = None
+    private var selectableGroups: GridGroupSelection<Row>? = None
     internal val selectedRows: GridSelectedRows get() = selection.value
     public val selectedRowKeys: Array<ViewKey> get() = selection.value.keys
     public fun isRowSelected(key: ViewKey): Boolean = selection.value.contains(key)
@@ -196,6 +199,97 @@ public class DataGridState<Row> public constructor(
                 count += 1L
         return gridSelectionState(count, total)
     }
+    public val expandedRows: GridExpandedRows get() = computed.value.expanded
+    public fun isExpanded(key: GridRowKey): Boolean {
+        val groups = computed.value.groups ?: return false
+        return when (key) {
+            case Group(val path) -> groups.topology.paths.containsKey(path) &&
+                expandedRows.contains(key)
+            else -> false
+        }
+    }
+    public fun setExpanded(key: GridRowKey, value: Boolean): Boolean {
+        computed.checkMutation()
+        val old = computed.value
+        val groups = old.groups ?: return false
+        when (key) {
+            case Group(val path) -> {
+                if (!groups.topology.paths.containsKey(path))
+                    return false
+            }
+            else -> return false
+        }
+        setExpandedRows(old.expanded.changed(key, value))
+        return true
+    }
+    public fun setExpandedRows(value: GridExpandedRows) {
+        computed.checkMutation()
+        val old = computed.value
+        val checked = value.forGrouping(old.query.grouping)
+        gridRequire(
+            checked.exceptions.size == value.exceptions.size,
+            "expansion key does not match grouping dimensions"
+        )
+        if (old.expanded.same(checked))
+            return
+        val next = gridCompute(old.source, old.columns, old.query, Some(old), old.pins, checked)
+        if (computed.value !== old)
+            throw IllegalStateException(Some("准备展开期间模型已更新，请重试"))
+        computed.value = next
+        clearCellRange()
+        changed()
+    }
+    public fun groupSelectableRows(path: GridGroupPath): Long {
+        if (rowSelection != GridRowSelectionMode.Multiple)
+            return 0L
+        val groups = computed.value.groups ?: return 0L
+        val group = groups.topology.paths[path] ?: return 0L
+        when (selectableGroups) {
+            case Some(val old) -> if (old.groups.topology === groups.topology)
+                return old.count(group)
+            case None -> {}
+        }
+        val next = GridGroupSelection(groups, selectable)
+        selectableGroups = Some(next)
+        return next.count(group)
+    }
+    public fun groupRowSelection(path: GridGroupPath): CheckState {
+        if (rowSelection != GridRowSelectionMode.Multiple)
+            return CheckState.Unchecked
+        val total = groupSelectableRows(path)
+        val groups = computed.value.groups ?: return CheckState.Unchecked
+        val group = groups.topology.paths[path] ?: return CheckState.Unchecked
+        val start = groups.order.starts[group]
+        val stop = start + groups.topology.nodes[group].count
+        var count = 0L
+        for (key in selection.value.keys) {
+            val position = groups.order.rows.indexOfKey(key) ?: continue
+            if (position >= start && position < stop)
+                count += 1L
+        }
+        return gridSelectionState(count, total)
+    }
+    public fun selectGroupRows(path: GridGroupPath, value: Boolean): Boolean {
+        selection.checkMutation()
+        if (rowSelection != GridRowSelectionMode.Multiple)
+            return false
+        val groups = computed.value.groups ?: return false
+        val group = groups.topology.paths[path] ?: return false
+        val start = groups.order.starts[group]
+        val stop = start + groups.topology.nodes[group].count
+        val targeted = HashSet<ViewKey>()
+        val keys = ArrayList<ViewKey>()
+        for (index in start ..< stop) {
+            val key = groups.order.rows.keyAt(index)
+            if (isRowSelectable(key)) {
+                targeted.add(key)
+                keys.add(key)
+            }
+        }
+        changeSelection(targeted, keys.toArray(), value)
+        selectionAnchor = None
+        return true
+    }
     public val cellRange: GridCellRange? get() = rangeSelection.value
     public fun setCellRange(value: GridCellRange?): Boolean {
         rangeSelection.checkMutation()
@@ -256,15 +350,7 @@ public class DataGridState<Row> public constructor(
             }
         val visible =
             Array<GridColumn<Row>>(order.count) { at -> snapshot.columns.get(order.idAt(at)) }
-        return Some(
-            gridCopyText(
-                snapshot.result.rows,
-                columns,
-                bounds,
-                includeHeaders,
-                gridRowLabelColumn(visible, snapshot.result.aggregates)
-            )
-        )
+        return Some(gridCopyText(snapshot.result.rows, columns, bounds, includeHeaders, visible))
     }
     public val query: GridQuery get() = computed.value.query
     public fun findCell(
@@ -304,7 +390,8 @@ public class DataGridState<Row> public constructor(
             selectedRowKeys,
             cellRange,
             readingPosition,
-            focusedCell
+            focusedCell,
+            expandedRows
         )
     public fun restoreViewState(value: GridViewState): GridRestoreReport {
         computed.checkMutation()
@@ -402,7 +489,8 @@ public class DataGridState<Row> public constructor(
                 value.withPagination(gridFirstPage(value.pagination))
         if (old.query == requested)
             return
-        val next = gridCompute(old.source, old.columns, requested, Some(old), old.pins)
+        val next =
+            gridCompute(old.source, old.columns, requested, Some(old), old.pins, old.expanded)
         if (computed.value !== old)
             throw IllegalStateException(Some("准备查询期间模型已更新，请重试"))
         computed.value = next
@@ -411,7 +499,9 @@ public class DataGridState<Row> public constructor(
                 old.query.pagination !=
                 next.query.pagination ||
                 old.query.totals.placement !=
-                next.query.totals.placement
+                next.query.totals.placement ||
+                old.query.groupTotals.placement !=
+                next.query.groupTotals.placement
         )
             clearCellRange()
         notify(old.query, next.query)
@@ -426,6 +516,9 @@ public class DataGridState<Row> public constructor(
     }
     public fun setPagination(value: GridPagination) {
         setQuery(query.withPagination(value))
+    }
+    public fun setGrouping(columns: Array<GridColumnId>) {
+        setQuery(query.withGrouping(columns))
     }
     public fun aggregation(column: GridColumnId): GridAggregateId? {
         for (selection in query.aggregations)
@@ -487,7 +580,14 @@ public class DataGridState<Row> public constructor(
         if (source === old.source)
             return
         val next =
-            gridCompute(source, old.columns, old.query, Some(old), old.pins.surviving(source))
+            gridCompute(
+                source,
+                old.columns,
+                old.query,
+                Some(old),
+                old.pins.surviving(source),
+                old.expanded
+            )
         val kept = gridSurvivingSelection(selection.value, source, selectable)
         val keepRange =
             cellRange ==
@@ -521,16 +621,21 @@ public class DataGridState<Row> public constructor(
             if (nextColumns.contains(sort.column))
                 sorting.add(sort)
         val filter = gridSurvivingFilter(old.query.filter, nextColumns) ?: GridFilter.All
+        val grouping = gridSurvivingGrouping(old.query.grouping, nextColumns)
+        val aggregations = gridSurvivingAggregations(old.query.aggregations, nextColumns)
         val requested =
             GridQuery(
                 sorting.toArray(),
                 filter,
                 old.query.quickFilter,
                 old.query.pagination,
-                gridSurvivingAggregations(old.query.aggregations, nextColumns),
-                old.query.totals
+                aggregations,
+                old.query.totals,
+                grouping,
+                gridSurvivingGroupSorting(old.query.groupSorting, grouping, aggregations),
+                old.query.groupTotals
             )
-        val next = gridCompute(old.source, nextColumns, requested, None, old.pins)
+        val next = gridCompute(old.source, nextColumns, requested, None, old.pins, old.expanded)
         val states = ArrayList<GridColumnState>()
         val retained = HashSet<GridColumnId>()
         for (entry in presentation.value)
@@ -598,19 +703,10 @@ public class DataGridState<Row> public constructor(
         if (old.pins.same(value))
             return
         gridCheckPinnedRows(old.source, value)
-        val before = old.result
-        val result =
-            gridPinResult(
-                before.pageRows,
-                before.ordered,
-                before.totalRows,
-                before.pageCount,
-                value,
-                before.aggregates,
-                old.query.totals
-            )
-        computed.value =
-            GridComputed(old.source, old.columns, old.query, result, value, old.filtered)
+        val next = gridCompute(old.source, old.columns, old.query, Some(old), value, old.expanded)
+        if (computed.value !== old)
+            throw IllegalStateException(Some("准备固定行期间模型已更新，请重试"))
+        computed.value = next
         clearCellRange()
         changed()
     }

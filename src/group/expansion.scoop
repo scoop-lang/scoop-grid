@@ -1,0 +1,49 @@
+package scoop.grid
+
+import scoop.collections.HashSet
+
+public class GridExpandedRows public constructor(
+    public val defaultExpanded: Boolean = false,
+    public val exceptions: Array<GridRowKey> = []
+) {
+    private val keys = HashSet<GridRowKey>()
+    init {
+        for (key in exceptions)
+            gridRequire(keys.add(key), "duplicate expansion key")
+    }
+    public fun contains(key: GridRowKey): Boolean = defaultExpanded != keys.contains(key)
+    internal fun same(other: GridExpandedRows): Boolean {
+        if (defaultExpanded != other.defaultExpanded || exceptions.size != other.exceptions.size)
+            return false
+        for (key in exceptions)
+            if (!other.keys.contains(key))
+                return false
+        return true
+    }
+    internal fun changed(key: GridRowKey, expanded: Boolean): GridExpandedRows {
+        if (contains(key) == expanded)
+            return this
+        val next = ArrayList<GridRowKey>()
+        for (old in exceptions)
+            if (old != key)
+                next.add(old)
+        if (expanded != defaultExpanded)
+            next.add(key)
+        return GridExpandedRows(defaultExpanded, next.toArray())
+    }
+    internal fun forGrouping(columns: Array<GridColumnId>): GridExpandedRows {
+        val next = ArrayList<GridRowKey>()
+        for (key in exceptions)
+            when (key) {
+                case Group(val path) -> {
+                    if (path.matches(columns))
+                        next.add(key)
+                }
+                else -> {}
+            }
+        return if (next.size == exceptions.size)
+            this
+        else
+            GridExpandedRows(defaultExpanded, next.toArray())
+    }
+}

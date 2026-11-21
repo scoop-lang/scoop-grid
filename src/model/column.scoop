@@ -19,6 +19,7 @@ public interface GridColumn<Row> {
     public val missingLast: Boolean
     public val editing: GridColumnEditing<Row>?
     public val aggregations: Array<GridColumnAggregation<Row>> get() = []
+    public val grouping: GridColumnGrouping<Row>? get() = None
     public fun cell(
         row: Row,
         fonts: FontCollection? = None,
@@ -50,7 +51,8 @@ public fun <Row, T> gridColumn(
     exportable: Boolean = true,
     missingLast: Boolean = true,
     edit: GridEditSpec<Row, T>? = None,
-    aggregations: Array<GridAggregation<T>> = []
+    aggregations: Array<GridAggregation<T>> = [],
+    groupable: Boolean = false
 ): GridColumn<Row> =
     TypedGridColumn(
         id,
@@ -64,7 +66,8 @@ public fun <Row, T> gridColumn(
         exportable,
         missingLast,
         edit,
-        aggregations
+        aggregations,
+        groupable
     )
 
 private class TypedGridColumn<Row, T>(
@@ -79,9 +82,15 @@ private class TypedGridColumn<Row, T>(
     public override val exportable: Boolean,
     public override val missingLast: Boolean,
     edit: GridEditSpec<Row, T>?,
-    operations: Array<GridAggregation<T>>
+    operations: Array<GridAggregation<T>>,
+    groupable: Boolean
 ): GridColumn<Row> {
     public override val valueKind: GridValueKind? get() = Some(values.kind)
+    public override val grouping: GridColumnGrouping<Row>? =
+        if (groupable)
+            Some(TypedGridGrouping(value, values))
+        else
+            None
     public override val editing: GridColumnEditing<Row>? = edit?.bind(value)
     public override val aggregations: Array<GridColumnAggregation<Row>> =
         Array<GridColumnAggregation<Row>>(operations.size) {

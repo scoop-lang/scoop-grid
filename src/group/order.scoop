@@ -1,0 +1,150 @@
+package scoop.grid
+
+import scoop.collections.sortWith
+import scoop.comparisons.comparatorOf
+import scoop.ui.component.TableSource
+
+internal class GridGroupOrder<Row>(
+    val rows: TableSource<Row>,
+    val roots: Array<Long>,
+    val children: Array<Array<Long>>,
+    val starts: Array<Long>
+)
+
+internal fun <Row> gridOrderGroups(
+    topology: GridGroupTopology<Row>,
+    aggregates: GridAggregations,
+    query: GridQuery
+): GridGroupOrder<Row> {
+    val comparison =
+        comparatorOf<Long> {
+            left,
+            right -> gridCompareGroups(topology, aggregates, query.groupSorting, left, right)
+        }
+    val roots = ArrayList<Long>()
+    for (root in topology.roots)
+        roots.add(root)
+    roots.sortWith(comparison)
+    val children =
+        Array<Array<Long>>(topology.nodes.size) {
+            index ->
+            val values = ArrayList<Long>()
+            for (child in topology.nodes[index].children)
+                values.add(child)
+            values.sortWith(comparison)
+            values.toArray()
+        }
+    val recordOrder = gridRecordOrder(topology.source, topology.columns, query.sorting)
+    val starts = ArrayList<Long>()
+    for (_ in topology.nodes)
+        starts.add(0L)
+    val indices = ArrayList<Long>()
+    val pending = ArrayList<Long>()
+    for (at in 0L ..< roots.size)
+        pending.add(roots[roots.size - at - 1L])
+    while (pending.size > 0L) {
+        val index = pending.removeAt(pending.size - 1L)
+        val node = topology.nodes[index]
+        starts[index] = indices.size
+        if (node.children.size == 0L) {
+            val records = ArrayList<Long>()
+            for (record in node.records)
+                records.add(record)
+            when (recordOrder) {
+                case Some(val order) -> records.sortWith(order)
+                case None -> {}
+            }
+            for (record in records)
+                indices.add(record)
+        } else {
+            val next = children[index]
+            for (at in 0L ..< next.size)
+                pending.add(next[next.size - at - 1L])
+        }
+    }
+    return GridGroupOrder(
+        GridOrderedRows(topology.source, indices.toArray()),
+        roots.toArray(),
+        children,
+        starts.toArray()
+    )
+}
+
+private fun <Row> gridCompareGroups(
+    topology: GridGroupTopology<Row>,
+    aggregates: GridAggregations,
+    sorting: Array<GridGroupSort>,
+    left: Long,
+    right: Long
+): Long {
+    val a = topology.nodes[left]
+    val column = a.path.parts[a.path.parts.size - 1L].column
+    var specified = false
+    for (sort in sorting)
+        if (sort.column == column) {
+            specified = true
+            val value = gridCompareGroupValue(topology, aggregates, left, right, sort)
+            if (value != 0L)
+                return value
+        }
+    if (!specified) {
+        val value = gridCompareGroupValue(topology, aggregates, left, right, GridGroupSort(column))
+        if (value != 0L)
+            return value
+    }
+    return left.compareTo(right)
+}
+
+private fun <Row> gridCompareGroupValue(
+    topology: GridGroupTopology<Row>,
+    aggregates: GridAggregations,
+    left: Long,
+    right: Long,
+    sort: GridGroupSort
+): Long {
+    val a = topology.nodes[left]
+    val b = topology.nodes[right]
+    val compared =
+        when (sort.by) {
+            case Value -> {
+                val depth = a.path.parts.size - 1L
+                val missingA = a.path.parts[depth].value == GridLiteral.Empty
+                val missingB = b.path.parts[depth].value == GridLiteral.Empty
+                val column = topology.columns.get(sort.column)
+                if (missingA != missingB)
+                    return if (missingA == column.missingLast)
+                        1L
+                    else
+                        -1L
+                if (missingA)
+                    return 0L
+                column.grouping!!.compare(
+                    topology.source.rowAt(a.representative),
+                    topology.source.rowAt(b.representative)
+                )
+            }
+            case Aggregate(val column) -> {
+                val metric = aggregates.metric(column)!!
+                val rankA = gridAggregateRank(metric.display(left + 1L))
+                val rankB = gridAggregateRank(metric.display(right + 1L))
+                if (rankA != rankB)
+                    return rankA.compareTo(rankB)
+                if (rankA != 0L)
+                    return 0L
+                metric.compare(left + 1L, right + 1L)
+            }
+        }
+    if (compared == 0L)
+        return 0L
+    return if ((compared < 0L) == (sort.direction == GridSortDirection.Ascending))
+        -1L
+    else
+        1L
+}
+
+private fun gridAggregateRank(value: GridAggregateDisplay): Long =
+    when (value) {
+        case Value(_) -> 0L
+        case Missing -> 1L
+        case Failed(_) -> 2L
+    }

@@ -46,6 +46,32 @@ internal class GridSelectionView<Row>(
             content
         )
     }
+    fun group(path: GridGroupPath, label: String, content: View): View {
+        if (!checkboxes || model.rowSelection != GridRowSelectionMode.Multiple)
+            return content
+        val view = this
+        val control =
+            checkbox(
+                binding(
+                    { view.model.groupRowSelection(path) },
+                    {
+                        next ->
+                        if (view.session.usesModel(view.model))
+                            view.session.selectGroupRows(path, next == CheckState.Checked)
+                        Unit
+                    }
+                )
+            ) {
+                enabled = view.enabled && view.model.groupSelectableRows(path) > 0L
+                theme = Some(view.theme)
+                semantics =
+                    ComponentSemantics(
+                        name = Some(view.labels.selectGroup(label)),
+                        automationId = Some(f"grid-group-selection-${path.encoded}")
+                    )
+            }
+        return leading(control, content)
+    }
     fun header(column: Long, content: View): View {
         if (!checkboxes || column != 0L || model.rowSelection != GridRowSelectionMode.Multiple)
             return content

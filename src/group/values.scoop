@@ -1,0 +1,27 @@
+package scoop.grid
+
+public struct GridGroupValue(val key: GridLiteral, val label: String)
+
+/** The bound operations retain their column's concrete value type. */
+public interface GridColumnGrouping<Row> {
+    public fun value(row: Row): GridGroupValue
+    public fun compare(left: Row, right: Row): Long
+}
+
+internal class TypedGridGrouping<Row, T>(
+    private val read: (Row) -> T,
+    private val values: GridValues<T>
+): GridColumnGrouping<Row> {
+    public override fun value(row: Row): GridGroupValue {
+        val value = read(row)
+        return GridGroupValue(
+            if (values.missing(value))
+                GridLiteral.Empty
+            else
+                values.encode(value),
+            values.format(value)
+        )
+    }
+    public override fun compare(left: Row, right: Row): Long =
+        values.compare(read(left), read(right))
+}

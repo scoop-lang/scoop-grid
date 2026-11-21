@@ -110,14 +110,7 @@ internal fun <Row> gridFindCell(
             if (cachedIndex != at.row) {
                 cachedRow = Some(rows.rowAt(at.row))
                 cachedIndex = at.row
-                labelColumn =
-                    when (cachedRow!!) {
-                        case Data(_, _) -> None
-                        case Total(val total) -> gridRowLabelColumn(
-                            columns.toArray(),
-                            total.aggregates
-                        )
-                    }
+                labelColumn = cachedRow!!.labelColumn(columns.toArray())
             }
             when (cachedRow!!.text(column, labelColumn)) {
                 case Some(val value) -> {

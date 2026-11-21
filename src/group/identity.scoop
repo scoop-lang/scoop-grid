@@ -1,0 +1,114 @@
+package scoop.grid
+
+public class GridGroupPart public constructor(
+    public val column: GridColumnId,
+    public val value: GridLiteral
+): Equals<GridGroupPart>, Hash {
+    init {
+        when (value) {
+            case Number(val number) -> gridRequire(number.isFinite(), "group key must be finite")
+            else -> {}
+        }
+    }
+    public override operator fun equals(other: GridGroupPart): Boolean =
+        column == other.column && value == other.value
+    public override fun hash(): Long = (column.hash() shl 7) xor value.hash()
+}
+
+/** A typed path remains stable independently of labels and row positions. */
+public class GridGroupPath public constructor(public val parts: Array<GridGroupPart>): Equals<
+    GridGroupPath
+>, Hash {
+    init {
+        gridRequire(parts.size > 0L, "group path must not be empty")
+    }
+    public val parent: GridGroupPath? get() =
+        if (parts.size == 1L)
+            None
+        else
+            Some(GridGroupPath(Array<GridGroupPart>(parts.size - 1L) { at -> parts[at] }))
+    public override operator fun equals(other: GridGroupPath): Boolean =
+        gridArrayEqual(parts, other.parts)
+    public override fun hash(): Long {
+        var value = parts.size
+        for (part in parts)
+            value = (value shl 7) xor (value ushr 57) xor part.hash()
+        return value
+    }
+    internal val encoded: String = gridEncodeGroupPath(parts)
+    internal fun matches(columns: Array<GridColumnId>): Boolean {
+        if (parts.size > columns.size)
+            return false
+        for (index in 0L ..< parts.size)
+            if (parts[index].column != columns[index])
+                return false
+        return true
+    }
+}
+
+private fun gridEncodeGroupPath(parts: Array<GridGroupPart>): String {
+    val text = StringBuilder()
+    for (part in parts) {
+        val value = gridGroupLiteral(part.value)
+        text.append(f"${part.column.value.byteLength}:${part.column.value}")
+        text.append(f"${value.byteLength}:${value}")
+    }
+    return text.toString()
+}
+
+private fun gridGroupLiteral(value: GridLiteral): String =
+    when (value) {
+        case Text(val text) -> f"t${text}"
+        case Integer(val number) -> f"i${number}"
+        case Number(val number) -> f"n${
+            if (number == 0.0)
+                0L
+            else
+                number.toBits()
+        }"
+        case BooleanValue(val flag) -> if (flag)
+            "b1"
+        else
+            "b0"
+        case Date(val date) -> f"d${date}"
+        case Empty -> "e"
+    }
+
+public enum GridGroupSortBy: Equals<GridGroupSortBy> {
+    Value, Aggregate(GridColumnId)
+    public override operator fun equals(other: GridGroupSortBy): Boolean =
+        when ((this, other)) {
+            case(Value, Value) -> true
+            case(Aggregate(val a), Aggregate(val b)) -> a == b
+            else -> false
+        }
+}
+
+public struct GridGroupSort(
+    val column: GridColumnId,
+    val by: GridGroupSortBy = GridGroupSortBy.Value,
+    val direction: GridSortDirection = GridSortDirection.Ascending
+): Equals<GridGroupSort> {
+    public override operator fun equals(other: GridGroupSort): Boolean =
+        column == other.column && by == other.by && direction == other.direction
+}
+
+/** Public metadata shared by group rendering, text operations and accessibility. */
+public class GridGroupRow internal constructor(
+    public val path: GridGroupPath,
+    public val label: String,
+    public val count: Long,
+    public val aggregates: GridAggregations
+) {
+    public val column: GridColumnId get() = path.parts[path.parts.size - 1L].column
+}
+
+public struct GridRowHierarchy(
+    val level: Long,
+    val parent: GridRowKey?,
+    val expanded: Boolean? = None
+)
+
+public enum GridPageUnit {
+    Records, Roots
+}

@@ -1,0 +1,26 @@
+package scoop.grid
+
+import scoop.collections.HashMap
+
+/** Eligibility is cached for unchanged membership, independently of selection and expansion. */
+internal class GridGroupSelection<Row>(
+    val groups: GridGrouped<Row>,
+    private val accepts: ((Row) -> Boolean)?
+) {
+    private val counts = HashMap<Long, Long>()
+    fun count(group: Long): Long {
+        val test = accepts ?: return groups.topology.nodes[group].count
+        when (val found = counts[group]) {
+            case Some(val value) -> return value
+            case None -> {}
+        }
+        val start = groups.order.starts[group]
+        val size = groups.topology.nodes[group].count
+        var count = 0L
+        for (index in start ..< start + size)
+            if (test(groups.order.rows.rowAt(index)))
+                count += 1L
+        counts.put(group, count)
+        return count
+    }
+}

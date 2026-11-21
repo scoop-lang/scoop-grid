@@ -12,7 +12,9 @@ public class GridResult<Row> internal constructor(
     public val pageCount: Long,
     public val topCount: Long,
     public val bottomCount: Long,
-    public val aggregates: GridAggregations
+    public val aggregates: GridAggregations,
+    public val rootCount: Long,
+    public val pageUnit: GridPageUnit
 ) {
     public val bodyCount: Long get() = rows.count - topCount - bottomCount
 }

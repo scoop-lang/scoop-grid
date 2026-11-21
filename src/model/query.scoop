@@ -1,7 +1,13 @@
 package scoop.grid
 
-public enum GridSortDirection {
+public enum GridSortDirection: Equals<GridSortDirection> {
     Ascending, Descending
+    public override operator fun equals(other: GridSortDirection): Boolean =
+        when ((this, other)) {
+            case(Ascending, Ascending) -> true
+            case(Descending, Descending) -> true
+            else -> false
+        }
 }
 
 public struct GridSort(
@@ -28,7 +34,10 @@ public class GridQuery public constructor(
     public val quickFilter: String = "",
     public val pagination: GridPagination = GridPagination.Disabled,
     public val aggregations: Array<GridAggregationSelection> = [],
-    public val totals: GridTotals = GridTotals()
+    public val totals: GridTotals = GridTotals(),
+    public val grouping: Array<GridColumnId> = [],
+    public val groupSorting: Array<GridGroupSort> = [],
+    public val groupTotals: GridTotals = GridTotals(label = "小计")
 ): Equals<GridQuery> {
     init {
         when (pagination) {
@@ -40,26 +49,130 @@ public class GridQuery public constructor(
         }
     }
     public override operator fun equals(other: GridQuery): Boolean =
-        gridCriteriaEqual(this, other) && pagination == other.pagination && totals == other.totals
+        gridCriteriaEqual(this, other) &&
+            pagination ==
+            other.pagination &&
+            totals ==
+            other.totals &&
+            groupTotals ==
+            other.groupTotals
 
     public fun withPagination(value: GridPagination): GridQuery =
-        GridQuery(sorting, filter, quickFilter, value, aggregations, totals)
+        GridQuery(
+            sorting,
+            filter,
+            quickFilter,
+            value,
+            aggregations,
+            totals,
+            grouping,
+            groupSorting,
+            groupTotals
+        )
     public fun withSorting(value: Array<GridSort>): GridQuery =
-        GridQuery(value, filter, quickFilter, pagination, aggregations, totals)
+        GridQuery(
+            value,
+            filter,
+            quickFilter,
+            pagination,
+            aggregations,
+            totals,
+            grouping,
+            groupSorting,
+            groupTotals
+        )
     public fun withFilter(value: GridFilter): GridQuery =
-        GridQuery(sorting, value, quickFilter, pagination, aggregations, totals)
+        GridQuery(
+            sorting,
+            value,
+            quickFilter,
+            pagination,
+            aggregations,
+            totals,
+            grouping,
+            groupSorting,
+            groupTotals
+        )
     public fun withQuickFilter(value: String): GridQuery =
-        GridQuery(sorting, filter, value, pagination, aggregations, totals)
+        GridQuery(
+            sorting,
+            filter,
+            value,
+            pagination,
+            aggregations,
+            totals,
+            grouping,
+            groupSorting,
+            groupTotals
+        )
     public fun withAggregations(value: Array<GridAggregationSelection>): GridQuery =
-        GridQuery(sorting, filter, quickFilter, pagination, value, totals)
+        GridQuery(
+            sorting,
+            filter,
+            quickFilter,
+            pagination,
+            value,
+            totals,
+            grouping,
+            gridSurvivingGroupSorting(groupSorting, grouping, value),
+            groupTotals
+        )
     public fun withTotals(value: GridTotals): GridQuery =
-        GridQuery(sorting, filter, quickFilter, pagination, aggregations, value)
+        GridQuery(
+            sorting,
+            filter,
+            quickFilter,
+            pagination,
+            aggregations,
+            value,
+            grouping,
+            groupSorting,
+            groupTotals
+        )
+    public fun withGrouping(value: Array<GridColumnId>): GridQuery =
+        GridQuery(
+            sorting,
+            filter,
+            quickFilter,
+            pagination,
+            aggregations,
+            totals,
+            value,
+            gridSurvivingGroupSorting(groupSorting, value, aggregations),
+            groupTotals
+        )
+    public fun withGroupSorting(value: Array<GridGroupSort>): GridQuery =
+        GridQuery(
+            sorting,
+            filter,
+            quickFilter,
+            pagination,
+            aggregations,
+            totals,
+            grouping,
+            value,
+            groupTotals
+        )
+    public fun withGroupTotals(value: GridTotals): GridQuery =
+        GridQuery(
+            sorting,
+            filter,
+            quickFilter,
+            pagination,
+            aggregations,
+            totals,
+            grouping,
+            groupSorting,
+            value
+        )
 }
 
 internal fun gridCriteriaEqual(left: GridQuery, right: GridQuery): Boolean =
     gridArrayEqual(left.sorting, right.sorting) &&
         gridFilterCriteriaEqual(left, right) &&
-        gridArrayEqual(left.aggregations, right.aggregations)
+        gridArrayEqual(left.aggregations, right.aggregations) &&
+        gridArrayEqual(left.grouping, right.grouping) &&
+        gridArrayEqual(left.groupSorting, right.groupSorting)
 
 internal fun gridFilterCriteriaEqual(left: GridQuery, right: GridQuery): Boolean =
     left.filter == right.filter && left.quickFilter == right.quickFilter

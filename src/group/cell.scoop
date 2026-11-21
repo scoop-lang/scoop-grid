@@ -1,0 +1,63 @@
+package scoop.grid
+
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.button as groupButton
+import scoop.ui.style.LogicalInsets
+
+internal fun <Row> gridGroupCell(
+    input: GridDataCellProps<Row>,
+    group: GridGroupRow,
+    content: View
+): View {
+    val session = input.session
+    val model = session.currentModel
+    val expanded = model?.isExpanded(input.key) ?: false
+    val appearance = input.appearance
+    val child = input.selection?.group(group.path, group.label, content) ?: content
+    return row {
+        logicalPadding =
+            Some(
+                LogicalInsets(
+                    start = (group.path.parts.size - 1L).toDouble() * 14.0 * appearance.density
+                )
+            )
+        spacing = 4.0 * appearance.density
+        alignment = CrossAlignment.Center
+        add(
+            groupButton(
+                if (expanded)
+                    "▾"
+                else
+                    "▸",
+                {
+                    when (model) {
+                        case Some(val current) -> if (session.usesModel(current))
+                            session.setExpanded(input.key, !current.isExpanded(input.key))
+                        case None -> {}
+                    }
+                    Unit
+                }
+            ) {
+                key = ViewKey.Text("grid-group-expansion")
+                enabled = input.enabled && !session.submitting
+                theme = session.theme
+                fonts = Some(appearance.fonts)
+                size = ButtonSize.IconXs
+                variant = ButtonVariant.Ghost
+                semantics =
+                    ComponentSemantics(
+                        name =
+                            Some(
+                                if (expanded)
+                                    input.labels.collapseGroup(group.label)
+                                else
+                                    input.labels.expandGroup(group.label)
+                            ),
+                        automationId = Some(f"grid-group-expand-${group.path.encoded}")
+                    )
+            }
+        )
+        item(child) { grow = 1.0 }
+    }
+}

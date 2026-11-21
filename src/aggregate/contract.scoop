@@ -85,6 +85,7 @@ internal interface GridValueAggregation<T> {
 internal interface GridRowAggregation<Row> {
     fun ensure(group: Long)
     fun add(group: Long, row: Row)
+    fun addGroups(groups: Array<Long>, row: Row)
     fun finish(): GridAggregateValues
 }
 
@@ -104,6 +105,12 @@ private class BoundGridAggregation<Row, T>(
         val current = value(row)
         if (!missing(current))
             target.add(group, current)
+    }
+    public override fun addGroups(groups: Array<Long>, row: Row) {
+        val current = value(row)
+        if (!missing(current))
+            for (group in groups)
+                target.add(group, current)
     }
     public override fun finish(): GridAggregateValues = target.finish()
 }

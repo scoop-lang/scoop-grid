@@ -50,13 +50,37 @@
 
 `result.aggregates.total(column)` 返回该项显示结果（Value／Missing／Failed），未配置该列时返回 None。`numericTotal(column)` 只返回已成功且有数值转换的精确 BigDecimal。结果内部保留真实类型与比较操作，显示字符串不用于排序。聚合始终消费整个筛选结果；切页、列宽、显隐、固定行和业务选择均复用既有聚合。改变排序只改变行序，保留同一筛选集的聚合结果；数据、筛选、快速筛选、度量或列定义变化时重新计算。
 
-选择聚合沿查询动作通知并重置页码，列替换清理已移除或不再允许的操作；视图保存和恢复包含聚合选择，恢复报告具体失效项。列面板只为允许聚合的列显示选择器，使用现有编辑提交门控；非法草稿或等待保存时不切换聚合。`gridAggregationSummary` 显示筛选记录数与各列总计，使用现有主题、字体和显式 Labels，不读取记录或在绘制中启动计算。分组／树的小计与结果行将在对应实现中接入相同类型化结果。
+选择聚合沿查询动作通知并重置页码，列替换清理已移除或不再允许的操作；视图保存和恢复包含聚合选择，恢复报告具体失效项。列面板只为允许聚合的列显示选择器，使用现有编辑提交门控；非法草稿或等待保存时不切换聚合。`gridAggregationSummary` 显示筛选记录数与各列总计，使用现有主题、字体和显式 Labels，不读取记录或在绘制中启动计算。分组行及小计复用相同的类型化结果；树数据继续按设计实施。
+
+## 本地行分组
+
+类型化列通过 `gridColumn(..., groupable = true)` 明确允许分组；组键来自同一 `GridValues.encode`，标签来自 format，同级比较使用原始 T 的 compare。缺值统一使用 `GridLiteral.Empty`，不与空字符串、零或同名标签混同。动作列不参与分组。
+
+`GridQuery.grouping` 按维度顺序保存列 id；重复、未知或不允许分组的列在查询发布前拒绝。`GridGroupPath` 由有序 `GridGroupPart(column, value)` 组成，作为 `GridRowKey.Group(path)` 的稳定身份。路径包含真实类型及完整值，内部 ViewKey 编码采用类型标记和长度前缀；排序、展开、格式化标签或分页都不改变组身份。
+
+本地流水线先筛选业务记录，再构造组与类型化聚合，排序同级组及组内记录，按根组分页，最后按展开状态生成逻辑呈现。`GridQuery.sorting` 排序叶记录；`groupSorting` 的 `GridGroupSort(column, by, direction)` 为指定分组维度提供组排序，by 为 Value 或 Aggregate(metricColumn)。同一维度可按多个不同目标依次比较；没有配置时按该维度原值升序，有效值相等后保留来源顺序。维度缺值的位置由列的 `missingLast` 固定；聚合缺值及错误保持在有效值之后，不随降序翻转，也不按显示文字比较。
+
+`GridRow.Group`／`GridRowInfo.Group` 保存组路径、标签、成员数和该组聚合；没有伪造的业务 Row。`GridQuery.groupTotals` 使用独立的 `GridTotals` 配置，默认隐藏、标签为“小计”；Before／After 分别放在已展开组的子项之前／之后。组内小计使用 `GridTotalKey.Group(path)`，与全筛选集总计、业务 key 分域。所有组和小计复用同一批度量结果，隐藏、分页及展开不重算聚合。
+
+`GridExpandedRows(defaultExpanded = false, exceptions = [])` 保存普通视图数据，exceptions 为与默认值相反的逻辑行 key。DataGridState 的 `expandedRows`、`isExpanded`、`setExpanded` 和 `setExpandedRows` 使用稳定身份；仅展开变化复用分组、排序、当前页业务快照与聚合，不重新读取业务值；自定义可选条件的页内资格计数也沿相同成员快照复用。筛选暂时隐藏一个组时保留其展开选择；更换分组维度清理不再匹配维度路径的记录。视图快照保存展开数据，恢复时报告不适用的配置。
+
+分组结果的 `rootCount` 为根组数，`pageUnit` 为 Roots；平面结果为业务行数与 Records。pageSize 只计根项，展开后代和小计留在其根页。`pageRows` 包含所选根页内全部匹配业务成员，折叠不改变分页全选范围；`ordered` 包含全部筛选业务记录，`totalRows` 仍为匹配记录数。固定业务行继续保持唯一身份，不改变根计数或聚合成员。
+
+`GridRowSource.hierarchyAt(index)` 返回可选 `GridRowHierarchy(level, parent, expanded)`，只读取元数据。平面行没有层级；组声明深度及展开状态，业务成员和小计声明其父组与深度。来源组合、固定及切片保留这份描述，系统语义不通过构造 View 推测层级。
+
+组行只读，使用现有单元格布局和连续矩形操作。组标签优先放在对应分组列，其次是首个没有度量的可见列；仅有度量列时在首列同时显示组标签和度量。Enter／F2 从组标签格进入真实展开按钮，按钮自身的 Enter／Space、点击与原生 expanded 动作进入同一编辑门控，普通方向键保留二维导航。收起含当前编辑或焦点的后代前先完成编辑门控，再将焦点恢复到有效父组。组行不作为独立业务选择对象；其 Checkbox 和明确的组选择操作按整个已知匹配成员集计算三态，折叠不改变成员，可选性规则仍作用于实际业务记录。
+
+`groupSelectableRows(path)` 和 `groupRowSelection(path)` 只在 Multiple 模式统计本次筛选的合格成员；`selectGroupRows(path, value)` 修改这些业务 key，保留其他组与暂不匹配筛选的已有选择。不存在的组返回 false；Single／Disabled 模式不提供组选择。挂载的 `handle.setExpanded(key, value)` 与 `handle.selectGroupRows(path, value)` 返回 `GridRowActionResult`，旧语义快照或已失效目标不能操作新结果。
+
+列面板对允许分组的当前列提供“不分组／第 N 级分组”、同级组的值／度量排序和方向，以及分组小计位置；调整层级同时调整维度顺序。面板每个层级提供一个排序依据，明确修改该项会替换该层级的排序配置；模型 API 仍允许多个依次比较的目标。移除维度或度量同步删除失效组排序，不修改业务列排序。`GridColumnsLabels.grouping` 的 `GridGroupingLabels` 配置文案，`GridLabels` 配置展开、折叠及组选择名称。`gridPager` 同时显示根组数和业务记录数，页大小明确使用“组／页”；`GridPagerLabels` 的 rootSize／rootSizeName／roots／rootStatus 可单独本地化。
+
+复制、查找、统计与 CSV 使用同一逻辑值描述；业务回调只接收真实 Row。Records 导出业务记录；Displayed 导出按当前展开状态排列的组、业务行与小计，可独立排除组行及总计。AllFiltered 取消根分页但保留当前展开配置；SelectedRows 始终导出业务选择。
 
 ## 本地状态与数据
 
-`GridRowKey` 区分 `Data(ViewKey)` 与 `Total(GridTotalKey)`；总计使用 `GridTotalKey.AllFiltered`。`GridCellAddress.row` 和 `GridReadingPosition.row` 保存该类型化身份，接收业务 `ViewKey` 的构造器等价于显式构造 Data。业务选择、固定行和应用提交仍使用原业务 key。底层 ViewKey 编码将文本业务 key 与结果行身份分域，不能将编码后的 ViewKey 再当业务 key 使用。
+`GridRowKey` 区分 `Data(ViewKey)`、`Group(GridGroupPath)` 与 `Total(GridTotalKey)`；全筛选集总计使用 `GridTotalKey.AllFiltered`，组小计使用 `GridTotalKey.Group(path)`。`GridCellAddress.row` 和 `GridReadingPosition.row` 保存该类型化身份，接收业务 `ViewKey` 的构造器等价于显式构造 Data。业务选择、固定行和应用提交仍使用原业务 key。底层 ViewKey 编码将文本业务 key 与结果行身份分域，不能将编码后的 ViewKey 再当业务 key 使用。
 
-`GridResult.rows` 为 `GridRowSource<Row>`，其 `rowAt` 返回完整的 `GridRow.Data(row, key)` 或 `GridRow.Total(total)`。`infoAt` 只返回同种身份及展示元数据，不读取 Row；`rowKeyAt` 和 `indexOfKey(GridRowKey)` 用于逻辑地址定位。普通 `keyAt`／`indexOfKey(ViewKey)` 是 UI 虚拟化使用的编码身份。无论结果多大，平面来源包装、分页、固定行和追加总计都不为全部记录分配逐行描述。
+`GridResult.rows` 为 `GridRowSource<Row>`，其 `rowAt` 返回完整的 `GridRow.Data(row, key)`、`GridRow.Group(group)` 或 `GridRow.Total(total)`。`infoAt` 只返回同种身份及展示元数据，不读取 Row；`rowKeyAt` 和 `indexOfKey(GridRowKey)` 用于逻辑地址定位。普通 `keyAt`／`indexOfKey(ViewKey)` 是 UI 虚拟化使用的编码身份。无论结果多大，平面来源包装、分页、固定行和追加总计都不为全部记录分配逐行描述。
 
 `GridQuery.totals` 使用 `GridTotals(placement, label)`，placement 为 Hidden／Before／After，缺省 Hidden；label 缺省“总计”。总计位于正文业务行之前或之后，处于顶部／底部固定行之间，不占 pageSize，不增加 totalRows，空结果仍可显示一条总计。它始终读取同一份全筛选集的类型化聚合，数值列不因总计文字而丢失结果。首个可导出且没有度量的可见列显示 label；全部可见列都是度量时只显示各项值，行的无障碍名称仍提供 label。未配置的其他列为空，Missing 为空，Failed 显示错误原因并保留失败状态。
 
@@ -74,7 +98,7 @@
 
 ## 视图状态保存与恢复
 
-`model.saveViewState()` 返回 `GridViewState`，保存当前列顺序／显隐／逻辑宽度／冻结、完整查询、固定行、业务行选择和唯一矩形。它只含普通数据，没有来源、Row、View、回调、编辑草稿或在途请求；应用负责持久化。可显式附带 `readingPosition` 和 `focusedCell`。挂载后的 `handle.saveViewState(includePosition = true, includeFocus = true)` 可取得最近 Accepted 的阅读锚点及最近成功单元格，未挂载返回 None。
+`model.saveViewState()` 返回 `GridViewState`，保存当前列顺序／显隐／逻辑宽度／冻结、完整查询、固定行、业务行选择、展开配置和唯一矩形。它只含普通数据，没有来源、Row、View、回调、编辑草稿或在途请求；应用负责持久化。可显式附带 `readingPosition` 和 `focusedCell`。挂载后的 `handle.saveViewState(includePosition = true, includeFocus = true)` 可取得最近 Accepted 的阅读锚点及最近成功单元格，未挂载返回 None。
 
 `model.restoreViewState(value)` 在当前来源与列定义下准备完整结果，一次发布后才通知模型观察者、查询和选择回调。保存页码按恢复后的结果夹取，不因恢复了筛选而强制回到首页；相同查询复用已有顺序。计算或数据读取失败抛出异常，保留原模型。准备期间应用主动更新了模型时不覆盖应用的新状态。
 
@@ -190,7 +214,7 @@ DataGrid 的正文、列头与列组复用现有 ContextMenu、Menu、Overlay �
 
 `model.exportCsv(GridCsvOptions(...))` 在同一个快照中解析范围和列，然后复用 `gridCsv`。`scope` 缺省 `GridExportScope.CurrentPage`，包含当前呈现页；`AllFiltered` 包含全部筛选／排序结果；`SelectedRows` 按已选 key 的保存顺序读取完整本地来源，包含其他页和暂被筛选隐藏的已选记录。只解析选中 key，不扫描完整来源收集选择。
 
-`data` 缺省 `GridExportData.Records`，导出原始业务记录；`Displayed` 明确导出逻辑展示结果，`includeTotals` 缺省 true，只包含该查询已启用的总计。已选记录范围始终按业务选择解释。显示结果的总计标签位于所导出列中首个没有度量的列。
+`data` 缺省 `GridExportData.Records`，导出原始业务记录；`Displayed` 明确导出逻辑展示结果，`includeTotals` 缺省 true，只包含该查询已启用的全筛选集总计与组小计；`includeGroups` 缺省 true，控制组标题行，两项互相独立。已选记录范围始终按业务选择解释。显示结果的总计标签位于所导出列中首个没有度量的列。
 
 缺省 `includePinnedRows = true`：页和全部结果按 Top／Body／Bottom 导出，同一业务 key 只出现一次；已选范围只含实际选中的记录，不额外加入固定记录。设为 false 时排除当前配置的固定行。`includeHiddenColumns = false` 缺省仅含可见列，列序按当前逻辑 Start／普通／End 排列；可用 `columns = Some(ids)` 指定唯一列序，未知或重复 ID 拒绝，隐藏列仍服从显式包含选项，不可导出列始终排除。`includeHeaders` 缺省 true。应用持有输出文字并选择写入位置；格式化失败不返回半份 CSV，不执行文件或剪贴板写入。
 
@@ -218,7 +242,7 @@ Start／End 冻结随 RTL 转换到对应物理边。它们与中心共享同一
 
 每格的 LayoutResult 保存所属区域及同一真实视口。原生显露、焦点和内容控件使用这份实际区域：中心格避开两侧冻结区，正文避开表头，冻结格只沿纵轴显露，表头不因显露改变正文的纵向位置。RTL 使用对应的物理区域；没有可用区域时不能通过显露取得焦点。
 
-`GridCellAddress(row, column)` 使用 `GridRowKey` 与 `GridColumnId`；传业务 ViewKey 时构造 Data 地址。`DataGridHandle.focusCell(address)` 接受当前结果中的业务行或总计行与有效可见列，返回请求是否接受；真实焦点必须等布局 Accepted 后落到该格的真实 FocusHandle。`focusedCell` 反映实际焦点（包括自定义内容后代），`pendingCell`／`isPending` 反映尚未完成的请求。`cancelFocus()` 只取消定位请求。目标删除、禁用、外部焦点或新请求沿原 UI 焦点路径取消旧请求，不能在迟到帧中复活。表头排序沿模型入口执行。
+`GridCellAddress(row, column)` 使用 `GridRowKey` 与 `GridColumnId`；传业务 ViewKey 时构造 Data 地址。`DataGridHandle.focusCell(address)` 接受当前结果中的业务行、组行或总计行与有效可见列，返回请求是否接受；真实焦点必须等布局 Accepted 后落到该格的真实 FocusHandle。`focusedCell` 反映实际焦点（包括自定义内容后代），`pendingCell`／`isPending` 反映尚未完成的请求。`cancelFocus()` 只取消定位请求。目标删除、禁用、外部焦点或新请求沿原 UI 焦点路径取消旧请求，不能在迟到帧中复活。表头排序沿模型入口执行。
 
 表头点击按未排序、升序、降序、未排序循环。`multiSortModifier` 默认 `GridMultiSortModifier.Shift`，可配置为平台 `Primary`；按住配置的修饰键追加或调整该列排序，其余排序维度与既有优先级保留。普通点击只保留当前列。表头显示方向，多列排序时同时显示从 1 开始的优先级，语义名称与可见标题一致。表头取得真实焦点后，普通 Enter／Space 使用单列排序，配置的修饰键加 Enter／Space 使用多列排序；自动重复不连续切换方向。所有入口先经过当前编辑会话的提交规则，非法草稿、组合输入与等待保存不会执行新的排序。不可排序列不执行排序动作。
 

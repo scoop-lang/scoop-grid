@@ -26,7 +26,8 @@ internal fun <Row> gridRestoreView(
             gridRestorePins(saved.pinnedRows.bottom, previous.source, issues)
         )
     val query = gridRestoreQuery(saved.query, previous.columns, issues)
-    val next = gridCompute(previous.source, previous.columns, query, Some(previous), pins)
+    val expanded = gridRestoreExpansion(saved.expandedRows, query.grouping, issues)
+    val next = gridCompute(previous.source, previous.columns, query, Some(previous), pins, expanded)
     if (next.query.pagination != query.pagination)
         issues.add(GridRestoreIssue(GridStatePart.Pagination, "页码已按恢复后的结果调整"))
     val selected =
@@ -67,7 +68,16 @@ internal fun <Row> gridRestoreView(
         next,
         selected,
         GridRestoreReport(
-            GridViewState(states, next.query, pins, selected.keys, range, position, focus),
+            GridViewState(
+                states,
+                next.query,
+                pins,
+                selected.keys,
+                range,
+                position,
+                focus,
+                next.expanded
+            ),
             issues.toArray()
         )
     )

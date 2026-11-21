@@ -1,0 +1,82 @@
+package scoop.grid.tests.grouping
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.ui.*
+
+internal fun GroupingProbe.inspectControls() {
+    when (phase) {
+        case 32 -> {
+            assertEquals(500L, model.result.rootCount)
+            assertEquals(500L, model.result.pageCount)
+            assertEquals(2L, model.result.pageRows.count)
+            assertEquals(4L, table!!.rowCount)
+            assertTrue(named("grid-page-size").text(0, Some("每页根组数")))
+        }
+        case 33 -> {
+            assertEquals(5L, table!!.rowCount)
+            assertEquals(1L, model.result.bottomCount)
+            assertEquals(2L, model.result.pageRows.count)
+            assertEquals(1L, keep(keep(table!!.cell(4L, 0L)!!).parent()!!).hierarchyLevel)
+        }
+        case 34 -> {
+            assertEquals(6L, table!!.rowCount)
+            val subtotal = keep(keep(table!!.cell(3L, 0L)!!).parent()!!)
+            assertTrue(subtotal.text(0, Some("0 Subtotal")))
+            assertEquals(1L, subtotal.hierarchyLevel)
+            assertFalse(subtotal.flag(18))
+            assertFalse(subtotal.flag(20))
+            assertTrue(keep(table!!.cell(3L, 1L)!!).text(1, Some("13")))
+        }
+        case 35 -> {
+            assertEquals(2L, model.result.rootCount)
+            assertEquals(3L, model.result.totalRows)
+            assertEquals(2L, model.result.pageCount)
+            assertFalse(oldGroup!!.flag(0))
+            assertFalse(groupCell!!.flag(0))
+            assertEquals(GridRowKey.Group(groupWindowPath(498L)), model.result.rows.rowKeyAt(0L))
+        }
+        case 36 -> {
+            groupCell = Some(keep(table!!.cell(0L, 0L)!!))
+            groupRow = Some(keep(groupCell!!.parent()!!))
+            assertTrue(model.isExpanded(group))
+            assertFalse(oldGroup!!.flag(0))
+            assertFalse(oldGroup!!.same(groupRow!!))
+            assertEquals(6L, table!!.rowCount)
+        }
+        case 38 -> {
+            option = find(root!!, "AXMenuItem", Some("不分组"))
+            retry = !(option?.flag(1) ?: false)
+        }
+        case 40 -> {
+            assertEquals(0L, model.query.grouping.size)
+            assertEquals(GridPageUnit.Records, model.result.pageUnit)
+            assertFalse(groupRow!!.flag(0))
+            assertTrue(named("grid-page-size").text(0, Some("每页条数")))
+            assertEquals(3L, table!!.rowCount)
+        }
+        case 42 -> {
+            option = find(root!!, "AXMenuItem", Some("第 1 级分组"))
+            retry = !(option?.flag(1) ?: false)
+        }
+        case 44 -> {
+            assertEquals(1L, model.query.grouping.size)
+            assertFalse(model.isExpanded(group))
+            assertEquals(GridPageUnit.Roots, model.result.pageUnit)
+            assertEquals(3L, table!!.rowCount)
+            groupCell = Some(keep(table!!.cell(0L, 0L)!!))
+            groupRow = Some(keep(groupCell!!.parent()!!))
+        }
+        case 45 -> assertFalse(groupRow!!.flag(18))
+        case 47 -> {
+            assertFalse(model.isExpanded(group))
+            assertTrue(groupRow!!.flag(18))
+        }
+        case 48 -> {
+            assertFalse(handle.isAttached)
+            assertFalse(groupRow!!.flag(0))
+            assertFalse(table!!.flag(0))
+        }
+        else -> {}
+    }
+}

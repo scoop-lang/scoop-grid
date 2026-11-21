@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合与总计。公开合同见 [SPEC.md](docs/SPEC.md)，分组、树、透视和外部结果继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、按组展开、小计与总计。公开合同见 [SPEC.md](docs/SPEC.md)，树、透视、详情和外部结果继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -31,6 +31,12 @@ fun main() {
     println(model.exportCsv())
 }
 ```
+
+行分组在列上显式设置 `groupable = true`，再通过 `model.setGrouping([columnId, ...])` 或列面板选择维度与次序。同级组按类型化原值或组聚合排序，业务列排序继续作用于叶记录。组路径包含真实值与维度身份，同名标签不会合并；组行及小计只读，业务单格编辑仍使用原记录。
+
+`expandedRows = GridExpandedRows(true)` 可以初始展开全部组；默认折叠，真实展开按钮、键盘进入按钮及系统展开动作共用编辑门控。`query.groupTotals = GridTotals(GridTotalPlacement.After, "小计")` 在已展开组内显示小计。分页按根组计数，后代与小计留在同一页；页内全选和组选择作用于匹配的业务成员，折叠不改变选择范围。固定业务行仍只出现一次。展开、总计位置与固定行不重新计算聚合。
+
+`GridCsvOptions(data = GridExportData.Displayed)` 导出当前展开的展示结果，`includeGroups` 和 `includeTotals` 分别控制组标题及汇总；缺省 Records 导出业务记录。十万行示例提供“按区域分组”，列工具可继续调整分组排序及小计位置。完整路径、选择、恢复及导出约定见 [公开合同](docs/SPEC.md)。
 
 本地模型验证：
 
@@ -74,7 +80,7 @@ scoop test --release .
 
 `gridAggregationSummary(model)` 显示整个筛选结果的记录数与总计，可放入 footer；翻页、排序、固定和选行不会改变聚合成员或重新聚合。`model.result.aggregates.total(id)` 返回 Value／Missing／Failed，未配置返回 None；`numericTotal(id)` 返回成功数值的 BigDecimal。Long 求和保留整数精度，超出 Long 范围时明确失败；count 只数非缺值，全缺值的其他操作返回 Missing。可空列使用 `nullableGridAggregation(...)`。内置 Double／BigDecimal 的求和与平均值，以及 `gridAggregation<T, A, R>` 的自定义累加器／结果格式化，见 [聚合合同](docs/SPEC.md#类型化聚合)。操作 title、列面板 Labels 和 `GridAggregationLabels` 分别配置名称、选择器及总计文案。十万行示例默认汇总金额，修改金额后总计随数据更新。
 
-`model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "全部筛选结果")))` 把全筛选集总计显示为正文结果行，After 放在正文末尾，Hidden 隐藏。它不占分页名额，与业务行共用布局、焦点、矩形、复制和查找，保持只读；固定行不改变聚合成员。`GridCellAddress(GridRowKey.Total(GridTotalKey.AllFiltered), columnId)` 定位总计。`result.rows.rowAt(index)` 返回完整的 Data／Total 变体，`infoAt` 与 `rowKeyAt` 只读取元数据；原始业务数据仍从 pageRows／ordered 访问。CSV 缺省导出业务记录；指定 `GridCsvOptions(data = GridExportData.Displayed)` 包含已启用的总计，可用 includeTotals 排除。十万行示例在首部固定记录之后直接显示总计。
+`model.setQuery(model.query.withTotals(GridTotals(GridTotalPlacement.Before, "全部筛选结果")))` 把全筛选集总计显示为正文结果行，After 放在正文末尾，Hidden 隐藏。它不占分页名额，与业务行共用布局、焦点、矩形、复制和查找，保持只读；固定行不改变聚合成员。`GridCellAddress(GridRowKey.Total(GridTotalKey.AllFiltered), columnId)` 定位总计。`result.rows.rowAt(index)` 返回完整的 Data／Group／Total 变体，`infoAt` 与 `rowKeyAt` 只读取元数据；原始业务数据仍从 pageRows／ordered 访问。CSV 缺省导出业务记录；指定 `GridCsvOptions(data = GridExportData.Displayed)` 包含已启用的总计，可用 includeTotals 排除。十万行示例在首部固定记录之后直接显示总计。
 
 
 `gridFind(handle) { ... }` 提供真实查找输入框、上一项／下一项和结果提示，Enter 查找下一项。它在当前呈现结果与可见逻辑列的数据文字中定位，不改变筛选／排序／分页。默认忽略 ASCII 大小写，Unicode 原文保留；可配置 `matchCase`、`wrap`、`labels`、字体／主题／焦点与 `onResult`。连续操作从上次匹配继续，修改文字重新开始；组合输入期间不提交查找。未命中或编辑校验拒绝时保留原范围，成功时清除矩形并显露匹配格。
@@ -182,6 +188,8 @@ scoop check --tests --release tests-cones/slots
 scoop test --release tests-cones/slots
 scoop check --tests --release tests-cones/aggregation
 scoop test --release tests-cones/aggregation
+scoop check --tests --release tests-cones/grouping
+scoop test --release tests-cones/grouping
 ```
 
 原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合，`pinned` 覆盖顶部／底部固定、分页去重、筛选／删除、可变高度、原生身份与编辑保留，以及零正文和三段内容测宽。

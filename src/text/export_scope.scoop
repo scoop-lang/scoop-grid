@@ -20,7 +20,8 @@ public class GridCsvOptions public constructor(
     public val includePinnedRows: Boolean = true,
     public val columns: Array<GridColumnId>? = None,
     public val data: GridExportData = GridExportData.Records,
-    public val includeTotals: Boolean = true
+    public val includeTotals: Boolean = true,
+    public val includeGroups: Boolean = true
 )
 
 internal fun <Row> gridExportCsv(
@@ -62,47 +63,71 @@ private fun <Row> gridExportRows(
     selection: GridSelectedRows,
     options: GridCsvOptions
 ): GridRowSource<Row> {
+    if (options.scope == GridExportScope.SelectedRows) {
+        if (options.includePinnedRows)
+            return GridDataRows(GridPickedRows(snapshot.source, selection.keys))
+        val pinned = HashSet<ViewKey>()
+        for (keys in [snapshot.pins.top, snapshot.pins.bottom])
+            for (key in keys)
+                pinned.add(key)
+        val keys = ArrayList<ViewKey>()
+        for (key in selection.keys)
+            if (!pinned.contains(key))
+                keys.add(key)
+        return GridDataRows(GridPickedRows(snapshot.source, keys.toArray()))
+    }
+    val displayed = options.data == GridExportData.Displayed
     val totals =
-        if (options.data == GridExportData.Displayed && options.includeTotals)
+        if (displayed && options.includeTotals)
             snapshot.query.totals
         else
             GridTotals()
+    val groups =
+        if (displayed)
+            snapshot.groups
+        else
+            None
+    val currentPage = options.scope == GridExportScope.CurrentPage
     val result =
-        when (options.scope) {
-            case CurrentPage -> if (totals == snapshot.query.totals)
-                snapshot.result
-            else
-                gridPinResult(
-                    snapshot.result.pageRows,
+        when (groups) {
+            case Some(val value) -> {
+                val query =
+                    snapshot.query.withPagination(
+                        if (currentPage)
+                            snapshot.query.pagination
+                        else
+                            GridPagination.Disabled
+                    ).withTotals(totals).withGroupTotals(
+                        if (options.includeTotals)
+                            snapshot.query.groupTotals
+                        else
+                            GridTotals()
+                    )
+                val(result, _) =
+                    gridPresentGroups(
+                        value,
+                        query,
+                        snapshot.expanded,
+                        snapshot.pins,
+                        options.includeGroups
+                    )
+                result
+            }
+            case None -> gridPinResult(
+                if (currentPage)
+                    snapshot.result.pageRows
+                else
                     snapshot.result.ordered,
-                    snapshot.result.totalRows,
-                    snapshot.result.pageCount,
-                    snapshot.pins,
-                    snapshot.result.aggregates,
-                    totals
-                )
-            case AllFiltered -> gridPinResult(
-                snapshot.result.ordered,
                 snapshot.result.ordered,
                 snapshot.result.totalRows,
-                1L,
+                if (currentPage)
+                    snapshot.result.pageCount
+                else
+                    1L,
                 snapshot.pins,
                 snapshot.result.aggregates,
                 totals
             )
-            case SelectedRows -> {
-                if (options.includePinnedRows)
-                    return GridDataRows(GridPickedRows(snapshot.source, selection.keys))
-                val pinned = HashSet<ViewKey>()
-                for (keys in [snapshot.pins.top, snapshot.pins.bottom])
-                    for (key in keys)
-                        pinned.add(key)
-                val keys = ArrayList<ViewKey>()
-                for (key in selection.keys)
-                    if (!pinned.contains(key))
-                        keys.add(key)
-                return GridDataRows(GridPickedRows(snapshot.source, keys.toArray()))
-            }
         }
     return if (options.includePinnedRows)
         result.rows

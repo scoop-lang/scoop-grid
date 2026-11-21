@@ -69,10 +69,7 @@ internal class GridRowCells<Row>(
                 selection,
                 range,
                 labels,
-                when (row) {
-                    case Data(_, _) -> None
-                    case Total(val total) -> gridRowLabelColumn(columns.columns, total.aggregates)
-                }
+                row.labelColumn(columns.columns)
             ),
             { props, scope -> GridDataCell(props, scope) }
         )

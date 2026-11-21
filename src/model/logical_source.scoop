@@ -11,15 +11,21 @@ internal class GridDataRows<Row>(private val source: TableSource<Row>): GridRowS
     public override fun rowAt(index: Long): GridRow<Row> =
         GridRow.Data(source.rowAt(index), source.keyAt(index))
     public override fun indexOfKey(key: ViewKey): Long? =
-        when (key) {
-            case Number(_) -> source.indexOfKey(key)
-            case Text(val text) -> if (text.startsWith("d"))
-                source.indexOfKey(ViewKey.Text(text.substring(1L)))
-            else
-                None
-            case Position -> None
+        when (gridBusinessKey(key)) {
+            case Some(val data) -> source.indexOfKey(data)
+            case None -> None
         }
 }
+
+internal fun gridBusinessKey(key: ViewKey): ViewKey? =
+    when (key) {
+        case Number(_) -> Some(key)
+        case Text(val text) -> if (text.startsWith("d"))
+            Some(ViewKey.Text(text.substring(1L)))
+        else
+            None
+        case Position -> None
+    }
 
 internal class GridWithTotalRows<Row>(
     private val source: GridRowSource<Row>,
@@ -48,6 +54,11 @@ internal class GridWithTotalRows<Row>(
         else
             source.infoAt(sourceIndex(index))
     public override fun keyAt(index: Long): ViewKey = rowKeyAt(index).viewKey
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? =
+        if (index == totalIndex)
+            None
+        else
+            source.hierarchyAt(sourceIndex(index))
     public override fun rowAt(index: Long): GridRow<Row> =
         if (index == totalIndex)
             GridRow.Total(total)
@@ -97,6 +108,10 @@ internal class GridCombinedRows<Row>(
         val(rows, offset) = at(index)
         return rows.infoAt(offset)
     }
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? {
+        val(rows, offset) = at(index)
+        return rows.hierarchyAt(offset)
+    }
     public override fun keyAt(index: Long): ViewKey = rowKeyAt(index).viewKey
     public override fun rowAt(index: Long): GridRow<Row> {
         val(rows, offset) = at(index)
@@ -144,6 +159,8 @@ internal class GridSliceRows<Row>(
         return start + index
     }
     public override fun infoAt(index: Long): GridRowInfo = source.infoAt(offset(index))
+    public override fun hierarchyAt(index: Long): GridRowHierarchy? =
+        source.hierarchyAt(offset(index))
     public override fun keyAt(index: Long): ViewKey = source.keyAt(offset(index))
     public override fun rowAt(index: Long): GridRow<Row> = source.rowAt(offset(index))
     public override fun indexOfKey(key: ViewKey): Long? {

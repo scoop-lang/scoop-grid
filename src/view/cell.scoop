@@ -74,7 +74,7 @@ internal class GridDataCell<Row>(
                                 appearance.paragraph
                         )
                     )
-                    case Total(_) -> component(
+                    else -> component(
                         LabelProps(
                             LabelText.Plain(
                                 input.row.text(input.column, input.labelColumn) ?: "",
@@ -98,7 +98,7 @@ internal class GridDataCell<Row>(
                 1L &&
                 when (input.row) {
                     case Data(val row, _) -> input.column.editing?.editable(row) ?: false
-                    case Total(_) -> false
+                    else -> false
                 }
         val cell =
             element(
@@ -141,6 +141,12 @@ internal class GridDataCell<Row>(
                                     input.columnIndex,
                                     child
                                 ) ?:
+                                    child
+                                case Group(val group) -> if (
+                                    input.labelColumn == Some(input.column.id)
+                                )
+                                    gridGroupCell(input, group, child)
+                                else
                                     child
                                 case Total(_) -> child
                             }

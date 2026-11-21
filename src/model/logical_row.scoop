@@ -4,22 +4,35 @@ import scoop.math.BigDecimal
 import scoop.ui.ViewKey
 import scoop.ui.component.TableSource
 
-public enum GridTotalKey {
-    AllFiltered
+public enum GridTotalKey: Equals<GridTotalKey>, Hash {
+    AllFiltered, Group(GridGroupPath)
+    public override operator fun equals(other: GridTotalKey): Boolean =
+        when ((this, other)) {
+            case(AllFiltered, AllFiltered) -> true
+            case(Group(val a), Group(val b)) -> a == b
+            else -> false
+        }
+    public override fun hash(): Long =
+        when (this) {
+            case AllFiltered -> 0L
+            case Group(val path) -> path.hash() xor 1L
+        }
 }
 
 public enum GridRowKey: Equals<GridRowKey>, Hash {
-    Data(ViewKey), Total(GridTotalKey)
+    Data(ViewKey), Group(GridGroupPath), Total(GridTotalKey)
     public override operator fun equals(other: GridRowKey): Boolean =
         when ((this, other)) {
             case(Data(val a), Data(val b)) -> a == b
+            case(Group(val a), Group(val b)) -> a == b
             case(Total(val a), Total(val b)) -> a == b
             else -> false
         }
     public override fun hash(): Long =
         when (this) {
             case Data(val key) -> key.hash() xor 1L
-            case Total(_) -> 2L
+            case Group(val path) -> path.hash() xor 2L
+            case Total(val key) -> key.hash() xor 3L
         }
     public val viewKey: ViewKey get() =
         when (this) {
@@ -31,16 +44,25 @@ public enum GridRowKey: Equals<GridRowKey>, Hash {
                 )
             }
             case Total(GridTotalKey.AllFiltered) -> ViewKey.Text("t:all")
+            case Total(GridTotalKey.Group(val path)) -> ViewKey.Text(f"t:group${path.encoded}")
+            case Group(val path) -> ViewKey.Text(f"g${path.encoded}")
         }
     public val dataKey: ViewKey? get() =
         when (this) {
             case Data(val key) -> Some(key)
-            case Total(_) -> None
+            else -> None
         }
 }
 
-public enum GridTotalPlacement {
+public enum GridTotalPlacement: Equals<GridTotalPlacement> {
     Hidden, Before, After
+    public override operator fun equals(other: GridTotalPlacement): Boolean =
+        when ((this, other)) {
+            case(Hidden, Hidden) -> true
+            case(Before, Before) -> true
+            case(After, After) -> true
+            else -> false
+        }
 }
 
 public struct GridTotals(
@@ -59,31 +81,48 @@ public class GridTotalRow internal constructor(
 
 /** Metadata access never materializes a business record. */
 public enum GridRowInfo {
-    Data(ViewKey), Total(GridTotalRow)
+    Data(ViewKey), Group(GridGroupRow), Total(GridTotalRow)
     public val key: GridRowKey get() =
         when (this) {
             case Data(val key) -> GridRowKey.Data(key)
+            case Group(val group) -> GridRowKey.Group(group.path)
             case Total(val total) -> GridRowKey.Total(total.key)
         }
     public val dataKey: ViewKey? get() = key.dataKey
     public val label: String? get() =
         when (this) {
             case Data(_) -> None
+            case Group(val group) -> Some(group.label)
             case Total(val total) -> Some(total.label)
         }
 }
 
 public enum GridRow<Row> {
-    Data(Row, ViewKey), Total(GridTotalRow)
+    Data(Row, ViewKey), Group(GridGroupRow), Total(GridTotalRow)
     public val info: GridRowInfo get() =
         when (this) {
             case Data(_, val key) -> GridRowInfo.Data(key)
+            case Group(val group) -> GridRowInfo.Group(group)
             case Total(val total) -> GridRowInfo.Total(total)
         }
     public val key: GridRowKey get() = info.key
     public fun text(column: GridColumn<Row>, labelColumn: GridColumnId? = None): String? =
         when (this) {
             case Data(val row, _) -> column.text(row)
+            case Group(val group) -> {
+                val display = group.aggregates.total(column.id)
+                val text = gridAggregateText(display)
+                Some(
+                    if (labelColumn == Some(column.id)) {
+                        val label = f"${group.label} (${group.count})"
+                        if (text == "")
+                            label
+                        else
+                            f"${label} · ${text}"
+                    } else
+                        text
+                )
+            }
             case Total(val total) -> Some(
                 when (total.aggregates.total(column.id)) {
                     case Some(GridAggregateDisplay.Value(val text)) -> text
@@ -99,12 +138,32 @@ public enum GridRow<Row> {
     public fun numericValue(column: GridColumn<Row>): BigDecimal? =
         when (this) {
             case Data(val row, _) -> column.numericValue(row)
+            case Group(val group) -> group.aggregates.numericTotal(column.id)
             case Total(val total) -> total.aggregates.numericTotal(column.id)
         }
+    internal fun labelColumn(columns: Array<GridColumn<Row>>): GridColumnId? {
+        return when (this) {
+            case Data(_, _) -> None
+            case Total(val total) -> gridRowLabelColumn(columns, total.aggregates)
+            case Group(val group) -> {
+                for (column in columns)
+                    if (column.id == group.column)
+                        return Some(column.id)
+                when (val preferred = gridRowLabelColumn(columns, group.aggregates)) {
+                    case Some(_) -> preferred
+                    case None -> if (columns.size > 0L)
+                        Some(columns[0L].id)
+                    else
+                        None
+                }
+            }
+        }
+    }
 }
 
 public interface GridRowSource<Row>: TableSource<GridRow<Row>> {
     public fun infoAt(index: Long): GridRowInfo
+    public fun hierarchyAt(index: Long): GridRowHierarchy? = None
     public fun rowKeyAt(index: Long): GridRowKey = infoAt(index).key
     public fun indexOfKey(key: GridRowKey): Long? =
         if (key.dataKey == Some(ViewKey.Position))
@@ -112,6 +171,13 @@ public interface GridRowSource<Row>: TableSource<GridRow<Row>> {
         else
             indexOfKey(key.viewKey)
 }
+
+private fun gridAggregateText(value: GridAggregateDisplay?): String =
+    when (value) {
+        case Some(GridAggregateDisplay.Value(val text)) -> text
+        case Some(GridAggregateDisplay.Failed(val message)) -> message
+        else -> ""
+    }
 
 internal fun <Row> gridRowLabelColumn(
     columns: Array<GridColumn<Row>>,

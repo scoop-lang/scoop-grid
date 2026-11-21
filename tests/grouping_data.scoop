@@ -1,0 +1,176 @@
+package scoop.grid
+
+import scoop.test.*
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+internal struct GroupingRecord(
+    val region: Long?,
+    val team: String,
+    val amount: Long?,
+    val note: String
+)
+
+internal class GroupingReads {
+    var records = 0L
+    var amounts = 0L
+    var forbidden = false
+    var action: (() -> Unit)? = None
+}
+
+internal class GroupingSource(
+    private val records: Array<GroupingRecord>,
+    val reads: GroupingReads = GroupingReads()
+): TableSource<GroupingRecord> {
+    public override val count: Long get() = records.size
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val at) -> if (at >= 0L && at < count)
+                Some(at)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): GroupingRecord {
+        assertFalse(reads.forbidden, Some("a presentation change read a business record"))
+        reads.records += 1L
+        return records[index]
+    }
+}
+
+internal fun groupingRecords(): Array<GroupingRecord> =
+    [
+        GroupingRecord(Some(10L), "same", Some(8L), "a"),
+        GroupingRecord(Some(2L), "same", Some(3L), "b"),
+        GroupingRecord(Some(10L), "other", Some(5L), "c"),
+        GroupingRecord(Some(2L), "same", None, "d"),
+        GroupingRecord(None, "", Some(7L), "e"),
+        GroupingRecord(Some(0L), "", Some(1L), "f"),
+        GroupingRecord(Some(10L), "same", Some(2L), "g")
+    ]
+
+internal fun groupingColumns(reads: GroupingReads, sameLabels: Boolean = false): Array<
+    GridColumn<GroupingRecord>
+> {
+    val longs = gridLongValues()
+    val regions =
+        if (sameLabels)
+            GridValues<Long>(
+                longs.kind,
+                { _ -> "Region" },
+                longs.compare,
+                longs.literal,
+                longs.encode,
+                longs.missing,
+                longs.number
+            )
+        else
+            longs
+    val concatenate =
+        gridAggregation<String, String, String>(
+            GridAggregateId("join"),
+            "Join",
+            { "" },
+            { previous, next -> f"${previous}${next}" },
+            { value, _ -> value },
+            { value -> value },
+            { a, b -> a.compareTo(b) }
+        )
+    return [
+        gridColumn<GroupingRecord, Long?>(
+            GridColumnId("region"),
+            "Region",
+            { row -> row.region },
+            nullableGridValues(regions),
+            groupable = true
+        ),
+        gridColumn<GroupingRecord, String>(
+            GridColumnId("team"),
+            "Team",
+            { row -> row.team },
+            gridTextValues(),
+            groupable = true
+        ),
+        gridColumn<GroupingRecord, Long?>(
+            GridColumnId("amount"),
+            "Amount",
+            {
+                row ->
+                reads.amounts += 1L
+                reads.action?.invoke()
+                row.amount
+            },
+            nullableGridValues(longs),
+            aggregations =
+                [
+                    nullableGridAggregation(gridSumLongAggregation()),
+                    nullableGridAggregation(gridCountAggregation<Long>())
+                ],
+            cell = Some { _ -> fail(Some("a group operation built a business view")) }
+        ),
+        gridColumn<GroupingRecord, String>(
+            GridColumnId("note"),
+            "Note",
+            { row -> row.note },
+            gridTextValues(),
+            aggregations = [concatenate]
+        )
+    ]
+}
+
+internal fun groupingQuery(nested: Boolean = true): GridQuery =
+    GridQuery(
+        grouping =
+            if (nested)
+                [GridColumnId("region"), GridColumnId("team")]
+            else
+                [GridColumnId("region")],
+        aggregations =
+            [
+                GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum")),
+                GridAggregationSelection(GridColumnId("note"), GridAggregateId("join"))
+            ]
+    )
+
+internal fun groupingPath(region: Long?, team: String? = None): GridGroupPath {
+    val first =
+        GridGroupPart(
+            GridColumnId("region"),
+            when (region) {
+                case Some(val value) -> GridLiteral.Integer(value)
+                case None -> GridLiteral.Empty
+            }
+        )
+    return GridGroupPath(
+        when (team) {
+            case Some(val value) -> [
+                first,
+                GridGroupPart(GridColumnId("team"), GridLiteral.Text(value))
+            ]
+            case None -> [first]
+        }
+    )
+}
+
+internal fun <Row> groupingInfo(rows: GridRowSource<Row>, path: GridGroupPath): GridGroupRow =
+    when (rows.infoAt(rows.indexOfKey(GridRowKey.Group(path))!!)) {
+        case Group(val group) -> group
+        else -> fail(Some("expected a group row"))
+    }
+
+internal fun <Row> groupingDataKeys(rows: GridRowSource<Row>): Array<ViewKey> {
+    val result = ArrayList<ViewKey>()
+    for (at in 0L ..< rows.count)
+        when (rows.infoAt(at).dataKey) {
+            case Some(val key) -> result.add(key)
+            case None -> {}
+        }
+    return result.toArray()
+}
+
+internal fun groupingAssertKeys(actual: Array<ViewKey>, expected: Array<Long>) {
+    assertEquals(expected.size, actual.size)
+    for (at in 0L ..< expected.size)
+        assertEquals(ViewKey.Number(expected[at]), actual[at])
+}

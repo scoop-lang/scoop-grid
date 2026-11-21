@@ -119,6 +119,31 @@ private class GridExample(scope: ComponentScope): Component(scope) {
             lastEdit.value = error.message ?: "无法生成 CSV"
         }
     }
+    private fun toggleGrouping() {
+        when (handle.commitEdit()) {
+            case NoEdit -> {}
+            case Committed -> {}
+            else -> {
+                lastEdit.value = "请先完成当前单元格的编辑或保存";
+                return
+            }
+        }
+        val grouped = model.query.grouping.size > 0L
+        model.setQuery(
+            model.query.withGrouping(
+                if (grouped)
+                    []
+                else
+                    [GridColumnId("region")]
+            )
+            .withGroupTotals(GridTotals(GridTotalPlacement.After, "小计"))
+        )
+        lastEdit.value =
+            if (grouped)
+                "已恢复平面记录"
+            else
+                "按区域分组；展开按钮查看成员，复选框选择组内记录"
+    }
     private fun toggleSpans() {
         when (handle.commitEdit()) {
             case NoEdit -> mergeDescriptions.value = !mergeDescriptions.value
@@ -163,7 +188,8 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 "基本信息",
                 [
                     GridHeaderNode.Column(GridColumnId("name")),
-                    GridHeaderNode.Column(GridColumnId("amount"))
+                    GridHeaderNode.Column(GridColumnId("amount")),
+                    GridHeaderNode.Column(GridColumnId("region"))
                 ]
             ),
             GridHeaderNode.Group(
@@ -172,9 +198,9 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                 [
                     GridHeaderNode.Group(
                         GridColumnGroupId("first-metrics"),
-                        "指标 3–20",
-                        Array<GridHeaderNode>(18L) {
-                            index -> GridHeaderNode.Column(GridColumnId(f"metric-${index + 3L}"))
+                        "指标 4–20",
+                        Array<GridHeaderNode>(17L) {
+                            index -> GridHeaderNode.Column(GridColumnId(f"metric-${index + 4L}"))
                         }
                     ),
                     GridHeaderNode.Group(
@@ -259,19 +285,38 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                     )
                 else
                     gridColumn<SampleRow, Long>(
-                        GridColumnId(f"metric-${column}"),
+                        GridColumnId(
+                            if (column == 3L)
+                                "region"
+                            else
+                                f"metric-${column}"
+                        ),
                         if (column == 0L)
                             "序号"
                         else
-                            f"指标 ${column}",
+                            if (column == 3L)
+                                "区域"
+                            else
+                                f"指标 ${column}",
                         {
                             row -> if (column == 0L)
                                 row.id
                             else
-                                row.id * (column + 1L)
+                                if (column == 3L)
+                                    (row.id - 1L) % 4L + 1L
+                                else
+                                    row.id * (column + 1L)
                         },
                         gridLongValues(),
-                        TableColumnSize(GridTrack.Fixed(112.0))
+                        TableColumnSize(
+                            GridTrack.Fixed(
+                                if (column == 3L)
+                                    200.0
+                                else
+                                    112.0
+                            )
+                        ),
+                        groupable = column == 3L
                     )
         }
     }
@@ -441,6 +486,15 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                                         lastEdit.value = "已清除单元格选区"
                                 }
                         ) { enabled = model.cellRange != None }
+                    )
+                    add(
+                        gridPinButton(
+                            if (model.query.grouping.size > 0L)
+                                "取消分组"
+                            else
+                                "按区域分组",
+                            { example.toggleGrouping() }
+                        )
                     )
                     add(gridPinButton("复制本页 CSV", { example.copyCsv(false) }))
                     add(

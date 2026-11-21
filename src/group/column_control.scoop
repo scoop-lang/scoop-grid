@@ -1,0 +1,211 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.select as groupSelect
+import scoop.ui.style.ThemeSource
+
+internal fun <Row> gridColumnGroupingControl(
+    model: DataGridState<Row>,
+    definition: GridColumn<Row>,
+    enabled: Boolean,
+    labels: GridGroupingLabels,
+    fonts: FontCollection?,
+    theme: ThemeSource?,
+    change: (GridQuery) -> Unit
+): View {
+    val id = definition.id
+    val level = gridGroupingLevel(model.query, id)
+    val levels = ArrayList<Choice<Long>>()
+    levels.add(Choice(ViewKey.Number(0L), 0L, labels.none))
+    val maximum =
+        model.query.grouping.size +
+            if (level == 0L)
+                1L
+            else
+                0L
+    for (index in 1L .. maximum)
+        levels.add(Choice(ViewKey.Number(index), index, labels.level(index)))
+    val metrics = ArrayList<Choice<GridGroupSortBy>>()
+    metrics.add(Choice(ViewKey.Number(0L), GridGroupSortBy.Value, labels.value))
+    for (metric in model.query.aggregations)
+        metrics.add(
+            Choice(
+                ViewKey.Text(metric.column.value),
+                GridGroupSortBy.Aggregate(metric.column),
+                labels.metric(model.column(metric.column).title)
+            )
+        )
+    return column {
+        spacing = 6.0
+        alignment = CrossAlignment.Stretch
+        add(
+            groupSelect(
+                binding<Long?>(
+                    { Some(gridGroupingLevel(model.query, id)) },
+                    {
+                        value -> when (value) {
+                            case Some(val next) -> change(gridMoveGrouping(model.query, id, next))
+                            case None -> {}
+                        }
+                    }
+                ),
+                levels.toArray()
+            ) {
+                key = ViewKey.Text(f"grid-grouping-${id.value}")
+                this.enabled = enabled
+                this.fonts = fonts
+                this.theme = theme
+                semantics = gridColumnControl(id, "grouping", labels.levelName(definition.title))
+            }
+        )
+        if (level > 0L) {
+            add(
+                groupSelect(
+                    binding<GridGroupSortBy?>(
+                        { Some(gridColumnGroupSort(model.query, id).by) },
+                        {
+                            value -> when (value) {
+                                case Some(val next) -> change(
+                                    gridChangeGroupSort(
+                                        model.query,
+                                        GridGroupSort(
+                                            id,
+                                            next,
+                                            gridColumnGroupSort(model.query, id).direction
+                                        )
+                                    )
+                                )
+                                case None -> {}
+                            }
+                        }
+                    ),
+                    metrics.toArray()
+                ) {
+                    key = ViewKey.Text(f"grid-grouping-sort-${id.value}")
+                    this.enabled = enabled
+                    this.fonts = fonts
+                    this.theme = theme
+                    semantics =
+                        gridColumnControl(id, "group-sort", labels.sortName(definition.title))
+                }
+            )
+            add(
+                groupSelect(
+                    binding<GridSortDirection?>(
+                        { Some(gridColumnGroupSort(model.query, id).direction) },
+                        {
+                            value -> when (value) {
+                                case Some(val next) -> change(
+                                    gridChangeGroupSort(
+                                        model.query,
+                                        GridGroupSort(
+                                            id,
+                                            gridColumnGroupSort(model.query, id).by,
+                                            next
+                                        )
+                                    )
+                                )
+                                case None -> {}
+                            }
+                        }
+                    ),
+                    [
+                        Choice(ViewKey.Number(0L), GridSortDirection.Ascending, labels.ascending),
+                        Choice(ViewKey.Number(1L), GridSortDirection.Descending, labels.descending)
+                    ]
+                ) {
+                    key = ViewKey.Text(f"grid-grouping-direction-${id.value}")
+                    this.enabled = enabled
+                    this.fonts = fonts
+                    this.theme = theme
+                    semantics =
+                        gridColumnControl(
+                            id,
+                            "group-direction",
+                            labels.directionName(definition.title)
+                        )
+                }
+            )
+            add(
+                groupSelect(
+                    binding<GridTotalPlacement?>(
+                        { Some(model.query.groupTotals.placement) },
+                        {
+                            value -> when (value) {
+                                case Some(val next) -> change(
+                                    model.query.withGroupTotals(
+                                        GridTotals(next, model.query.groupTotals.label)
+                                    )
+                                )
+                                case None -> {}
+                            }
+                        }
+                    ),
+                    [
+                        Choice(ViewKey.Number(0L), GridTotalPlacement.Hidden, labels.hiddenTotals),
+                        Choice(ViewKey.Number(1L), GridTotalPlacement.Before, labels.beforeTotals),
+                        Choice(ViewKey.Number(2L), GridTotalPlacement.After, labels.afterTotals)
+                    ]
+                ) {
+                    key = ViewKey.Text(f"grid-grouping-totals-${id.value}")
+                    this.enabled = enabled
+                    this.fonts = fonts
+                    this.theme = theme
+                    semantics = gridColumnControl(id, "group-totals", labels.totalsName)
+                }
+            )
+        }
+    }
+}
+
+private fun gridGroupingLevel(query: GridQuery, id: GridColumnId): Long {
+    for (index in 0L ..< query.grouping.size)
+        if (query.grouping[index] == id)
+            return index + 1L
+    return 0L
+}
+
+private fun gridMoveGrouping(query: GridQuery, id: GridColumnId, level: Long): GridQuery {
+    val others = ArrayList<GridColumnId>()
+    for (column in query.grouping)
+        if (column != id)
+            others.add(column)
+    if (level == 0L)
+        return query.withGrouping(others.toArray())
+    val at =
+        if (level > others.size + 1L)
+            others.size
+        else
+            level - 1L
+    val next =
+        Array<GridColumnId>(others.size + 1L) {
+            index -> if (index == at)
+                id
+            else
+                others[
+                    if (index < at)
+                        index
+                    else
+                        index - 1L
+                ]
+        }
+    return query.withGrouping(next)
+}
+
+private fun gridColumnGroupSort(query: GridQuery, id: GridColumnId): GridGroupSort {
+    for (sort in query.groupSorting)
+        if (sort.column == id)
+            return sort
+    return GridGroupSort(id)
+}
+
+private fun gridChangeGroupSort(query: GridQuery, sort: GridGroupSort): GridQuery {
+    val values = ArrayList<GridGroupSort>()
+    for (value in query.groupSorting)
+        if (value.column != sort.column)
+            values.add(value)
+    values.add(sort)
+    return query.withGroupSorting(values.toArray())
+}

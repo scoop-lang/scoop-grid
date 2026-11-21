@@ -1,0 +1,229 @@
+package scoop.grid.tests.grouping
+
+import scoop.grid.*
+import scoop.test.*
+import scoop.tests.ui.accessibility.native.*
+import scoop.ui.*
+
+internal fun GroupingProbe.accepted() {
+    if (finished || waiting || !(window?.isFocused ?: false))
+        return
+    waiting = true
+    retry = false
+    when (phase) {
+        case 1 -> calls!!.post(farRow!!, phase, 14)
+        case 3 -> calls!!.post(farRow!!, phase, 15)
+        case 5 -> calls!!.post(button!!, phase)
+        case 7 -> calls!!.post(checkbox!!, phase)
+        case 9 -> calls!!.post(groupRow!!, phase, 16)
+        case 15 -> calls!!.post(groupRow!!, phase, 14)
+        case 19 -> calls!!.post(groupRow!!, phase, 15)
+        case 30 -> calls!!.post(checkbox!!, phase)
+        case 37 -> calls!!.post(selector!!, phase)
+        case 39 -> calls!!.post(option!!, phase)
+        case 41 -> calls!!.post(selector!!, phase)
+        case 43 -> calls!!.post(option!!, phase)
+        case 46 -> calls!!.post(groupRow!!, phase, 14)
+        else -> calls!!.post(root!!, phase, 20)
+    }
+}
+
+internal fun GroupingProbe.inspect(tag: Int) {
+    assertEquals(phase, tag)
+    if (phase >= 32) {
+        inspectControls()
+        return
+    }
+    when (phase) {
+        case 0 -> {
+            table = find(root!!, "AXTable")
+            assertEquals(501L, table!!.rowCount)
+            groupCell = Some(keep(table!!.cell(0L, 0L)!!))
+            groupRow = Some(keep(groupCell!!.parent()!!))
+            farRow = Some(keep(keep(table!!.cell(400L, 0L)!!).parent()!!))
+            assertEquals(0L, groupRow!!.hierarchyLevel)
+            assertTrue(groupRow!!.flag(18))
+            assertFalse(groupRow!!.flag(17))
+            assertFalse(groupRow!!.flag(19))
+            assertFalse(groupRow!!.flag(20))
+            assertFalse(farRow!!.flag(2))
+            assertEquals(0L, dataBuilds)
+            assertTrue(groupCell!!.text(1, Some("0 (2)")))
+            aggregate = Some(model.result.aggregates)
+            button = find(root!!, "AXButton", Some("展开 0 组"))
+            checkbox = find(root!!, "AXCheckBox", Some("选择 0 组的记录"))
+            assertTrue(button?.flag(1) ?: false)
+            assertTrue(checkbox?.flag(1) ?: false)
+            selector = Some(named("grid-columns-group-grouping"))
+        }
+        case 2 -> {
+            assertTrue(model.isExpanded(far))
+            assertEquals(503L, table!!.rowCount)
+            assertTrue(farRow!!.flag(17))
+            assertFalse(farRow!!.flag(2))
+            assertTrue(aggregate!! === model.result.aggregates)
+            assertEquals(0L, dataBuilds)
+        }
+        case 4 -> {
+            assertFalse(model.isExpanded(far))
+            assertEquals(501L, table!!.rowCount)
+            assertTrue(groupCell!!.same(keep(table!!.cell(0L, 0L)!!)))
+            assertEquals(0L, dataBuilds)
+        }
+        case 6 -> {
+            assertTrue(model.isExpanded(group))
+            assertEquals(503L, table!!.rowCount)
+            assertTrue(groupRow!!.flag(17))
+            assertTrue(groupCell!!.same(keep(table!!.cell(0L, 0L)!!)))
+            member = Some(keep(keep(table!!.cell(1L, 0L)!!).parent()!!))
+            assertEquals(1L, member!!.hierarchyLevel)
+            assertFalse(member!!.flag(18))
+            assertTrue(member!!.flag(20))
+            assertTrue(dataBuilds > 0L)
+        }
+        case 8 -> {
+            assertEquals(2L, model.selectedRowKeys.size)
+            assertEquals(2L, table!!.selectedCount)
+            assertEquals(1L, checkbox!!.numericValue)
+            assertFalse(groupRow!!.flag(20))
+        }
+        case 10 -> {
+            assertEquals(2L, model.selectedRowKeys.size)
+            assertEquals(2L, table!!.selectedCount)
+        }
+        case 11 -> retry = !focused
+        case 12 -> {
+            assertTrue(handle.editError != None)
+            assertEquals(Some(address), handle.editingCell)
+            assertTrue(model.isExpanded(group))
+            assertEquals("bad", editor!!.state.text)
+            retry = !focused
+        }
+        case 13 -> retry = handle.focusedCell != Some(address)
+        case 14 -> {
+            assertFalse(model.isExpanded(group))
+            assertEquals(501L, table!!.rowCount)
+            assertFalse(member!!.flag(0))
+            assertEquals(2L, model.selectedRowKeys.size)
+            assertEquals(0L, table!!.selectedCount)
+            retry = handle.focusedCell != Some(groupAmount)
+        }
+        case 16 -> assertTrue(model.isExpanded(group))
+        case 17 -> retry = !focused
+        case 18 -> {
+            assertTrue(handle.isSubmitting)
+            assertTrue(model.isExpanded(group))
+            assertFalse(button!!.flag(1))
+            assertEquals(1, submissions)
+        }
+        case 20 -> {
+            assertTrue(handle.isSubmitting)
+            assertTrue(model.isExpanded(group))
+            assertEquals(1, submissions)
+        }
+        case 21 -> {
+            assertFalse(handle.isSubmitting)
+            assertTrue(model.isExpanded(group))
+            assertTrue(groupCell!!.same(keep(table!!.cell(0L, 0L)!!)))
+            assertTrue(keep(table!!.cell(0L, 1L)!!).text(1, Some("13")))
+            assertEquals(
+                Some(GridAggregateDisplay.Value("500510")),
+                model.result.aggregates.total(GridColumnId("amount"))
+            )
+        }
+        case 22 -> retry = handle.focusedCell != Some(groupAddress)
+        case 23 -> {
+            retry = !button!!.flag(4)
+            assertTrue(model.isExpanded(group))
+        }
+        case 24 -> {
+            assertFalse(model.isExpanded(group))
+            assertEquals(501L, table!!.rowCount)
+        }
+        case 25 -> retry = handle.focusedCell != Some(groupAddress) || !groupCell!!.flag(4)
+        case 26 -> {
+            retry = handle.focusedCell != Some(groupAmount)
+            assertFalse(model.isExpanded(group))
+        }
+        case 27 -> retry = handle.focusedCell != Some(groupAddress)
+        case 28 -> retry = !button!!.flag(4)
+        case 29 -> assertTrue(model.isExpanded(group))
+        case 31 -> {
+            assertEquals(0L, model.selectedRowKeys.size)
+            assertEquals(0L, table!!.selectedCount)
+        }
+        else -> {}
+    }
+}
+
+internal fun GroupingProbe.completed(tag: Int, result: Int) {
+    assertEquals(phase, tag)
+    assertEquals(1, result, Some(f"native action at ${phase}"))
+    waiting = false
+    if (retry) {
+        frame!!.requestFrame()
+        return
+    }
+    phase += 1
+    when (phase) {
+        case 11 -> {
+            assertFalse(handle.beginEdit(groupAmount))
+            assertTrue(handle.beginEdit(address))
+        }
+        case 12 -> {
+            editor!!.state.replaceAll("bad")
+            rejected(handle.setExpanded(group, false))
+        }
+        case 13 -> {
+            assertTrue(handle.cancelEdit())
+            assertTrue(handle.focusCell(address))
+        }
+        case 14 -> applied(handle.setExpanded(group, false))
+        case 17 -> assertTrue(handle.beginEdit(address))
+        case 18 -> {
+            editor!!.state.replaceAll("11")
+            rejected(handle.setExpanded(group, false))
+        }
+        case 21 -> assertTrue(pending!!.accept(GroupingWindowSource(11L)))
+        case 22 -> assertTrue(handle.focusCell(groupAddress))
+        case 23 -> key(36)
+        case 24 -> key(36)
+        case 25 -> key(53)
+        case 26 -> key(124)
+        case 27 -> assertTrue(handle.focusCell(groupAddress))
+        case 28 -> key(120)
+        case 29 -> key(49)
+        case 32 -> model.setPagination(GridPagination.Page(0L, 1L))
+        case 33 -> model.pinRow(ViewKey.Number(999L), GridRowPin.Bottom)
+        case 34 -> model.setQuery(
+            model.query.withGroupTotals(GridTotals(GridTotalPlacement.After, "Subtotal"))
+        )
+        case 35 -> {
+            oldGroup = groupRow
+            model.setQuery(
+                model.query.withFilter(
+                    GridFilter.Column(
+                        GridColumnId("amount"),
+                        GridCondition.Compare(GridComparison.Greater, GridLiteral.Integer(997L))
+                    )
+                )
+            )
+        }
+        case 36 -> model.setQuery(model.query.withFilter(GridFilter.All))
+        case 45 -> enabled.value = false
+        case 47 -> enabled.value = true
+        case 48 -> {
+            ui!!.close()
+            waiting = true
+            calls!!.post(root!!, phase, 20)
+            return
+        }
+        case 49 -> {
+            finished = true
+            application!!.requestExit()
+            return
+        }
+        else -> {}
+    }
+    frame!!.requestFrame()
+}

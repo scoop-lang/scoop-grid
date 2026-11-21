@@ -187,6 +187,34 @@ public class GridColumnsPanel<Row> public constructor(
         input.state.setAggregation(id, operation)
         report(GridColumnActionResult.Applied)
     }
+    private fun groupQuery(id: GridColumnId, query: GridQuery) {
+        val input = props.value
+        if (!available() || selected != id)
+            return
+        val before = input.state.query
+        if (!gridQueryReady(Some(input.handle))) {
+            report(
+                GridColumnActionResult.Rejected(
+                    input.handle.editError ?: input.labels.finishEditing
+                )
+            )
+            return
+        }
+        if (
+            !scope.isMounted ||
+                props.value.state !==
+                input.state ||
+                selected !=
+                id ||
+                input.state.query !==
+                before
+        ) {
+            report(GridColumnActionResult.Rejected("查询已更新，请重试"))
+            return
+        }
+        input.state.setQuery(query)
+        report(GridColumnActionResult.Applied)
+    }
     private fun clearContentFit() {
         contentFit?.cancel()
         contentFit = None
@@ -300,6 +328,20 @@ public class GridColumnsPanel<Row> public constructor(
                 }
             )
             add(gridColumnsLabel(labels.title(title), appearance))
+            when (definition.grouping) {
+                case Some(_) -> add(
+                    gridColumnGroupingControl(
+                        input.state,
+                        definition,
+                        active,
+                        labels.grouping,
+                        input.fonts,
+                        input.theme,
+                        { query -> this @GridColumnsPanel.groupQuery(current.id, query) }
+                    )
+                )
+                case None -> {}
+            }
             if (definition.aggregations.size > 0L)
                 add(
                     gridColumnAggregationControl(

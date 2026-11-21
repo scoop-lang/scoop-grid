@@ -1,0 +1,89 @@
+package scoop.grid.tests.grouping
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.surface.FrameSubmission
+import scoop.test.*
+import scoop.ui.*
+
+internal class GroupingScene(private val probe: GroupingProbe, scope: ComponentScope): Component(
+    scope
+) {
+    public override fun render(): View {
+        val probe = this.probe
+        return element(
+            GroupingLayoutProps(probe, probe.model.result, probe.enabled.value),
+            { props, scope -> GroupingLayout(props, scope) },
+            [
+                gridColumnsPanel(probe.model, probe.handle) {
+                    height = 100.0;
+                    enabled = probe.enabled.value
+                },
+                dataGrid(probe.model) {
+                    width = Some(620.0)
+                    height = 570.0
+                    rowHeight = 44.0
+                    rowSizing =
+                        GridRowSizing.Explicit {
+                            row ->
+                            assertTrue(row.index >= 0L && row.index < 1000L)
+                            44.0
+                        }
+                    columnSpans =
+                        Some {
+                            row ->
+                            assertTrue(row.amount > 0L);
+                            []
+                        }
+                    handle = Some(probe.handle)
+                    enabled = probe.enabled.value
+                },
+                gridPager(probe.model) {
+                    handle = Some(probe.handle);
+                    enabled = probe.enabled.value
+                }
+            ]
+        )
+    }
+}
+
+private class GroupingLayoutProps(
+    val probe: GroupingProbe,
+    val result: GridResult<GroupingWindowRow>,
+    val enabled: Boolean
+)
+
+private class GroupingLayout(
+    private val props: Props<GroupingLayoutProps>,
+    scope: ComponentScope
+): Element<Unit>(scope) {
+    init {
+        props.value.probe.frame = Some(scope)
+    }
+    public override fun measure(context: MeasureContext, constraints: Constraints): LayoutResult<
+        Unit
+    > {
+        context.measureChild(0L, Constraints.tight(Size(300.0, 750.0)))
+        context.placeChild(0L, Point(0.0, 0.0))
+        context.measureChild(1L, Constraints.tight(Size(620.0, 570.0)))
+        context.placeChild(1L, Point(320.0, 0.0))
+        context.measureChild(2L, Constraints.tight(Size(620.0, 90.0)))
+        context.placeChild(2L, Point(320.0, 590.0))
+        return LayoutResult(LayoutMetrics(constraints.constrain(Size(980.0, 780.0))), Unit)
+    }
+    public override fun scene(context: SceneContext, value: Unit) {
+        val input = props.value
+        context.children()
+        context.onFrameComplete {
+            frame -> if (
+                frame.submission ==
+                    FrameSubmission.Accepted &&
+                    input.result ===
+                    input.probe.model.result &&
+                    input.enabled ==
+                    input.probe.enabled.value
+            )
+                input.probe.accepted()
+        }
+    }
+}

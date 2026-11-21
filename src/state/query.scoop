@@ -36,13 +36,40 @@ internal fun <Row> gridRestoreQuery(
         else
             aggregations.add(entry)
     }
+    val grouping = gridSurvivingGrouping(saved.grouping, columns)
+    val groupIds = HashSet<GridColumnId>()
+    for (id in grouping)
+        groupIds.add(id)
+    val seenGroups = HashSet<GridColumnId>()
+    for (id in saved.grouping)
+        if (!seenGroups.add(id) || !groupIds.contains(id))
+            issues.add(GridRestoreIssue(GridStatePart.Grouping(id), "分组列重复、已移除或不允许分组"))
+    val groupSorting =
+        gridSurvivingGroupSorting(saved.groupSorting, grouping, aggregations.toArray())
+    val usedSorts = ArrayList<GridGroupSort>()
+    for (sort in saved.groupSorting) {
+        var valid = false
+        for (kept in groupSorting)
+            if (kept == sort)
+                valid = true
+        for (prior in usedSorts)
+            if (prior.column == sort.column && prior.by == sort.by)
+                valid = false
+        if (valid)
+            usedSorts.add(sort)
+        else
+            issues.add(GridRestoreIssue(GridStatePart.GroupSorting(sort.column), "组排序重复或其维度／度量已失效"))
+    }
     return GridQuery(
         sorting.toArray(),
         filter,
         saved.quickFilter,
         saved.pagination,
         aggregations.toArray(),
-        saved.totals
+        saved.totals,
+        grouping,
+        groupSorting,
+        saved.groupTotals
     )
 }
 

@@ -20,5 +20,10 @@ public class GridPagerLabels public constructor(
     public val previous: String = "上一页",
     public val next: String = "下一页",
     public val page: (Long) -> String = { number -> f"第 ${number} 页" },
-    public val name: String = "结果分页"
+    public val name: String = "结果分页",
+    public val rootSize: (Long) -> String = { count -> f"${count} 组 / 页" },
+    public val rootSizeName: String = "每页根组数",
+    public val roots: (Long, Long) -> String = { count, records -> f"共 ${count} 组 · ${records} 条" },
+    public val rootStatus: (Long, Long, Long, Long) -> String =
+        { count, records, page, pages -> f"共 ${count} 组 · ${records} 条 · ${page} / ${pages} 页" }
 )

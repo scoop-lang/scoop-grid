@@ -8,7 +8,7 @@ import scoop.ui.component.*
 internal fun <Row> testGridData(row: GridRow<Row>): Row =
     when (row) {
         case Data(val value, _) -> value
-        case Total(_) -> fail(Some("expected a business record"))
+        else -> fail(Some("expected a business record"))
     }
 
 private fun logicalRecords(values: Array<Long>): TableRows<Long> =

@@ -1,0 +1,19 @@
+package scoop.grid
+
+internal fun <Row> gridGroupAggregate(
+    topology: GridGroupTopology<Row>,
+    selections: Array<GridAggregationSelection>
+): GridAggregations {
+    val runs = gridAggregateRuns(topology.columns, selections)
+    for (run in runs)
+        for (group in 0L .. topology.nodes.size)
+            run.ensure(group)
+    if (runs.size > 0L)
+        for (index in 0L ..< topology.source.count) {
+            val row = topology.source.rowAt(index)
+            val groups = topology.nodes[topology.leaves[index]].ancestry
+            for (run in runs)
+                run.addGroups(groups, row)
+        }
+    return gridFinishAggregates(selections, runs)
+}

@@ -3,6 +3,7 @@ package scoop.grid
 import scoop.collections.HashSet
 import scoop.collections.sortWith
 import scoop.comparisons.comparatorOf
+import scoop.comparisons.Comparator
 import scoop.text.*
 import scoop.ui.component.TableSource
 
@@ -12,7 +13,9 @@ internal class GridComputed<Row>(
     val query: GridQuery,
     val result: GridResult<Row>,
     val pins: GridPinnedRows,
-    val filtered: TableSource<Row>
+    val filtered: TableSource<Row>,
+    val expanded: GridExpandedRows,
+    val groups: GridGrouped<Row>? = None
 )
 
 internal fun <Row> gridCompute(
@@ -20,7 +23,8 @@ internal fun <Row> gridCompute(
     columns: GridColumns<Row>,
     query: GridQuery,
     previous: GridComputed<Row>?,
-    pins: GridPinnedRows
+    pins: GridPinnedRows,
+    expanded: GridExpandedRows
 ): GridComputed<Row> {
     gridRequire(source.count >= 0L, "negative grid source count")
     var filterCache: TableSource<Row>? = None
@@ -35,63 +39,72 @@ internal fun <Row> gridCompute(
                 gridFilterCriteriaEqual(old.query, query)
         ) {
             filterCache = Some(old.filtered)
-            if (gridArrayEqual(old.query.sorting, query.sorting))
+            if (old.query.grouping.size == 0L && gridArrayEqual(old.query.sorting, query.sorting))
                 orderCache = Some(old.result.ordered)
-            if (gridArrayEqual(old.query.aggregations, query.aggregations))
+            if (
+                old.query.grouping.size ==
+                    0L &&
+                    gridArrayEqual(old.query.aggregations, query.aggregations)
+            )
                 aggregateCache = Some(old.result.aggregates)
         }
         case None -> {}
     }
     val filtered = filterCache ?: gridLocalFilter(source, columns, query)
+    val expansion = expanded.forGrouping(query.grouping)
+    if (query.grouping.size > 0L) {
+        val groups = gridComputeGroups(filtered, columns, query, previous?.groups ?: None)
+        val(result, resolved) =
+            gridPresentGroups(groups, query, expansion, pins, previous = previous)
+        return GridComputed(
+            source,
+            columns,
+            resolved,
+            result,
+            pins,
+            filtered,
+            expansion,
+            Some(groups)
+        )
+    }
+    gridCheckGroupSorting(query)
     val ordered = orderCache ?: gridLocalOrder(filtered, columns, query.sorting)
     val aggregates = aggregateCache ?: gridAggregate(filtered, columns, query.aggregations)
-    val total = ordered.count
-    var resolved = query
-    var rows: TableSource<Row> = ordered
-    var pages =
-        if (total == 0L)
-            0L
-        else
-            1L
-    when (query.pagination) {
-        case Disabled -> {}
-        case Page(val requested, val size) -> {
-            pages =
-                total /
-                    size +
-                    if (total % size == 0L)
-                        0L
-                    else
-                        1L
-            val index =
-                if (pages == 0L)
-                    0L
-                else
-                    if (requested >= pages)
-                        pages - 1L
-                    else
-                        requested
-            val start = index * size
-            rows =
-                GridPageRows(
-                    ordered,
-                    start,
-                    if (total - start < size)
-                        total - start
-                    else
-                        size
-                )
-            if (index != requested)
-                resolved = query.withPagination(GridPagination.Page(index, size))
+    val bounds = gridPageRange(ordered.count, query.pagination)
+    val pageCache =
+        when (previous) {
+            case Some(val old) -> if (
+                old.query.grouping.size ==
+                    0L &&
+                    old.result.ordered ===
+                    ordered &&
+                    old.query.pagination ==
+                    bounds.pagination
+            )
+                Some(old.result.pageRows)
+            else
+                None
+            case None -> None
         }
-    }
+    val rows: TableSource<Row> =
+        pageCache ?:
+            when (query.pagination) {
+                case Disabled -> ordered
+                case Page(_, _) -> GridPageRows(ordered, bounds.start, bounds.count)
+            }
+    val resolved =
+        if (bounds.pagination == query.pagination)
+            query
+        else
+            query.withPagination(bounds.pagination)
     return GridComputed(
         source,
         columns,
         resolved,
-        gridPinResult(rows, ordered, total, pages, pins, aggregates, query.totals),
+        gridPinResult(rows, ordered, ordered.count, bounds.pages, pins, aggregates, query.totals),
         pins,
-        filtered
+        filtered,
+        expansion
     )
 }
 
@@ -167,6 +180,19 @@ private fun <Row> gridLocalOrder(
     columns: GridColumns<Row>,
     sorts: Array<GridSort>
 ): TableSource<Row> {
+    val comparison = gridRecordOrder(source, columns, sorts) ?: return source
+    val indices = ArrayList<Long>()
+    for (index in 0L ..< source.count)
+        indices.add(index)
+    indices.sortWith(comparison)
+    return GridOrderedRows(source, indices.toArray())
+}
+
+internal fun <Row> gridRecordOrder(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    sorts: Array<GridSort>
+): Comparator<Long>? {
     val sorting = ArrayList<GridColumn<Row>>()
     val ids = HashSet<GridColumnId>()
     for (sort in sorts) {
@@ -176,38 +202,33 @@ private fun <Row> gridLocalOrder(
         sorting.add(column)
     }
     if (sorting.size == 0L)
-        return source
-    val indices = ArrayList<Long>()
-    for (index in 0L ..< source.count)
-        indices.add(index)
-    if (sorting.size > 0L)
-        indices.sortWith(
-            comparatorOf<Long> compare@{
-                left, right ->
-                val a = source.rowAt(left)
-                val b = source.rowAt(right)
-                for (index in 0L ..< sorting.size) {
-                    val column = sorting[index]
-                    val aMissing = column.missing(a)
-                    val bMissing = column.missing(b)
-                    if (aMissing != bMissing)
-                        return@compare if (aMissing == column.missingLast)
-                            1L
-                        else
+        return None
+    return Some(
+        comparatorOf<Long> compare@{
+            left, right ->
+            val a = source.rowAt(left)
+            val b = source.rowAt(right)
+            for (index in 0L ..< sorting.size) {
+                val column = sorting[index]
+                val aMissing = column.missing(a)
+                val bMissing = column.missing(b)
+                if (aMissing != bMissing)
+                    return@compare if (aMissing == column.missingLast)
+                        1L
+                    else
+                        -1L
+                if (!aMissing) {
+                    val value = column.compare(a, b)
+                    if (value != 0L) {
+                        val ascending = sorts[index].direction == GridSortDirection.Ascending
+                        return@compare if ((value < 0L) == ascending)
                             -1L
-                    if (!aMissing) {
-                        val value = column.compare(a, b)
-                        if (value != 0L) {
-                            val ascending = sorts[index].direction == GridSortDirection.Ascending
-                            return@compare if ((value < 0L) == ascending)
-                                -1L
-                            else
-                                1L
-                        }
+                        else
+                            1L
                     }
                 }
-                left.compareTo(right)
             }
-        )
-    return GridOrderedRows(source, indices.toArray())
+            left.compareTo(right)
+        }
+    )
 }
