@@ -11,7 +11,8 @@ internal class GridComputed<Row>(
     val columns: GridColumns<Row>,
     val query: GridQuery,
     val result: GridResult<Row>,
-    val pins: GridPinnedRows
+    val pins: GridPinnedRows,
+    val filtered: TableSource<Row>
 )
 
 internal fun <Row> gridCompute(
@@ -22,15 +23,28 @@ internal fun <Row> gridCompute(
     pins: GridPinnedRows
 ): GridComputed<Row> {
     gridRequire(source.count >= 0L, "negative grid source count")
-    var cached: TableSource<Row>? = None
+    var filterCache: TableSource<Row>? = None
+    var orderCache: TableSource<Row>? = None
+    var aggregateCache: GridAggregations? = None
     when (previous) {
         case Some(val old) -> if (
-            old.source === source && old.columns === columns && gridCriteriaEqual(old.query, query)
-        )
-            cached = Some(old.result.ordered)
+            old.source ===
+                source &&
+                old.columns ===
+                columns &&
+                gridFilterCriteriaEqual(old.query, query)
+        ) {
+            filterCache = Some(old.filtered)
+            if (gridArrayEqual(old.query.sorting, query.sorting))
+                orderCache = Some(old.result.ordered)
+            if (gridArrayEqual(old.query.aggregations, query.aggregations))
+                aggregateCache = Some(old.result.aggregates)
+        }
         case None -> {}
     }
-    val ordered = cached ?: gridLocalOrder(source, columns, query)
+    val filtered = filterCache ?: gridLocalFilter(source, columns, query)
+    val ordered = orderCache ?: gridLocalOrder(filtered, columns, query.sorting)
+    val aggregates = aggregateCache ?: gridAggregate(filtered, columns, query.aggregations)
     val total = ordered.count
     var resolved = query
     var rows: TableSource<Row> = ordered
@@ -75,8 +89,9 @@ internal fun <Row> gridCompute(
         source,
         columns,
         resolved,
-        gridPinResult(rows, ordered, total, pages, pins),
-        pins
+        gridPinResult(rows, ordered, total, pages, pins, aggregates),
+        pins,
+        filtered
     )
 }
 
@@ -129,21 +144,13 @@ private fun <Row> gridQuickMatch(row: Row, columns: GridColumns<Row>, needle: St
     return false
 }
 
-private fun <Row> gridLocalOrder(
+private fun <Row> gridLocalFilter(
     source: TableSource<Row>,
     columns: GridColumns<Row>,
     query: GridQuery
 ): TableSource<Row> {
-    val sorting = ArrayList<GridColumn<Row>>()
-    val ids = HashSet<GridColumnId>()
-    for (sort in query.sorting) {
-        val column = columns.get(sort.column)
-        gridRequire(ids.add(sort.column), "duplicate grid sort column")
-        gridRequire(column.sortable, "grid column is not sortable")
-        sorting.add(column)
-    }
     val predicate = gridFilterPredicate(columns, query.filter)
-    if (sorting.size == 0L && query.filter == GridFilter.All && query.quickFilter == "")
+    if (query.filter == GridFilter.All && query.quickFilter == "")
         return source
     val needle = query.quickFilter.lowercaseAscii()
     val indices = ArrayList<Long>()
@@ -152,6 +159,27 @@ private fun <Row> gridLocalOrder(
         if (predicate(row) && gridQuickMatch(row, columns, needle))
             indices.add(index)
     }
+    return GridOrderedRows(source, indices.toArray())
+}
+
+private fun <Row> gridLocalOrder(
+    source: TableSource<Row>,
+    columns: GridColumns<Row>,
+    sorts: Array<GridSort>
+): TableSource<Row> {
+    val sorting = ArrayList<GridColumn<Row>>()
+    val ids = HashSet<GridColumnId>()
+    for (sort in sorts) {
+        val column = columns.get(sort.column)
+        gridRequire(ids.add(sort.column), "duplicate grid sort column")
+        gridRequire(column.sortable, "grid column is not sortable")
+        sorting.add(column)
+    }
+    if (sorting.size == 0L)
+        return source
+    val indices = ArrayList<Long>()
+    for (index in 0L ..< source.count)
+        indices.add(index)
     if (sorting.size > 0L)
         indices.sortWith(
             comparatorOf<Long> compare@{
@@ -170,8 +198,7 @@ private fun <Row> gridLocalOrder(
                     if (!aMissing) {
                         val value = column.compare(a, b)
                         if (value != 0L) {
-                            val ascending =
-                                query.sorting[index].direction == GridSortDirection.Ascending
+                            val ascending = sorts[index].direction == GridSortDirection.Ascending
                             return@compare if ((value < 0L) == ascending)
                                 -1L
                             else

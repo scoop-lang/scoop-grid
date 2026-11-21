@@ -43,5 +43,8 @@ public class GridColumnsLabels public constructor(
         },
     public val filtered: String = "筛选中",
     public val decorate: (String, String) -> String = { title, status -> f"${title} · ${status}" },
-    public val error: (String) -> String = { message -> message }
+    public val error: (String) -> String = { message -> message },
+    public val noAggregation: String = "不聚合",
+    public val aggregationName: (String) -> String = { column -> f"${column} 列聚合方式" },
+    public val finishEditing: String = "请先完成当前编辑"
 )

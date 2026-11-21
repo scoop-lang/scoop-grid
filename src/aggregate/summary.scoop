@@ -1,0 +1,86 @@
+package scoop.grid
+
+import scoop.graphics.text.FontCollection
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.style.ThemeSource
+import scoop.ui.component.label as aggregateLabel
+
+public class GridAggregationLabels public constructor(
+    public val records: (Long) -> String = { count -> f"筛选结果总计 · ${count} 条记录" },
+    public val value: (String, String, String) -> String =
+        { column, operation, value -> f"${column} · ${operation}：${value}" },
+    public val missing: String = "—",
+    public val error: (String) -> String = { message -> f"计算错误：${message}" }
+)
+
+public class GridAggregationSummaryProps<Row> public constructor(
+    public val state: DataGridState<Row>,
+    public val fonts: FontCollection? = None,
+    public val theme: ThemeSource? = None,
+    public val labels: GridAggregationLabels = GridAggregationLabels()
+)
+
+public class GridAggregationSummary<Row> public constructor(
+    private val props: Props<GridAggregationSummaryProps<Row>>,
+    scope: ComponentScope
+): Component(scope) {
+    public override fun render(): View {
+        val input = props.value
+        val result = input.state.result
+        val labels = input.labels
+        return column {
+            add(
+                aggregateLabel(labels.records(result.totalRows)) {
+                    fonts = input.fonts
+                    theme = input.theme
+                    semantics = ComponentSemantics(automationId = Some("grid-aggregate-count"))
+                }
+            )
+            for (selection in result.aggregates.selections) {
+                val definition = input.state.column(selection.column)
+                val operation = gridFindAggregation(definition, selection.operation)!!
+                val value =
+                    when (result.aggregates.total(selection.column)!!) {
+                        case Value(val text) -> text
+                        case Missing -> labels.missing
+                        case Failed(val message) -> labels.error(message)
+                    }
+                add(
+                    aggregateLabel(labels.value(definition.title, operation.title, value)) {
+                        key = ViewKey.Text(selection.column.value)
+                        fonts = input.fonts
+                        theme = input.theme
+                        semantics =
+                            ComponentSemantics(
+                                automationId = Some(f"grid-aggregate-${selection.column.value}")
+                            )
+                    }
+                )
+            }
+            spacing = 4.0
+        }
+    }
+}
+
+public class GridAggregationSummaryBuilder internal constructor() {
+    public var fonts: FontCollection? = None
+    public var theme: ThemeSource? = None
+    public var labels: GridAggregationLabels = GridAggregationLabels()
+    public var key: ViewKey = ViewKey.Position
+    internal fun <Row> snapshot(state: DataGridState<Row>): GridAggregationSummaryProps<Row> =
+        GridAggregationSummaryProps(state, fonts, theme, labels)
+}
+
+public fun <Row> gridAggregationSummary(
+    state: DataGridState<Row>,
+    configure: GridAggregationSummaryBuilder.() -> Unit = {}
+): View {
+    val builder = GridAggregationSummaryBuilder()
+    builder.configure()
+    return component(
+        builder.snapshot(state),
+        { props, scope -> GridAggregationSummary(props, scope) },
+        builder.key
+    )
+}

@@ -93,9 +93,7 @@ public class GridFilterPanel<Row> public constructor(
         val before = input.state.result
         val query = input.state.query
         try {
-            input.state.setQuery(
-                GridQuery(query.sorting, filter, query.quickFilter, query.pagination)
-            )
+            input.state.setQuery(query.withFilter(filter))
         } catch (error: IllegalArgumentException) {
             if (input.state.result !== before)
                 throw error

@@ -170,6 +170,23 @@ public class GridColumnsPanel<Row> public constructor(
         if (available())
             report(props.value.handle.fitColumns())
     }
+    private fun aggregate(id: GridColumnId, operation: GridAggregateId?) {
+        val input = props.value
+        if (!available() || selected != id)
+            return
+        if (!gridQueryReady(Some(input.handle))) {
+            report(
+                GridColumnActionResult.Rejected(
+                    input.handle.editError ?: input.labels.finishEditing
+                )
+            )
+            return
+        }
+        if (!scope.isMounted || props.value.state !== input.state || selected != id)
+            return
+        input.state.setAggregation(id, operation)
+        report(GridColumnActionResult.Applied)
+    }
     private fun clearContentFit() {
         contentFit?.cancel()
         contentFit = None
@@ -283,6 +300,18 @@ public class GridColumnsPanel<Row> public constructor(
                 }
             )
             add(gridColumnsLabel(labels.title(title), appearance))
+            if (definition.aggregations.size > 0L)
+                add(
+                    gridColumnAggregationControl(
+                        input.state,
+                        definition,
+                        active,
+                        labels,
+                        input.fonts,
+                        input.theme,
+                        { operation -> this @GridColumnsPanel.aggregate(current.id, operation) }
+                    )
+                )
             for (ancestor in tree.ancestors(current.id)) {
                 val group =
                     when (ancestor.key) {

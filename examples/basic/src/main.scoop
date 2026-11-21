@@ -60,6 +60,11 @@ private class GridExample(scope: ComponentScope): Component(scope) {
         DataGridState(
             rows,
             columns(),
+            query =
+                GridQuery(
+                    aggregations =
+                        [GridAggregationSelection(GridColumnId("amount"), GridAggregateId("sum"))]
+                ),
             headers = Some(headers()),
             pinnedRows = GridPinnedRows([ViewKey.Number(0L)], [ViewKey.Number(99999L)]),
             rowSelection = GridRowSelectionMode.Multiple
@@ -241,7 +246,15 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                                                 None
                                         }
                                 )
-                            )
+                            ),
+                        aggregations =
+                            [
+                                gridCountAggregation<Long>(),
+                                gridSumLongAggregation(),
+                                gridMinAggregation(gridLongValues()),
+                                gridMaxAggregation(gridLongValues()),
+                                gridAverageLongAggregation()
+                            ]
                     )
                 else
                     gridColumn<SampleRow, Long>(
@@ -333,6 +346,7 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                                 gridSlotColumn {
                                     add(gridPager(model) { this.handle = Some(handle) })
                                     add(gridStatusBar(model))
+                                    add(gridAggregationSummary(model))
                                     spacing = 4.0
                                 }
                             )
@@ -340,7 +354,16 @@ private class GridExample(scope: ComponentScope): Component(scope) {
                             Some(
                                 gridSlotColumn {
                                     label("没有匹配的记录")
-                                    button("清除筛选", { model.setQuery(GridQuery()) })
+                                    button(
+                                        "清除筛选",
+                                        {
+                                            model.setQuery(
+                                                model.query.withFilter(
+                                                    GridFilter.All
+                                                ).withQuickFilter("")
+                                            )
+                                        }
+                                    )
                                     spacing = 8.0
                                     alignment = CrossAlignment.Center
                                 }

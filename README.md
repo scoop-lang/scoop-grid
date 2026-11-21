@@ -4,7 +4,7 @@
 
 本库处于实现阶段。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。
 
-已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行单选／多选、单矩形键盘／点击／拖动选择与系统复制、查找定位、明确范围的 CSV／TSV 导出和单格粘贴解析，公开合同见 [SPEC.md](docs/SPEC.md)。其余配套操作与分析功能继续实施。模型用法例如：
+已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合与总计。公开合同见 [SPEC.md](docs/SPEC.md)，分组、树、透视和外部结果继续实施。模型用法例如：
 
 ```scoop
 import scoop.grid.*
@@ -69,6 +69,10 @@ scoop test --release .
 可在网格上方组合 `gridQuickFilter(model) { handle = Some(handle) }`，按 Enter 或“应用”提交快速筛选，输入草稿期间不执行查询；`gridPager(model) { handle = Some(handle) }` 提供结果条数、页大小和翻页。“全部”取消分页，仍使用同一个虚拟网格。两个控件通过同一 handle 检查单元格编辑，非法草稿或等待保存时不改变查询。`pageSizes` 可配置允许选择的正整数，外部当前值也会正确显示。
 
 两个控件的 `labels` 分别使用 `GridQuickFilterLabels` 和 `GridPagerLabels`。可以替换按钮、占位文字、无障碍名称，以及结果数、页大小和页码的格式化回调；默认显示中文。运行中切换文案保留输入草稿、焦点和查询，选项身份与分页值不依赖显示文字。
+
+列声明 `aggregations = [gridCountAggregation<Long>(), gridSumLongAggregation(), gridMinAggregation(gridLongValues()), gridMaxAggregation(gridLongValues()), gridAverageLongAggregation()]` 后，列面板提供该列的聚合选择器。程序用 `model.setAggregation(id, Some(GridAggregateId("sum")))` 选择，传 None 清除；查询中的 `aggregations` 是普通的列 id／操作 id 数据，可随视图保存恢复。`withSorting`、`withFilter`、`withQuickFilter`、`withPagination` 只修改对应查询字段。
+
+`gridAggregationSummary(model)` 显示整个筛选结果的记录数与总计，可放入 footer；翻页、排序、固定和选行不会改变聚合成员或重新聚合。`model.result.aggregates.total(id)` 返回 Value／Missing／Failed，未配置返回 None；`numericTotal(id)` 返回成功数值的 BigDecimal。Long 求和保留整数精度，超出 Long 范围时明确失败；count 只数非缺值，全缺值的其他操作返回 Missing。可空列使用 `nullableGridAggregation(...)`。内置 Double／BigDecimal 的求和与平均值，以及 `gridAggregation<T, A, R>` 的自定义累加器／结果格式化，见 [聚合合同](docs/SPEC.md#类型化聚合)。操作 title、列面板 Labels 和 `GridAggregationLabels` 分别配置名称、选择器及总计文案。十万行示例默认汇总金额，修改金额后总计随数据更新。
 
 `gridFind(handle) { ... }` 提供真实查找输入框、上一项／下一项和结果提示，Enter 查找下一项。它在当前呈现结果与可见逻辑列的数据文字中定位，不改变筛选／排序／分页。默认忽略 ASCII 大小写，Unicode 原文保留；可配置 `matchCase`、`wrap`、`labels`、字体／主题／焦点与 `onResult`。连续操作从上次匹配继续，修改文字重新开始；组合输入期间不提交查找。未命中或编辑校验拒绝时保留原范围，成功时清除矩形并显露匹配格。
 
@@ -173,6 +177,8 @@ scoop check --tests --release tests-cones/range
 scoop test --release tests-cones/range
 scoop check --tests --release tests-cones/slots
 scoop test --release tests-cones/slots
+scoop check --tests --release tests-cones/aggregation
+scoop test --release tests-cones/aggregation
 ```
 
 原生测试要求桌面已解锁且测试窗口能取得系统焦点。每个测试 Cone 在独立进程里运行一个 Application；`window` 保留宽表、导航、文本、系统拼音和剪贴板组合，`controls` 覆盖值编辑器的弹层与提交，`accessibility` 覆盖生产网格的原生定位、冻结区和节点生命周期，`query` 覆盖排序的原生点击、键盘和编辑门控，`query-controls` 覆盖快速筛选、分页与编辑提交的组合，`filters` 覆盖类型化条件、嵌套组合、集合候选和编辑提交，`columns` 覆盖虚拟列面板、显隐／顺序／冻结、表头鼠标与键盘调宽、拖列与边缘自动滚动、取消恢复、RTL／密度、窄窗口和编辑提交，`sizing` 覆盖真实内容测宽、可见行边界、请求失效和模型／字体／编辑的组合，`groups` 覆盖多级表头、跨冻结区片段、组移动、宽组焦点、原生跨度与祖先表头关系，`heights` 覆盖显式／自动行高、阅读锚点、离屏贡献列、编辑器和原生定位的组合，`pinned` 覆盖顶部／底部固定、分页去重、筛选／删除、可变高度、原生身份与编辑保留，以及零正文和三段内容测宽。
@@ -182,6 +188,8 @@ scoop test --release tests-cones/slots
 `selection` 覆盖业务行选择与 Checkbox、原生选择、编辑提交及模型生命周期；`range` 覆盖唯一矩形的键盘／点击／拖动扩展、两轴边缘滚动与停帧、触点选择模式、系统菜单和快捷键复制、离屏语义、RTL、结构变化、内部按钮、真实编辑器、查找控件／循环／离屏定位／组合输入及失败原子性。系统输入回归在本机通过正常的 macOS 应用启动入口运行，保留真实窗口焦点条件；纯模型测试不依赖窗口焦点。
 
 `slots` 覆盖工具栏、底栏、空状态、加载和错误 View 的几何、身份、优先级与 busy，网格禁用期间的真实按钮、零高度焦点、编辑草稿、外部焦点提交、异步保存和关闭清理。
+
+`aggregation` 覆盖真实列面板选择、全筛选集总计、快速筛选保留聚合、排序／分页复用、编辑拒绝与等待保存、动态文案、数值错误、空结果、清除操作和关闭弹层。
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 

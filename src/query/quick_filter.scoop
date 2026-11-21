@@ -45,7 +45,7 @@ public class GridQuickFilter<Row> public constructor(
         if (!gridQueryReady(input.handle) || !scope.isMounted || props.value.state !== input.state)
             return
         val query = input.state.query
-        input.state.setQuery(GridQuery(query.sorting, query.filter, text, query.pagination))
+        input.state.setQuery(query.withQuickFilter(text))
         applied = input.state.query.quickFilter
         if (clear)
             draft.replaceAll("")

@@ -17,7 +17,32 @@ internal fun <Row> gridRestoreQuery(
             sorting.add(entry)
     }
     val filter = gridRestoreFilter(saved.filter, columns, [], issues) ?: GridFilter.All
-    return GridQuery(sorting.toArray(), filter, saved.quickFilter, saved.pagination)
+    val aggregations = ArrayList<GridAggregationSelection>()
+    val metrics = HashSet<GridColumnId>()
+    for (entry in saved.aggregations) {
+        val definition = columns.find(entry.column)
+        var allowed = false
+        when (definition) {
+            case Some(val column) -> when (gridFindAggregation(column, entry.operation)) {
+                case Some(_) -> allowed = true
+                case None -> {}
+            }
+            case None -> {}
+        }
+        if (!metrics.add(entry.column) || !allowed)
+            issues.add(
+                GridRestoreIssue(GridStatePart.Aggregation(entry.column), "聚合列重复、已移除或不再允许该操作")
+            )
+        else
+            aggregations.add(entry)
+    }
+    return GridQuery(
+        sorting.toArray(),
+        filter,
+        saved.quickFilter,
+        saved.pagination,
+        aggregations.toArray()
+    )
 }
 
 private fun <Row> gridRestoreFilter(

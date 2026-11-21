@@ -40,6 +40,18 @@
 
 筛选面板的 `labels: GridFilterLabels` 配置按钮、条件组与条件名称、比较方式、占位文字、布尔选项、候选状态、缺值／空字符串提示、输入错误和无障碍名称，默认中文。含路径、列名与计数的文字使用明确参数的格式化回调。更换 labels 保留草稿、输入焦点、候选快照和已选值，不执行查询或重新加载候选；下次显式搜索使用当时的候选显示文字。运算符、组连接、候选键和控件 automation id 均不使用显示文字作为身份。`error` 回调供应用格式化面板收到的错误消息，默认原样显示，不改变错误所属操作或查询失败原子性。
 
+## 类型化聚合
+
+`gridColumn(..., aggregations = [...])` 声明该列允许的 `GridAggregation<T>`。`GridAggregateId` 是非空稳定 id，名称可本地化且不参与身份。列内聚合 id 不得重复；纯操作列默认不提供聚合。`GridQuery.aggregations` 保存有序的 `GridAggregationSelection(column, operation)`，当前每列至多选一个操作。模型入口拒绝未知列／操作和重复度量列；`setAggregation(column, operation)` 替换该列选择，传 None 清除。
+
+`gridAggregation<T, A, R>` 显式绑定输入、累加器和输出类型，接受 seed／add／finish、结果格式化／比较及可选的精确数值转换；累加器与原始 R 结果均留在泛型实现中。seed 为每组提供独立初值，应用保持完成结果不可变，不使用动态值容器。缺值在列绑定处跳过，finish 接收非缺值数量；空结果默认缺值，可显式提供空结果值。真实算术异常转换为该项的 `GridAggregateDisplay.Failed`；内置数值 min／max 通过列的 encode 检查数值有效性，encode 拒绝的数值输入也作为聚合错误，不要求可选的 number 投影。其他应用异常仍向动作调用方传播且不发布半份状态。格式化文字只用于显示。
+
+内置 count／min／max 适用于明确类型的值；Long、Double 和 BigDecimal 提供 sum／average。count 返回 Long，统计非缺值，和 `result.totalRows` 的记录数分开。全缺值时 count 为零，其他内置操作为缺值。Long sum 用 BigInteger 累加，完成时检查 Long 范围，不经 Double；Long average 输出 Double，使用 Decimal128 中间除法。Double sum 检查非有限输入及每步溢出，average 用十进制累加和 Decimal128 除法后输出 Double，避免有限平均值因中间浮点和溢出而失败。BigDecimal average 必须显式给出 scale 与 roundingMode。`nullableGridAggregation` 将相同操作绑定到可缺值的输入。
+
+`result.aggregates.total(column)` 返回该项显示结果（Value／Missing／Failed），未配置该列时返回 None。`numericTotal(column)` 只返回已成功且有数值转换的精确 BigDecimal。结果内部保留真实类型与比较操作，显示字符串不用于排序。聚合始终消费整个筛选结果；切页、列宽、显隐、固定行和业务选择均复用既有聚合。改变排序只改变行序，保留同一筛选集的聚合结果；数据、筛选、快速筛选、度量或列定义变化时重新计算。
+
+选择聚合沿查询动作通知并重置页码，列替换清理已移除或不再允许的操作；视图保存和恢复包含聚合选择，恢复报告具体失效项。列面板只为允许聚合的列显示选择器，使用现有编辑提交门控；非法草稿或等待保存时不切换聚合。`gridAggregationSummary` 显示筛选记录数与各列总计，使用现有主题、字体和显式 Labels，不读取记录或在绘制中启动计算。分组／树的小计与结果行将在对应实现中接入相同类型化结果。
+
 ## 本地状态与数据
 
 `DataGridState<Row>` 消费不可变 `TableSource<Row>`，应用可复用 `TableRows`／`TableRecord`。来源必须履行 `TableSource` 的稳定、显式、唯一 key 与互逆索引合同；`TableRows` 已在构造时验证，不重复全量检查该事实。

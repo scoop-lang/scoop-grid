@@ -1,0 +1,459 @@
+package scoop.grid
+
+import scoop.math.*
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+private fun <T> aggregationRows(values: Array<T>): TableRows<T> =
+    TableRows(
+        Array<TableRecord<T>>(values.size) {
+            index -> TableRecord(ViewKey.Number(index), values[index])
+        }
+    )
+
+private fun longAggregations(): Array<GridAggregation<Long>> =
+    [
+        gridCountAggregation<Long>(),
+        gridSumLongAggregation(),
+        gridMinAggregation(gridLongValues()),
+        gridMaxAggregation(gridLongValues()),
+        gridAverageLongAggregation()
+    ]
+
+private fun <T> aggregationColumn(
+    values: GridValues<T>,
+    operations: Array<GridAggregation<T>>,
+    id: String = "value"
+): GridColumn<T> =
+    gridColumn<T, T>(
+        GridColumnId(id),
+        "Same label",
+        { value -> value },
+        values,
+        cell = Some { _ -> fail(Some("aggregation created a view")) },
+        aggregations = operations
+    )
+
+private fun <T> aggregationModel(values: Array<T>, column: GridColumn<T>): DataGridState<T> =
+    DataGridState(aggregationRows(values), [column])
+
+private fun <T> aggregateValue(model: DataGridState<T>, operation: String): GridAggregateDisplay {
+    model.setAggregation(GridColumnId("value"), Some(GridAggregateId(operation)))
+    return model.result.aggregates.total(GridColumnId("value"))!!
+}
+
+private fun aggregateFailed(value: GridAggregateDisplay) {
+    when (value) {
+        case Failed(val message) -> assertTrue(message != "")
+        else -> fail(Some("expected an explicit aggregate failure"))
+    }
+}
+
+private class AggregationCounts {
+    var adds = 0L
+    var filters = 0L
+    var changes = 0L
+    var action: (() -> Unit)? = None
+}
+
+private class EmptyAggregationSource(public override val count: Long): TableSource<Long> {
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val at) -> if (at >= 0L && at < count)
+                Some(at)
+            else
+                None
+            else -> None
+        }
+    public override fun rowAt(index: Long): Long = fail(Some("an inactive aggregate read a record"))
+}
+
+@Test
+private class GridAggregationTest {
+    @Test
+    fun `missing inputs have zero count but no sum extrema or average`() {
+        val operations = longAggregations()
+        val nullable =
+            Array<GridAggregation<Long?>>(operations.size) {
+                index -> nullableGridAggregation(operations[index])
+            }
+        val model =
+            aggregationModel<Long?>(
+                [Some(2L), None, Some(6L)],
+                aggregationColumn(nullableGridValues(gridLongValues()), nullable)
+            )
+        assertEquals(GridAggregateDisplay.Value("2"), aggregateValue(model, "count"))
+        assertEquals(GridAggregateDisplay.Value("8"), aggregateValue(model, "sum"))
+        assertEquals(GridAggregateDisplay.Value("2"), aggregateValue(model, "min"))
+        assertEquals(GridAggregateDisplay.Value("6"), aggregateValue(model, "max"))
+        assertEquals(GridAggregateDisplay.Value("4.0"), aggregateValue(model, "average"))
+        assertEquals(
+            Some(BigDecimal(4L)),
+            model.result.aggregates.numericTotal(GridColumnId("value"))
+        )
+    }
+
+    @Test
+    fun `empty and all missing groups are distinct from arithmetic failure`() {
+        val operations = longAggregations()
+        val nullable =
+            Array<GridAggregation<Long?>>(operations.size) {
+                index -> nullableGridAggregation(operations[index])
+            }
+        val model =
+            aggregationModel<Long?>(
+                [None, None],
+                aggregationColumn(nullableGridValues(gridLongValues()), nullable)
+            )
+        for (empty in [false, true]) {
+            if (empty)
+                model.replaceData(aggregationRows<Long?>([]))
+            assertEquals(GridAggregateDisplay.Value("0"), aggregateValue(model, "count"))
+            for (operation in ["sum", "min", "max", "average"])
+                assertEquals(GridAggregateDisplay.Missing, aggregateValue(model, operation))
+            assertEquals(None, model.result.aggregates.numericTotal(GridColumnId("value")))
+        }
+    }
+
+    @Test
+    fun `integer sums keep precision and only fail when the completed sum exceeds long`() {
+        val model =
+            aggregationModel<Long>(
+                [9007199254740993L, -9007199254740992L],
+                aggregationColumn(gridLongValues(), longAggregations())
+            )
+        assertEquals(GridAggregateDisplay.Value("1"), aggregateValue(model, "sum"))
+        assertEquals(
+            Some(BigDecimal.ONE),
+            model.result.aggregates.numericTotal(GridColumnId("value"))
+        )
+        model.replaceData(aggregationRows([Long.MAX_VALUE, 1L, -1L]))
+        assertEquals(GridAggregateDisplay.Value(f"${Long.MAX_VALUE}"), aggregateValue(model, "sum"))
+        model.replaceData(aggregationRows([Long.MAX_VALUE, Long.MAX_VALUE]))
+        aggregateFailed(aggregateValue(model, "sum"))
+        assertEquals(None, model.result.aggregates.numericTotal(GridColumnId("value")))
+        assertEquals(
+            GridAggregateDisplay.Value(f"${Long.MAX_VALUE.toDouble()}"),
+            aggregateValue(model, "average")
+        )
+        assertEquals(GridAggregateDisplay.Value("2"), aggregateValue(model, "count"))
+    }
+
+    @Test
+    fun `double totals reject nonfinite values and finite averages avoid intermediate overflow`() {
+        val model =
+            aggregationModel<Double>(
+                [Double.MAX_VALUE, Double.MAX_VALUE],
+                aggregationColumn(
+                    gridDoubleValues(),
+                    [
+                        gridSumDoubleAggregation(),
+                        gridAverageDoubleAggregation(),
+                        gridMinAggregation(gridDoubleValues()),
+                        gridMaxAggregation(gridDoubleValues())
+                    ]
+                )
+            )
+        aggregateFailed(aggregateValue(model, "sum"))
+        assertEquals(
+            GridAggregateDisplay.Value(f"${Double.MAX_VALUE}"),
+            aggregateValue(model, "average")
+        )
+        model.replaceData(aggregationRows([Double.MAX_VALUE, -Double.MAX_VALUE]))
+        assertEquals(GridAggregateDisplay.Value("0.0"), aggregateValue(model, "average"))
+        model.replaceData(aggregationRows([1.0, Double.NaN]))
+        for (operation in ["sum", "average", "min", "max"])
+            aggregateFailed(aggregateValue(model, operation))
+        val native = gridDoubleValues()
+        val customized =
+            GridValues<Double>(
+                native.kind,
+                native.format,
+                native.compare,
+                native.literal,
+                native.encode
+            )
+        model.replaceColumns(
+            [
+                aggregationColumn(
+                    customized,
+                    [gridMinAggregation(customized), gridMaxAggregation(customized)]
+                )
+            ]
+        )
+        model.replaceData(aggregationRows([1.0, 2.0]))
+        assertEquals(GridAggregateDisplay.Value("1.0"), aggregateValue(model, "min"))
+        assertEquals(GridAggregateDisplay.Value("2.0"), aggregateValue(model, "max"))
+    }
+
+    @Test
+    fun `decimal aggregation keeps typed input and requires explicit rounding`() {
+        val decimal =
+            GridValues<BigDecimal>(
+                GridValueKind.Text,
+                { _ -> "same input label" },
+                { a, b -> a.compareTo(b) },
+                {
+                    literal -> when (literal) {
+                        case Text(val text) -> BigDecimal.parse(text)
+                        else -> throw IllegalArgumentException(Some("decimal text required"))
+                    }
+                },
+                { value -> GridLiteral.Text(value.toPlainString()) }
+            )
+        val model =
+            aggregationModel(
+                [BigDecimal.parse("0.1"), BigDecimal.parse("0.2")],
+                aggregationColumn(
+                    decimal,
+                    [
+                        gridSumDecimalAggregation(),
+                        gridAverageDecimalAggregation(2L, RoundingMode.HalfEven)
+                    ]
+                )
+            )
+        assertEquals(GridAggregateDisplay.Value("0.3"), aggregateValue(model, "sum"))
+        assertEquals(GridAggregateDisplay.Value("0.15"), aggregateValue(model, "average"))
+        assertEquals(
+            Some(BigDecimal.parse("0.15")),
+            model.result.aggregates.numericTotal(GridColumnId("value"))
+        )
+        model.replaceData(aggregationRows([BigDecimal(1L), BigDecimal.ZERO, BigDecimal.ZERO]))
+        assertEquals(GridAggregateDisplay.Value("0.33"), aggregateValue(model, "average"))
+        model.replaceColumns(
+            [
+                aggregationColumn(
+                    decimal,
+                    [gridAverageDecimalAggregation(2L, RoundingMode.Unnecessary)]
+                )
+            ]
+        )
+        aggregateFailed(model.result.aggregates.total(GridColumnId("value"))!!)
+    }
+
+    @Test
+    fun `custom accumulator and result types stay separate from display text`() {
+        val operation =
+            gridAggregation<Long, (BigInteger, Long), BigDecimal>(
+                GridAggregateId("weighted"),
+                "Custom",
+                { -> (BigInteger.ZERO, 0L) },
+                {
+                    state,
+                    value -> (
+                        state._1 + BigInteger(value) * BigInteger(state._2 + 1L),
+                        state._2 + 1L
+                    )
+                },
+                {
+                    state,
+                    count -> BigDecimal(state._1).div(BigDecimal(count), 2L, RoundingMode.HalfEven)
+                },
+                { _ -> "same result label" },
+                { a, b -> a.compareTo(b) },
+                { value -> Some(value) }
+            )
+        val model = aggregationModel([2L, 9L], aggregationColumn(gridLongValues(), [operation]))
+        assertEquals(
+            GridAggregateDisplay.Value("same result label"),
+            aggregateValue(model, "weighted")
+        )
+        assertEquals(
+            Some(BigDecimal(10L)),
+            model.result.aggregates.numericTotal(GridColumnId("value"))
+        )
+    }
+
+    @Test
+    fun `pagination sorting selection and fixed rows reuse the full filtered aggregate`() {
+        val calls = AggregationCounts()
+        val operation =
+            gridAggregation<Long, Long, Long>(
+                GridAggregateId("sum"),
+                "Total",
+                { -> 0L },
+                {
+                    sum, value ->
+                    calls.adds += 1L;
+                    sum + value
+                },
+                { sum, _ -> sum },
+                { value -> f"${value}" },
+                { a, b -> a.compareTo(b) },
+                { value -> Some(BigDecimal(value)) }
+            )
+        val model =
+            DataGridState(
+                aggregationRows([4L, 1L, 3L, 2L]),
+                [
+                    aggregationColumn(gridLongValues(), [operation]),
+                    gridColumn<Long, Long>(
+                        GridColumnId("filter"),
+                        "Filter",
+                        {
+                            value ->
+                            calls.filters += 1L;
+                            value
+                        },
+                        gridLongValues()
+                    )
+                ],
+                GridQuery(
+                    filter =
+                        GridFilter.Column(
+                            GridColumnId("filter"),
+                            GridCondition.Compare(GridComparison.Greater, GridLiteral.Integer(1L))
+                        ),
+                    pagination = GridPagination.Page(0L, 1L),
+                    aggregations =
+                        [GridAggregationSelection(GridColumnId("value"), GridAggregateId("sum"))]
+                ),
+                onQueryChange = Some { _ -> calls.changes += 1L },
+                rowSelection = GridRowSelectionMode.Multiple
+            )
+        assertEquals(3L, calls.adds)
+        assertEquals(4L, calls.filters)
+        val totals = model.result.aggregates
+        assertEquals(Some(GridAggregateDisplay.Value("9")), totals.total(GridColumnId("value")))
+        model.setPage(2L)
+        model.setColumnState(GridColumnState(GridColumnId("value"), width = Some(120.0)))
+        model.setSelectedRows([ViewKey.Number(0L)])
+        model.setPinnedRows(GridPinnedRows([ViewKey.Number(0L)]))
+        model.toggleSort(GridColumnId("value"))
+        assertTrue(totals === model.result.aggregates)
+        assertEquals(3L, calls.adds)
+        assertEquals(4L, calls.filters)
+        assertEquals(2L, calls.changes)
+        assertEquals(GridPagination.Page(0L, 1L), model.query.pagination)
+        val ordered = model.result.ordered
+        model.setAggregation(GridColumnId("value"), None)
+        assertTrue(ordered === model.result.ordered)
+        assertEquals(4L, calls.filters)
+        model.setAggregation(GridColumnId("value"), Some(GridAggregateId("sum")))
+        assertTrue(ordered === model.result.ordered)
+        assertEquals(6L, calls.adds)
+        assertEquals(4L, calls.filters)
+        model.setQuery(model.query.withFilter(GridFilter.All))
+        assertEquals(
+            Some(GridAggregateDisplay.Value("10")),
+            model.result.aggregates.total(GridColumnId("value"))
+        )
+        assertEquals(10L, calls.adds)
+    }
+
+    @Test
+    fun `inactive operations do not scan a huge source and invalid selections do not publish`() {
+        val model =
+            DataGridState(
+                EmptyAggregationSource(Long.MAX_VALUE),
+                [aggregationColumn(gridLongValues(), longAggregations())]
+            )
+        assertEquals(0L, model.result.aggregates.selections.size)
+        val before = model.result
+        assertFailsWith<IllegalArgumentException> {
+            model.setAggregation(GridColumnId("value"), Some(GridAggregateId("unknown")))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            model.setQuery(
+                model.query.withAggregations(
+                    [
+                        GridAggregationSelection(GridColumnId("value"), GridAggregateId("sum")),
+                        GridAggregationSelection(GridColumnId("value"), GridAggregateId("count"))
+                    ]
+                )
+            )
+        }
+        assertTrue(before === model.result)
+        assertFailsWith<IllegalArgumentException> {
+            model.replaceColumns(
+                [
+                    aggregationColumn(
+                        gridLongValues(),
+                        [gridSumLongAggregation(), gridSumLongAggregation("Duplicate")]
+                    )
+                ]
+            )
+        }
+        assertTrue(before === model.result)
+    }
+
+    @Test
+    fun `restore keeps valid aggregate operations and reports removed capabilities once`() {
+        val model =
+            aggregationModel([1L, 2L], aggregationColumn(gridLongValues(), longAggregations()))
+        aggregateValue(model, "sum")
+        val saved = model.saveViewState()
+        model.setAggregation(GridColumnId("value"), Some(GridAggregateId("average")))
+        val report = model.restoreViewState(saved)
+        assertEquals(0L, report.issues.size)
+        assertEquals(Some(GridAggregateId("sum")), model.aggregation(GridColumnId("value")))
+        model.replaceColumns([aggregationColumn(gridLongValues(), [gridCountAggregation<Long>()])])
+        assertEquals(None, model.aggregation(GridColumnId("value")))
+        val missing = model.restoreViewState(saved)
+        assertEquals(1L, missing.issues.size)
+        when (missing.issues[0L].part) {
+            case Aggregation(val id) -> assertEquals(GridColumnId("value"), id)
+            else -> fail(Some("expected aggregate restore issue"))
+        }
+        assertEquals(None, model.result.aggregates.total(GridColumnId("value")))
+    }
+
+    @Test
+    fun `arithmetic failure is data while application failure leaves the prior snapshot intact`() {
+        val operation =
+            gridAggregation<Long, Long, Long>(
+                GridAggregateId("broken"),
+                "Broken",
+                { -> 0L },
+                { _, _ -> throw IllegalStateException(Some("application failed")) },
+                { sum, _ -> sum },
+                { value -> f"${value}" },
+                { a, b -> a.compareTo(b) }
+            )
+        val model = aggregationModel([1L], aggregationColumn(gridLongValues(), [operation]))
+        val before = model.result
+        assertFailsWith<IllegalStateException> { aggregateValue(model, "broken") }
+        assertTrue(before === model.result)
+        assertEquals(0L, model.query.aggregations.size)
+        val failed =
+            gridAggregation<Long, Long, Long>(
+                GridAggregateId("seed"),
+                "Seed",
+                { -> throw ArithmeticException() },
+                { sum, value -> sum + value },
+                { sum, _ -> sum },
+                { value -> f"${value}" },
+                { a, b -> a.compareTo(b) }
+            )
+        model.replaceColumns([aggregationColumn(gridLongValues(), [failed])])
+        aggregateFailed(aggregateValue(model, "seed"))
+    }
+
+    @Test
+    fun `a callback update wins over the aggregate action preparing an older snapshot`() {
+        val calls = AggregationCounts()
+        val operation =
+            gridAggregation<Long, Long, Long>(
+                GridAggregateId("sum"),
+                "Sum",
+                { -> 0L },
+                {
+                    sum, value ->
+                    val action = calls.action
+                    calls.action = None
+                    action?.invoke()
+                    sum + value
+                },
+                { sum, _ -> sum },
+                { value -> f"${value}" },
+                { a, b -> a.compareTo(b) }
+            )
+        val model = aggregationModel([1L, 2L], aggregationColumn(gridLongValues(), [operation]))
+        calls.action = Some { model.replaceData(aggregationRows([99L])) }
+        assertFailsWith<IllegalStateException> { aggregateValue(model, "sum") }
+        assertEquals(99L, model.result.rows.rowAt(0L))
+        assertEquals(0L, model.query.aggregations.size)
+    }
+}

@@ -18,6 +18,7 @@ public interface GridColumn<Row> {
     public val exportable: Boolean
     public val missingLast: Boolean
     public val editing: GridColumnEditing<Row>?
+    public val aggregations: Array<GridColumnAggregation<Row>> get() = []
     public fun cell(
         row: Row,
         fonts: FontCollection? = None,
@@ -48,7 +49,8 @@ public fun <Row, T> gridColumn(
     filterable: Boolean = true,
     exportable: Boolean = true,
     missingLast: Boolean = true,
-    edit: GridEditSpec<Row, T>? = None
+    edit: GridEditSpec<Row, T>? = None,
+    aggregations: Array<GridAggregation<T>> = []
 ): GridColumn<Row> =
     TypedGridColumn(
         id,
@@ -61,7 +63,8 @@ public fun <Row, T> gridColumn(
         filterable,
         exportable,
         missingLast,
-        edit
+        edit,
+        aggregations
     )
 
 private class TypedGridColumn<Row, T>(
@@ -75,10 +78,15 @@ private class TypedGridColumn<Row, T>(
     public override val filterable: Boolean,
     public override val exportable: Boolean,
     public override val missingLast: Boolean,
-    edit: GridEditSpec<Row, T>?
+    edit: GridEditSpec<Row, T>?,
+    operations: Array<GridAggregation<T>>
 ): GridColumn<Row> {
     public override val valueKind: GridValueKind? get() = Some(values.kind)
     public override val editing: GridColumnEditing<Row>? = edit?.bind(value)
+    public override val aggregations: Array<GridColumnAggregation<Row>> =
+        Array<GridColumnAggregation<Row>>(operations.size) {
+            index -> gridBindAggregation(value, values.missing, operations[index])
+        }
     public override fun numericValue(row: Row): BigDecimal? {
         val current = value(row)
         if (values.missing(current))

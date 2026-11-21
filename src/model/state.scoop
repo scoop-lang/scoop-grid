@@ -390,6 +390,8 @@ public class DataGridState<Row> public constructor(
         if (old.query == requested)
             return
         val next = gridCompute(old.source, old.columns, requested, Some(old), old.pins)
+        if (computed.value !== old)
+            throw IllegalStateException(Some("准备查询期间模型已更新，请重试"))
         computed.value = next
         if (old.query != next.query)
             clearCellRange()
@@ -406,6 +408,43 @@ public class DataGridState<Row> public constructor(
     public fun setPagination(value: GridPagination) {
         setQuery(query.withPagination(value))
     }
+    public fun aggregation(column: GridColumnId): GridAggregateId? {
+        for (selection in query.aggregations)
+            if (selection.column == column)
+                return Some(selection.operation)
+        return None
+    }
+    public fun setAggregation(column: GridColumnId, operation: GridAggregateId?) {
+        val definition = this.column(column)
+        when (operation) {
+            case Some(val id) -> when (gridFindAggregation(definition, id)) {
+                case Some(_) -> {}
+                case None -> throw IllegalArgumentException(
+                    Some("grid column does not allow this aggregation")
+                )
+            }
+            case None -> {}
+        }
+        if (aggregation(column) == operation)
+            return
+        val next = ArrayList<GridAggregationSelection>()
+        var replaced = false
+        for (selection in query.aggregations)
+            if (selection.column == column) {
+                replaced = true
+                when (operation) {
+                    case Some(val id) -> next.add(GridAggregationSelection(column, id))
+                    case None -> {}
+                }
+            } else
+                next.add(selection)
+        if (!replaced)
+            when (operation) {
+                case Some(val id) -> next.add(GridAggregationSelection(column, id))
+                case None -> {}
+            }
+        setQuery(query.withAggregations(next.toArray()))
+    }
     public fun toggleSort(id: GridColumnId, additive: Boolean = false) {
         gridRequire(column(id).sortable, "grid column is not sortable")
         val sorting = ArrayList<GridSort>()
@@ -421,7 +460,7 @@ public class DataGridState<Row> public constructor(
         }
         if (!found)
             sorting.add(GridSort(id))
-        setQuery(GridQuery(sorting.toArray(), query.filter, query.quickFilter, query.pagination))
+        setQuery(query.withSorting(sorting.toArray()))
     }
     public fun replaceData(source: TableSource<Row>) {
         computed.checkMutation()
@@ -435,6 +474,8 @@ public class DataGridState<Row> public constructor(
             cellRange ==
                 None ||
                 (old.query == next.query && gridSameCellRows(old.result.rows, next.result.rows))
+        if (computed.value !== old)
+            throw IllegalStateException(Some("准备数据期间模型已更新，请重试"))
         filterCandidates.clear()
         computed.value = next
         if (!keepRange)
@@ -462,7 +503,13 @@ public class DataGridState<Row> public constructor(
                 sorting.add(sort)
         val filter = gridSurvivingFilter(old.query.filter, nextColumns) ?: GridFilter.All
         val requested =
-            GridQuery(sorting.toArray(), filter, old.query.quickFilter, old.query.pagination)
+            GridQuery(
+                sorting.toArray(),
+                filter,
+                old.query.quickFilter,
+                old.query.pagination,
+                gridSurvivingAggregations(old.query.aggregations, nextColumns)
+            )
         val next = gridCompute(old.source, nextColumns, requested, None, old.pins)
         val states = ArrayList<GridColumnState>()
         val retained = HashSet<GridColumnId>()
@@ -501,6 +548,8 @@ public class DataGridState<Row> public constructor(
                         gridSameCellColumns(presentation.value, nextStates) &&
                         gridSameCellRows(old.result.rows, next.result.rows)
                 )
+        if (computed.value !== old)
+            throw IllegalStateException(Some("准备列期间模型已更新，请重试"))
         filterCandidates.clear()
         headerState.value = nextHeaders
         presentation.value = nextStates
@@ -536,9 +585,11 @@ public class DataGridState<Row> public constructor(
                 before.ordered,
                 before.totalRows,
                 before.pageCount,
-                value
+                value,
+                before.aggregates
             )
-        computed.value = GridComputed(old.source, old.columns, old.query, result, value)
+        computed.value =
+            GridComputed(old.source, old.columns, old.query, result, value, old.filtered)
         clearCellRange()
         changed()
     }

@@ -1,6 +1,7 @@
 package scoop.grid
 
 import scoop.collections.HashMap
+import scoop.collections.HashSet
 
 public enum GridPin: Equals<GridPin> {
     None, Start, End
@@ -38,6 +39,9 @@ internal class GridColumns<Row>(val values: Array<GridColumn<Row>>) {
         gridRequire(values.size > 0L, "grid requires at least one column")
         for (column in values) {
             gridRequire(!lookup.containsKey(column.id), "duplicate grid column id")
+            val operations = HashSet<GridAggregateId>()
+            for (operation in column.aggregations)
+                gridRequire(operations.add(operation.id), "duplicate grid aggregate id")
             lookup.put(column.id, column)
         }
     }

@@ -12,12 +12,13 @@ internal fun <Row> gridPinResult(
     ordered: TableSource<Row>,
     total: Long,
     pages: Long,
-    pins: GridPinnedRows
+    pins: GridPinnedRows,
+    aggregates: GridAggregations
 ): GridResult<Row> {
     val top = GridPickedRows(ordered, pins.top)
     val bottom = GridPickedRows(ordered, pins.bottom)
     if (top.count == 0L && bottom.count == 0L)
-        return GridResult(page, page, ordered, total, pages, 0L, 0L)
+        return GridResult(page, page, ordered, total, pages, 0L, 0L, aggregates)
     val omitted = ArrayList<Long>()
     for (fixed in [top, bottom])
         for (index in 0L ..< fixed.count)
@@ -32,7 +33,7 @@ internal fun <Row> gridPinResult(
         else
             GridUnpinnedRows(page, omitted.toArray())
     val rows = GridPresentedRows(top, body, bottom)
-    return GridResult(rows, page, ordered, total, pages, top.count, bottom.count)
+    return GridResult(rows, page, ordered, total, pages, top.count, bottom.count, aggregates)
 }
 
 internal class GridPickedRows<Row>(

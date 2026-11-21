@@ -21,7 +21,8 @@ public class GridViewState public constructor(
 
 public enum GridStatePart {
     Column(GridColumnId), ColumnOrder, Sorting(GridColumnId), Filter(Array<Long>),
-    PinnedRow(ViewKey), SelectedRow(ViewKey), CellRange, ReadingPosition, FocusedCell, Pagination
+    PinnedRow(ViewKey), SelectedRow(ViewKey), CellRange, ReadingPosition, FocusedCell, Pagination,
+    Aggregation(GridColumnId)
 }
 
 public struct GridRestoreIssue(val part: GridStatePart, val message: String)

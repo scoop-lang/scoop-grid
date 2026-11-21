@@ -11,7 +11,8 @@ public class GridResult<Row> internal constructor(
     public val totalRows: Long,
     public val pageCount: Long,
     public val topCount: Long,
-    public val bottomCount: Long
+    public val bottomCount: Long,
+    public val aggregates: GridAggregations
 ) {
     public val bodyCount: Long get() = rows.count - topCount - bottomCount
 }

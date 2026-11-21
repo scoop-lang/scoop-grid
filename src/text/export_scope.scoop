@@ -64,7 +64,8 @@ private fun <Row> gridExportRows(
                 snapshot.result.ordered,
                 snapshot.result.totalRows,
                 1L,
-                snapshot.pins
+                snapshot.pins,
+                snapshot.result.aggregates
             )
             case SelectedRows -> {
                 if (options.includePinnedRows)

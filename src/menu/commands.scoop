@@ -209,7 +209,7 @@ private fun <Row> gridMenuSort(
             case Some(val value) -> sorting.add(GridSort(id, value))
             case None -> {}
         }
-    model.setQuery(GridQuery(sorting.toArray(), query.filter, query.quickFilter, query.pagination))
+    model.setQuery(query.withSorting(sorting.toArray()))
 }
 
 private fun <Row> gridMenuCell(

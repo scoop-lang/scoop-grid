@@ -26,7 +26,8 @@ public class GridQuery public constructor(
     public val sorting: Array<GridSort> = [],
     public val filter: GridFilter = GridFilter.All,
     public val quickFilter: String = "",
-    public val pagination: GridPagination = GridPagination.Disabled
+    public val pagination: GridPagination = GridPagination.Disabled,
+    public val aggregations: Array<GridAggregationSelection> = []
 ): Equals<GridQuery> {
     init {
         when (pagination) {
@@ -41,15 +42,24 @@ public class GridQuery public constructor(
         gridCriteriaEqual(this, other) && pagination == other.pagination
 
     public fun withPagination(value: GridPagination): GridQuery =
-        GridQuery(sorting, filter, quickFilter, value)
+        GridQuery(sorting, filter, quickFilter, value, aggregations)
+    public fun withSorting(value: Array<GridSort>): GridQuery =
+        GridQuery(value, filter, quickFilter, pagination, aggregations)
+    public fun withFilter(value: GridFilter): GridQuery =
+        GridQuery(sorting, value, quickFilter, pagination, aggregations)
+    public fun withQuickFilter(value: String): GridQuery =
+        GridQuery(sorting, filter, value, pagination, aggregations)
+    public fun withAggregations(value: Array<GridAggregationSelection>): GridQuery =
+        GridQuery(sorting, filter, quickFilter, pagination, value)
 }
 
 internal fun gridCriteriaEqual(left: GridQuery, right: GridQuery): Boolean =
     gridArrayEqual(left.sorting, right.sorting) &&
-        left.filter ==
-        right.filter &&
-        left.quickFilter ==
-        right.quickFilter
+        gridFilterCriteriaEqual(left, right) &&
+        gridArrayEqual(left.aggregations, right.aggregations)
+
+internal fun gridFilterCriteriaEqual(left: GridQuery, right: GridQuery): Boolean =
+    left.filter == right.filter && left.quickFilter == right.quickFilter
 
 internal fun gridFirstPage(value: GridPagination): GridPagination =
     when (value) {
