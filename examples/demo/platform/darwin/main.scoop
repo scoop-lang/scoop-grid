@@ -1,0 +1,8 @@
+package scoop.grid.examples.demo
+
+import scoop.surface.configureFpsReportingFromEnvironment
+
+fun main() {
+    configureFpsReportingFromEnvironment()
+    runDemo()
+}

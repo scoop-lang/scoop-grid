@@ -9,6 +9,14 @@ kind = "executable"
 [[sources]]
 path = "src"
 
+[[sources]]
+path = "platform/darwin"
+when = { os = "darwin" }
+
+[[sources]]
+path = "platform/portable"
+when = { os = ["windows", "linux"] }
+
 [dependencies]
 "scoop:scoop.grid" = { version = "0.1.0", path = "../.." }
 "scoop:scoop.core" = "0.1.0"
@@ -17,6 +25,7 @@ path = "src"
 "scoop:scoop.platform" = "0.1.0"
 "scoop:scoop.graphics" = "0.1.0"
 "scoop:scoop.graphics.text" = "0.1.0"
+"scoop:scoop.surface" = "0.1.0"
 "scoop:scoop.window" = "0.1.0"
 "scoop:scoop.ui" = "0.1.0"
 "scoop:scoop.ui.component" = "0.1.0"

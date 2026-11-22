@@ -1,0 +1,5 @@
+package scoop.grid.examples.demo
+
+fun main() {
+    runDemo()
+}
