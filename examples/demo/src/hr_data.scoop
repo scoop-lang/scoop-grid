@@ -1,0 +1,183 @@
+package scoop.grid.examples.demo
+
+import scoop.datetime.LocalDate
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+internal struct Employee(
+    val id: Long,
+    val parent: Long?,
+    val name: String,
+    val role: String,
+    val department: String,
+    val employment: String,
+    val location: String,
+    val joined: LocalDate,
+    val salary: Long,
+    val paid: Boolean,
+    val portrait: Long
+) {
+    fun withEmployment(value: String): Employee =
+        Employee(
+            id,
+            parent,
+            name,
+            role,
+            department,
+            value,
+            location,
+            joined,
+            salary,
+            paid,
+            portrait
+        )
+    fun withSalary(value: Long): Employee =
+        Employee(
+            id,
+            parent,
+            name,
+            role,
+            department,
+            employment,
+            location,
+            joined,
+            value,
+            paid,
+            portrait
+        )
+    fun withPaid(value: Boolean): Employee =
+        Employee(
+            id,
+            parent,
+            name,
+            role,
+            department,
+            employment,
+            location,
+            joined,
+            salary,
+            value,
+            portrait
+        )
+    val flag: String get() =
+        when (location) {
+            case "France" -> "🇫🇷"
+            case "Spain" -> "🇪🇸"
+            case "United Kingdom" -> "🇬🇧"
+            case "Netherlands" -> "🇳🇱"
+            case "Ireland" -> "🇮🇪"
+            else -> "🇺🇸"
+        }
+    val email: String get() = f"employee.${id}@example.com"
+}
+
+internal fun employeeRows(): TableRows<Employee> {
+    val names =
+        [
+            "Ashley Rivers",
+            "Cheryl Browning",
+            "Bryan Hawkins",
+            "Chris Bruce",
+            "Gregory Walker",
+            "Deborah Morales",
+            "Amy Rojas",
+            "Ian Kramer",
+            "Adrian Conner",
+            "Shawn Hendrix",
+            "Sarah Abbott",
+            "Lucas Bennett",
+            "Olivia Turner",
+            "Marco Silva",
+            "Emma Chen",
+            "Deborah Love",
+            "Michael Allen",
+            "Peggy Williams",
+            "James Cohen",
+            "Lily Walsh",
+            "Daniel Park",
+            "Sofia Rossi",
+            "Samira Khan",
+            "Maya Foster",
+            "Theo Grant",
+            "Nina Brooks",
+            "Alex Quinn",
+            "Hannah Wood",
+            "Leo Evans"
+        ]
+    return TableRows(
+        Array<TableRecord<Employee>>(names.size) {
+            index ->
+            val team =
+                if (index == 0L)
+                    0L
+                else
+                    (index - 1L) / 7L
+            val offset =
+                if (index == 0L)
+                    0L
+                else
+                    (index - 1L) % 7L
+            val head = team * 7L + 1L
+            val parent: Long? =
+                if (index == 0L)
+                    None
+                else
+                    Some(
+                        if (offset == 0L)
+                            0L
+                        else
+                            if (offset == 1L)
+                                head
+                            else
+                                head + 1L
+                    )
+            val id = 126225L + index * 7319L
+            val employee =
+                Employee(
+                    id,
+                    when (parent) {
+                        case Some(val at) -> Some(126225L + at * 7319L);
+                        case None -> None
+                    },
+                    names[index],
+                    if (index == 0L)
+                        "CEO"
+                    else
+                        if (offset == 0L)
+                            ["CTO", "VP Sales", "CFO", "VP Customer Experience"][team]
+                        else
+                            if (offset == 1L)
+                                "Team Lead"
+                            else
+                                "Specialist",
+                    if (index == 0L)
+                        "Executive Management"
+                    else
+                        ["Engineering", "Sales & Marketing", "Finance & Legal", "Customer Support"][
+                            team
+                        ],
+                    if (index % 4L == 3L)
+                        "Contract"
+                    else
+                        "Permanent",
+                    [
+                        "France",
+                        "Spain",
+                        "United Kingdom",
+                        "Netherlands",
+                        "Ireland",
+                        "United States"
+                    ][index % 6L],
+                    LocalDate(
+                        (2010L + index % 15L).toInt(),
+                        (index % 12L + 1L).toInt(),
+                        (index % 23L + 1L).toInt()
+                    ),
+                    380000L + ((index * 73139L) % 700000L),
+                    index % 5L != 3L,
+                    index % 12L
+                )
+            TableRecord(ViewKey.Number(id), employee)
+        }
+    )
+}

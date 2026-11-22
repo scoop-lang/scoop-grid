@@ -1,0 +1,314 @@
+package scoop.grid.examples.demo
+
+import scoop.datetime.LocalDate
+import scoop.graphics.Color
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as demoColumn
+import scoop.ui.component.row as demoRow
+import scoop.ui.style.*
+
+internal class HrDemo(private val source: ThemeSource, private val images: DemoImages) {
+    private var rows = employeeRows()
+    val message = state("Double-click Employment Type, Salary or Payment Status to edit")
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val tools = GridTools()
+    val grid =
+        DataGridState(
+            rows,
+            columns(),
+            rowSelection = GridRowSelectionMode.Single,
+            expandedRows = GridExpandedRows(true),
+            treeData =
+                Some(
+                    GridTreeData<Employee>(
+                        {
+                            row -> when (row.parent) {
+                                case Some(val id) -> Some(ViewKey.Number(id));
+                                case None -> None
+                            }
+                        },
+                        Some(GridColumnId("employee"))
+                    )
+                )
+        )
+
+    init {
+        grid.setColumnState(GridColumnState(GridColumnId("employee"), pin = GridPin.Start))
+        grid.setColumnState(GridColumnState(GridColumnId("contact"), pin = GridPin.End))
+    }
+
+    private fun save(employee: Employee, completion: GridCommit<Employee>) {
+        val next =
+            TableRows(
+                Array<TableRecord<Employee>>(rows.count) {
+                    at ->
+                    val row = rows.rowAt(at)
+                    TableRecord(
+                        rows.keyAt(at),
+                        if (row.id == employee.id)
+                            employee
+                        else
+                            row
+                    )
+                }
+            )
+        if (completion.accept(next)) {
+            rows = next
+            message.value = f"Saved ${employee.name}"
+        }
+    }
+    fun expand(value: Boolean) {
+        if (readyToLeave(handle))
+            grid.setExpandedRows(GridExpandedRows(value))
+    }
+
+    private fun columns(): Array<GridColumn<Employee>> {
+        val demo = this
+        val theme = source
+        return [
+            gridColumn<Employee, String>(
+                GridColumnId("employee"),
+                "Employee",
+                { f"${it.name} ${it.role}" },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fixed(320.0)),
+                cell =
+                    Some {
+                        employee -> demoRow {
+                            spacing = 10.0;
+                            alignment = CrossAlignment.Center
+                            avatar(employee.name) {
+                                size = AvatarSize.Lg;
+                                image =
+                                    AvatarImageState.Ready(
+                                        demo.images.get(f"avatars/${employee.portrait}.png")
+                                    )
+                            }
+                            item(twoLines(employee.name, employee.role, theme)) {
+                                grow = 1.0;
+                                basis = FlexBasis.Fixed(0.0)
+                            }
+                        }
+                    }
+            ),
+            gridColumn<Employee, Long>(
+                GridColumnId("id"),
+                "ID",
+                { it.id },
+                gridLongValues(),
+                TableColumnSize(GridTrack.Fixed(110.0))
+            ),
+            gridColumn<Employee, String>(
+                GridColumnId("department"),
+                "Department",
+                { it.department },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fixed(220.0)),
+                cell =
+                    Some {
+                        employee -> tag(
+                            f"●  ${employee.department}",
+                            theme,
+                            Some(departmentColor(employee.department, theme))
+                        )
+                    }
+            ),
+            gridColumn<Employee, String>(
+                GridColumnId("employment"),
+                "Employment Type",
+                { it.employment },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fixed(174.0)),
+                edit =
+                    Some(
+                        gridEdit<Employee, String>(
+                            {
+                                value -> gridChoiceEditor(
+                                    value,
+                                    [
+                                        Choice(ViewKey.Text("permanent"), "Permanent", "Permanent"),
+                                        Choice(ViewKey.Text("contract"), "Contract", "Contract")
+                                    ]
+                                )
+                            },
+                            {
+                                edit,
+                                completion -> demo.save(
+                                    edit.row.withEmployment(edit.value),
+                                    completion
+                                )
+                            }
+                        )
+                    )
+            ),
+            gridColumn<Employee, String>(
+                GridColumnId("location"),
+                "Location",
+                { it.location },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fixed(180.0)),
+                cell =
+                    Some { employee -> demoText(f"${employee.flag}  ${employee.location}", theme) }
+            ),
+            gridColumn<Employee, LocalDate>(
+                GridColumnId("joined"),
+                "Join Date",
+                { it.joined },
+                gridDateValues(),
+                TableColumnSize(GridTrack.Fixed(145.0))
+            ),
+            gridColumn<Employee, Long>(
+                GridColumnId("salary"),
+                "Salary / month",
+                { it.salary },
+                moneyValues("£"),
+                TableColumnSize(GridTrack.Fixed(158.0)),
+                edit =
+                    Some(
+                        gridEdit<Employee, Long>(
+                            { moneyEditor(it) },
+                            {
+                                edit,
+                                completion -> demo.save(edit.row.withSalary(edit.value), completion)
+                            },
+                            validate =
+                                {
+                                    _,
+                                    value -> if (value > 0L && value <= 100000000L)
+                                        None
+                                    else
+                                        Some("Salary must be between £0.01 and £1,000,000")
+                                }
+                        )
+                    )
+            ),
+            gridColumn<Employee, Boolean>(
+                GridColumnId("paid"),
+                "Payment Status",
+                { it.paid },
+                paymentValues(),
+                TableColumnSize(GridTrack.Fixed(166.0)),
+                cell =
+                    Some {
+                        employee -> tag(
+                            if (employee.paid)
+                                "✓  Paid"
+                            else
+                                "◷  Pending",
+                            theme,
+                            Some(movementColor(theme, employee.paid))
+                        )
+                    },
+                edit =
+                    Some(
+                        gridEdit<Employee, Boolean>(
+                            { gridBooleanEditor(it) },
+                            {
+                                edit,
+                                completion -> demo.save(edit.row.withPaid(edit.value), completion)
+                            }
+                        )
+                    )
+            ),
+            gridActionColumn<Employee>(
+                GridColumnId("contact"),
+                "Contact",
+                {
+                    employee -> button(
+                        "Contact",
+                        { demo.message.value = f"${employee.name}  ·  ${employee.email}" }
+                    ) {
+                        variant = ButtonVariant.Outline;
+                        size = ButtonSize.Sm
+                    }
+                },
+                TableColumnSize(GridTrack.Fixed(104.0))
+            )
+        ]
+    }
+
+    fun view(): View {
+        val demo = this
+        return demoColumn {
+            spacing = 16.0;
+            alignment = CrossAlignment.Stretch
+            add(
+                pageHeading(
+                    "HR",
+                    "An employee directory with an expandable organization and editable payroll fields.",
+                    demo.source
+                )
+            )
+            row {
+                spacing = 10.0;
+                alignment = CrossAlignment.Center
+                add(tag("29 employees", demo.source))
+                add(tag("4 teams", demo.source))
+                item(empty()) { grow = 1.0 }
+                button("Expand all", { demo.expand(true) }) { variant = ButtonVariant.Outline }
+                button("Collapse all", { demo.expand(false) }) { variant = ButtonVariant.Outline }
+            }
+            add(gridControls(demo.grid, demo.handle, demo.tools, "Search employees..."))
+            add(
+                gridWorkspace(
+                    demo.grid,
+                    demo.handle,
+                    demo.tools,
+                    dataGrid(demo.grid) {
+                        handle = Some(demo.handle);
+                        scroll = Some(demo.scroll)
+                        height = 510.0;
+                        rowHeight = 62.0;
+                        headerHeight = 40.0
+                        selectionCheckboxes = false
+                        labels = demoGridLabels("HR grid")
+                    }
+                )
+            )
+            add(
+                demoText(
+                    demo.handle.editError ?: demo.message.value,
+                    demo.source,
+                    12.0,
+                    muted = true
+                )
+            )
+        }
+    }
+}
+
+private fun paymentValues(): GridValues<Boolean> {
+    val base = gridBooleanValues()
+    return GridValues(
+        base.kind,
+        {
+            value -> if (value)
+                "Paid"
+            else
+                "Pending"
+        },
+        base.compare,
+        base.literal,
+        base.encode
+    )
+}
+
+private fun departmentColor(department: String, source: ThemeSource): Color =
+    when (department) {
+        case "Engineering" -> if (source.current.value.tokens.mode == ThemeMode.Dark)
+            Color(0.55, 0.70, 1.0)
+        else
+            Color(0.20, 0.39, 0.75)
+        case "Sales & Marketing" -> if (source.current.value.tokens.mode == ThemeMode.Dark)
+            Color(0.87, 0.63, 1.0)
+        else
+            Color(0.54, 0.30, 0.70)
+        case "Finance & Legal" -> if (source.current.value.tokens.mode == ThemeMode.Dark)
+            Color(0.97, 0.75, 0.36)
+        else
+            Color(0.62, 0.40, 0.08)
+        else -> movementColor(source, true)
+    }

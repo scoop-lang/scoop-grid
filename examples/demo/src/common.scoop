@@ -1,0 +1,190 @@
+package scoop.grid.examples.demo
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as demoColumn
+import scoop.ui.component.row as demoRow
+import scoop.ui.component.frame as demoFrame
+import scoop.ui.style.*
+
+internal fun demoText(
+    text: String,
+    source: ThemeSource,
+    size: Double = 14.0,
+    weight: Int = 400,
+    muted: Boolean = false,
+    ink: Color? = None
+): View {
+    val palette = source.current.value.tokens.palette
+    return label(text) {
+        settings {
+            maxLines = Some(1L);
+            ellipsis = "…"
+        }
+        style {
+            fontSize = Some(size)
+            this.weight = Some(weight)
+            color =
+                Some(
+                    ink ?:
+                        if (muted)
+                            palette.muted.foreground
+                        else
+                            palette.background.foreground
+                )
+        }
+    }
+}
+
+internal fun pageHeading(title: String, description: String, source: ThemeSource): View =
+    demoColumn {
+        spacing = 6.0
+        alignment = CrossAlignment.Stretch
+        add(demoText(title, source, 26.0, 700))
+        add(demoText(description, source, 13.0, muted = true))
+    }
+
+internal fun twoLines(title: String, subtitle: String, source: ThemeSource): View =
+    demoColumn {
+        spacing = 4.0
+        alignment = CrossAlignment.Stretch
+        add(demoText(title, source, 14.0, 500))
+        add(demoText(subtitle, source, 12.0, muted = true))
+    }
+
+internal fun movementColor(source: ThemeSource, positive: Boolean): Color {
+    val dark = source.current.value.tokens.mode == ThemeMode.Dark
+    return if (positive)
+        if (dark)
+            Color(0.33, 0.84, 0.65)
+        else
+            Color(0.05, 0.47, 0.31)
+    else
+        if (dark)
+            Color(1.0, 0.49, 0.52)
+        else
+            Color(0.76, 0.15, 0.23)
+}
+
+internal fun tag(text: String, source: ThemeSource, color: Color? = None): View =
+    badge(demoText(text, source, 12.0, 500, ink = color)) { variant = ButtonVariant.Outline }
+
+internal fun readyToLeave(handle: DataGridHandle): Boolean =
+    when (handle.commitEdit()) {
+        case NoEdit -> true
+        case Committed -> true
+        else -> false
+    }
+
+internal class GridTools {
+    val selected = state(0)
+    fun toggle(next: Int) {
+        selected.value =
+            if (selected.value == next)
+                0
+            else
+                next
+    }
+}
+
+internal fun <Row> gridControls(
+    model: DataGridState<Row>,
+    handle: DataGridHandle,
+    tools: GridTools,
+    placeholder: String
+): View =
+    demoRow {
+        spacing = 8.0
+        alignment = CrossAlignment.Center
+        item(
+            gridQuickFilter(model) {
+                this.handle = Some(handle)
+                labels =
+                    GridQuickFilterLabels(
+                        placeholder,
+                        placeholder,
+                        "Search",
+                        "Apply search",
+                        "Clear",
+                        "Clear search"
+                    )
+            }
+        ) {
+            grow = 1.0;
+            basis = FlexBasis.Fixed(0.0)
+        }
+        button("Columns", { tools.toggle(1) }) {
+            variant =
+                if (tools.selected.value == 1)
+                    ButtonVariant.Default
+                else
+                    ButtonVariant.Outline
+        }
+        button("Filters", { tools.toggle(2) }) {
+            variant =
+                if (tools.selected.value == 2)
+                    ButtonVariant.Default
+                else
+                    ButtonVariant.Outline
+        }
+    }
+
+internal fun <Row> gridWorkspace(
+    model: DataGridState<Row>,
+    handle: DataGridHandle,
+    tools: GridTools,
+    table: View
+): View =
+    demoRow {
+        spacing = 16.0
+        alignment = CrossAlignment.Start
+        item(table) {
+            grow = 1.0;
+            basis = FlexBasis.Fixed(0.0)
+        }
+        if (tools.selected.value == 1)
+            item(
+                demoFrame(gridColumnsPanel(model, handle) { height = 500.0 }) {
+                    width = Some(310.0)
+                }
+            ) { shrink = 0.0 }
+        if (tools.selected.value == 2)
+            item(
+                demoFrame(
+                    gridFilterPanel(model) {
+                        this.handle = Some(handle)
+                        height = 300.0
+                        candidatesHeight = 140.0
+                    }
+                ) { width = Some(340.0) }
+            ) { shrink = 0.0 }
+    }
+
+internal fun <Row> gridSummary(
+    model: DataGridState<Row>,
+    source: ThemeSource,
+    note: String = ""
+): View =
+    demoRow {
+        spacing = 16.0
+        alignment = CrossAlignment.Center
+        add(demoText(f"Rows: ${integerText(model.result.totalRows)}", source, 12.0, muted = true))
+        add(demoText(f"Selected: ${model.selectedRowKeys.size}", source, 12.0, muted = true))
+        item(empty()) { grow = 1.0 }
+        add(demoText(note, source, 12.0, muted = true))
+    }
+
+internal fun demoGridLabels(title: String): GridLabels =
+    GridLabels(
+        name = title,
+        selectPage = "Select all visible rows",
+        selectRow = { index -> f"Select row ${index}" },
+        expandGroup = { title -> f"Expand ${title}" },
+        collapseGroup = { title -> f"Collapse ${title}" },
+        expandNode = { title -> f"Expand ${title}" },
+        collapseNode = { title -> f"Collapse ${title}" },
+        expandDetail = { title -> f"Expand ${title}" },
+        collapseDetail = { title -> f"Collapse ${title}" }
+    )

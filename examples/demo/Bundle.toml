@@ -1,0 +1,20 @@
+[bundle]
+schema = 1
+identifier = "dev.scoop.grid.demos"
+name = "grid-demos"
+version = "0.1.0"
+display-name = "Scoop Grid Demos"
+publisher = "Scoop"
+description = "Native Performance, Finance, HR and Inventory grid examples"
+license = "MIT OR Apache-2.0"
+icons = ["assets/icon.png"]
+files = [
+    { from = "assets/covers", to = "assets/covers", kind = "resource" },
+    { from = "assets/avatars", to = "assets/avatars", kind = "resource" },
+    { from = "assets/README.md", to = "assets/README.md", kind = "resource" },
+    { from = "../../LICENSE-MIT", to = "licenses/LICENSE-MIT", kind = "resource" },
+    { from = "../../LICENSE-APACHE", to = "licenses/LICENSE-APACHE", kind = "resource" },
+]
+
+[bundle.macos]
+formats = ["app"]

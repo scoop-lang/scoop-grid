@@ -1,0 +1,79 @@
+package scoop.grid.examples.demo
+
+import scoop.ui.ViewKey
+import scoop.ui.component.TableSource
+
+internal struct Participant(val index: Long) {
+    val name: String get() {
+        val first =
+            [
+                "Tony",
+                "Andrew",
+                "Kevin",
+                "Bricker",
+                "Dimple",
+                "Sarah",
+                "Olivia",
+                "Lucas",
+                "Emma",
+                "Daniel"
+            ]
+        val last =
+            [
+                "Smith",
+                "Johnson",
+                "Williams",
+                "Jones",
+                "Brown",
+                "Davis",
+                "Miller",
+                "Wilson",
+                "Moore",
+                "Taylor"
+            ]
+        return f"${first[index % 10L]} ${last[(index / 10L) % 10L]}"
+    }
+    val language: String get() = ["English", "Spanish", "French", "German", "Italian"][index % 5L]
+    val country: String get() =
+        [
+            "United Kingdom",
+            "United States",
+            "France",
+            "Germany",
+            "Italy",
+            "Ireland",
+            "Spain",
+            "Canada"
+        ][index % 8L]
+    val flag: String get() = ["🇬🇧", "🇺🇸", "🇫🇷", "🇩🇪", "🇮🇹", "🇮🇪", "🇪🇸", "🇨🇦"][index % 8L]
+    val game: String get() =
+        ["Chess", "Tetris", "Pac-Man", "Space Invaders", "Sudoku", "Backgammon"][index % 6L]
+    val bought: Boolean get() = index % 3L != 0L
+    val balance: Long get() = ((index * 7919L + 63512L) % 1200000L) - 120000L
+    val rating: Long get() = index % 5L + 1L
+    fun month(at: Long): Long = (index * 1877L + at * 9371L + 2300L) % 180000L
+    val winnings: Long get() {
+        var total = 0L
+        for (month in 0L ..< 12L)
+            total += this.month(month)
+        return total
+    }
+}
+
+/** Deterministic random access avoids allocating a row-by-column matrix. */
+internal class ParticipantRows(public override val count: Long): TableSource<Participant> {
+    init {
+        if (count != 1000L && count != 10000L && count != 100000L)
+            throw IllegalArgumentException(Some("Unsupported demo size"))
+    }
+    public override fun keyAt(index: Long): ViewKey = ViewKey.Number(index)
+    public override fun rowAt(index: Long): Participant = Participant(index)
+    public override fun indexOfKey(key: ViewKey): Long? =
+        when (key) {
+            case Number(val index) -> if (index >= 0L && index < count)
+                Some(index)
+            else
+                None
+            else -> None
+        }
+}

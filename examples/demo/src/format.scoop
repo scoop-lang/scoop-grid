@@ -1,0 +1,153 @@
+package scoop.grid.examples.demo
+
+import scoop.grid.*
+import scoop.math.abs
+import scoop.math.round
+import scoop.math.BigDecimal
+import scoop.math.BigInteger
+import scoop.text.*
+
+internal fun integerText(value: Long): String {
+    if (value < 0L)
+        return f"-${integerText(-value)}"
+    if (value < 1000L)
+        return f"${value}"
+    val tail = value % 1000L
+    val padded =
+        if (tail < 10L)
+            f"00${tail}"
+        else
+            if (tail < 100L)
+                f"0${tail}"
+            else
+                f"${tail}"
+    return f"${integerText(value / 1000L)},${padded}"
+}
+
+internal fun decimalText(value: Long): String {
+    val amount =
+        if (value < 0L)
+            -value
+        else
+            value
+    val cents = amount % 100L
+    val fraction =
+        if (cents < 10L)
+            f"0${cents}"
+        else
+            f"${cents}"
+    val sign =
+        if (value < 0L)
+            "-"
+        else
+            ""
+    return f"${sign}${integerText(amount / 100L)}.${fraction}"
+}
+
+internal fun moneyText(value: Long, currency: String = "$"): String =
+    if (value < 0L)
+        f"-${currency}${decimalText(-value)}"
+    else
+        f"${currency}${decimalText(value)}"
+
+internal fun changeText(value: Long): String =
+    if (value > 0L)
+        f"+${decimalText(value)}%"
+    else
+        f"${decimalText(value)}%"
+
+internal fun formattedLong(
+    format: (Long) -> String,
+    values: GridValues<Long> = gridLongValues()
+): GridValues<Long> {
+    return GridValues(
+        values.kind,
+        format,
+        values.compare,
+        values.literal,
+        values.encode,
+        values.missing,
+        values.number
+    )
+}
+
+/** Store exact cents while exposing normal currency units to filters and editors. */
+internal fun moneyValues(currency: String = "$"): GridValues<Long> {
+    val base = gridLongValues()
+    return GridValues(
+        GridValueKind.Number,
+        { value -> moneyText(value, currency) },
+        base.compare,
+        {
+            literal ->
+            val units =
+                when (literal) {
+                    case Integer(val value) -> value.toDouble()
+                    case Number(val value) -> value
+                    else -> throw IllegalArgumentException(Some("Enter a currency amount"))
+                }
+            moneyCents(units) ?:
+                throw IllegalArgumentException(Some("Use at most two decimal places"))
+        },
+        { value -> GridLiteral.Number(value.toDouble() / 100.0) },
+        number = { value -> Some(value.toDouble() / 100.0) }
+    )
+}
+
+internal fun moneyCents(value: Double): Long? {
+    if (!value.isFinite() || abs(value) > 1000000000.0)
+        return None
+    val cents = round(value * 100.0)
+    return if (abs(value * 100.0 - cents.toDouble()) < 0.00001)
+        Some(cents)
+    else
+        None
+}
+
+internal fun moneySum(currency: String = "$"): GridAggregation<Long> =
+    gridAggregation<Long, BigInteger, Long>(
+        GridAggregateId("sum"),
+        "Sum",
+        { -> BigInteger.ZERO },
+        { sum, value -> sum + BigInteger(value) },
+        { sum, _ -> sum.toLongExact() },
+        { value -> moneyText(value, currency) },
+        { left, right -> left.compareTo(right) },
+        { value -> Some(BigDecimal(value, 2L)) }
+    )
+
+internal fun moneyEditor(value: Long): GridTextEditor<Long> =
+    GridTextEditor(
+        value,
+        {
+            value ->
+            val amount =
+                if (value < 0L)
+                    -value
+                else
+                    value
+            val cents = amount % 100L
+            val tail =
+                if (cents < 10L)
+                    f"0${cents}"
+                else
+                    f"${cents}"
+            val sign =
+                if (value < 0L)
+                    "-"
+                else
+                    ""
+            f"${sign}${amount / 100L}.${tail}"
+        },
+        {
+            text -> when (val value = text.toDoubleOrNone()) {
+                case Some(val number) -> when (val cents = moneyCents(number)) {
+                    case Some(val amount) -> GridCandidate.Value(amount)
+                    case None -> GridCandidate.Rejected(
+                        "Use at most two decimal places, up to 1,000,000,000"
+                    )
+                }
+                case None -> GridCandidate.Rejected("Enter an amount, for example 32.50")
+            }
+        }
+    )

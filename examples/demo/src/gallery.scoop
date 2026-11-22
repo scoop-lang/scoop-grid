@@ -1,0 +1,196 @@
+package scoop.grid.examples.demo
+
+import scoop.graphics.*
+import scoop.grid.DataGridHandle
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as demoColumn
+import scoop.ui.component.row as demoRow
+import scoop.ui.component.frame as demoFrame
+import scoop.ui.component.scrollArea as demoScrollArea
+import scoop.ui.style.*
+import scoop.ui.style.shadcn.shadcnTheme
+import scoop.ui.style.material.materialTheme
+import scoop.ui.style.fluent.fluentTheme
+import scoop.ui.style.macos.macosTheme
+
+internal enum DemoPage {
+    Performance, Finance, Hr, Inventory
+}
+
+internal fun pageTitle(page: DemoPage): String =
+    when (page) {
+        case Performance -> "Performance"
+        case Finance -> "Finance"
+        case Hr -> "HR"
+        case Inventory -> "Inventory"
+    }
+
+internal class GalleryModel(images: DemoImages) {
+    val source = ThemeSource(shadcnTheme())
+    val selected = state(DemoPage.Performance)
+    val theme = state(0)
+    val dark = state(false)
+    val performance = PerformanceDemo(source)
+    val finance = FinanceDemo(source)
+    val hr = HrDemo(source, images)
+    val inventory = InventoryDemo(source, images)
+
+    fun select(page: DemoPage) {
+        if (selected.value == page)
+            return
+        if (!readyToLeave(activeHandle()))
+            return
+        selected.value = page
+    }
+    fun footerText(): String {
+        val handle = activeHandle()
+        return handle.editError ?:
+            if (handle.editingCell != None)
+                "Editing a cell  /  Enter to save  /  Esc to cancel"
+            else
+                "Native Scoop UI  /  Local sample data"
+    }
+    private fun activeHandle(): DataGridHandle =
+        when (selected.value) {
+            case Performance -> performance.handle
+            case Finance -> finance.handle
+            case Hr -> hr.handle
+            case Inventory -> inventory.handle
+        }
+    fun themeName(): String = ["shadcn", "Material", "Fluent", "macOS"][theme.value.toLong()]
+    fun changeTheme(next: Boolean) {
+        if (next)
+            theme.value = (theme.value + 1) % 4
+        else
+            dark.value = !dark.value
+        val mode =
+            if (dark.value)
+                ThemeMode.Dark
+            else
+                ThemeMode.Light
+        source.current.value =
+            when (theme.value) {
+                case 1 -> materialTheme(mode)
+                case 2 -> fluentTheme(mode)
+                case 3 -> macosTheme(mode)
+                else -> shadcnTheme(mode)
+            }
+    }
+    fun currentView(): View =
+        when (selected.value) {
+            case Performance -> performance.view()
+            case Finance -> finance.view()
+            case Hr -> hr.view()
+            case Inventory -> inventory.view()
+        }
+}
+
+internal class Gallery(private val model: GalleryModel, scope: ComponentScope): Component(scope) {
+    public override fun render(): View {
+        val model = this.model
+        val palette = model.source.current.value.tokens.palette
+        return cachedScene(
+            demoFrame(
+                demoColumn {
+                    spacing = 24.0;
+                    padding = Insets.all(28.0);
+                    alignment = CrossAlignment.Stretch
+                    row {
+                        spacing = 12.0;
+                        alignment = CrossAlignment.Center
+                        add(demoText("Scoop / Grid", model.source, 22.0, 700))
+                        add(tag("DEMO GALLERY", model.source))
+                        item(empty()) { grow = 1.0 }
+                        button(f"Theme: ${model.themeName()}", { model.changeTheme(true) }) {
+                            variant = ButtonVariant.Outline
+                        }
+                        button(
+                            if (model.dark.value)
+                                "Light theme"
+                            else
+                                "Dark theme",
+                            { model.changeTheme(false) }
+                        ) { variant = ButtonVariant.Outline }
+                    }
+                    item(
+                        demoRow {
+                            spacing = 28.0;
+                            alignment = CrossAlignment.Stretch
+                            add(
+                                demoFrame(
+                                    demoScrollArea(
+                                        demoColumn {
+                                            spacing = 12.0;
+                                            alignment = CrossAlignment.Stretch
+                                            padding = Insets(4.0, 4.0, 12.0, 4.0)
+                                            add(demoText("EXAMPLES", model.source, 11.0, 600, true))
+                                            for (
+                                                page in [
+                                                    DemoPage.Performance,
+                                                    DemoPage.Finance,
+                                                    DemoPage.Hr,
+                                                    DemoPage.Inventory
+                                                ]
+                                            )
+                                                button(pageTitle(page), { model.select(page) }) {
+                                                    variant =
+                                                        if (model.selected.value == page)
+                                                            ButtonVariant.Default
+                                                        else
+                                                            ButtonVariant.Outline
+                                                    style {
+                                                        surface {
+                                                            suggestedSize = Some(Size(184.0, 38.0))
+                                                        }
+                                                    }
+                                                    semantics =
+                                                        ComponentSemantics(
+                                                            automationId =
+                                                                Some(f"demo-nav-${pageTitle(page)}")
+                                                        )
+                                                }
+                                            add(
+                                                demoText(
+                                                    "AG Grid examples",
+                                                    model.source,
+                                                    12.0,
+                                                    muted = true
+                                                )
+                                            )
+                                            add(
+                                                demoText(
+                                                    "Rebuilt with Scoop",
+                                                    model.source,
+                                                    12.0,
+                                                    muted = true
+                                                )
+                                            )
+                                        }
+                                    )
+                                ) {
+                                    width = Some(192.0);
+                                    alignment = Alignment(AxisAlignment.Start, AxisAlignment.Start)
+                                }
+                            )
+                            item(
+                                demoScrollArea(
+                                    demoFrame(model.currentView()) {
+                                        padding = Some(Insets.all(6.0))
+                                    }
+                                ) { key = ViewKey.Text(pageTitle(model.selected.value)) }
+                            ) {
+                                grow = 1.0;
+                                basis = FlexBasis.Fixed(0.0)
+                            }
+                        }
+                    ) {
+                        grow = 1.0;
+                        basis = FlexBasis.Fixed(0.0)
+                    }
+                    add(demoText(model.footerText(), model.source, 12.0, muted = true))
+                }
+            ) { style { background(Some(Paint(palette.background.background))) } }
+        )
+    }
+}

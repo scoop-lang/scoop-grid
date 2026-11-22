@@ -4,6 +4,8 @@
 
 本库尚未发布版本。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。本机规模、耗时与资源结果见 [性能记录](docs/PERFORMANCE.md)，其中明确区分惰性视口与完整本地查询。
 
+[Demo Gallery](examples/demo/README.md) 将 AG Grid 官网的 Performance、Finance、HR 和 Inventory 四个场景组合成一个原生应用，采用 UI Component gallery 的左侧列表与右侧演示窗格。示例提供本地图片和应用图标，并附有 macOS `Bundle.toml`，可通过 `scoop bundle examples/demo --format app` 打包。
+
 已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、透视、按层级展开、小计与总计，以及普通或嵌套主从详情、外部分页／区间加载和未知总数。公开合同见 [SPEC.md](docs/SPEC.md)。模型用法例如：
 
 ```scoop

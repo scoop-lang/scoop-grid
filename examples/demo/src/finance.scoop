@@ -1,0 +1,236 @@
+package scoop.grid.examples.demo
+
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as demoColumn
+import scoop.ui.component.row as demoRow
+import scoop.ui.style.*
+
+internal class FinanceDemo(private val source: ThemeSource) {
+    private var rows = financeRows()
+    val snapshot = state(0L)
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val tools = GridTools()
+    val grid =
+        DataGridState(
+            rows,
+            columns(),
+            query =
+                GridQuery(
+                    aggregations =
+                        [
+                            GridAggregationSelection(GridColumnId("value"), GridAggregateId("sum")),
+                            GridAggregationSelection(GridColumnId("profit"), GridAggregateId("sum"))
+                        ],
+                    totals = GridTotals(GridTotalPlacement.After, "Portfolio total")
+                ),
+            rowSelection = GridRowSelectionMode.Multiple,
+            expandedRows = GridExpandedRows(true)
+        )
+
+    init {
+        grid.setColumnState(GridColumnState(GridColumnId("ticker"), pin = GridPin.Start))
+    }
+
+    fun refresh() {
+        if (!readyToLeave(handle))
+            return
+        val next = snapshot.value + 1L
+        rows = quoteRows(Array<Quote>(rows.count) { rows.rowAt(it).refreshed(next, it) })
+        grid.replaceData(rows)
+        snapshot.value = next
+    }
+    fun group() {
+        if (!readyToLeave(handle))
+            return
+        grid.setGrouping(
+            if (grid.query.grouping.size == 0L)
+                [GridColumnId("instrument")]
+            else
+                []
+        )
+    }
+    fun totalValue(): Long {
+        val version = snapshot.value
+        var total = 0L
+        for (i in 0L ..< rows.count)
+            total += rows.rowAt(i).value
+        return total
+    }
+    fun totalProfit(): Long {
+        val version = snapshot.value
+        var total = 0L
+        for (i in 0L ..< rows.count)
+            total += rows.rowAt(i).profit
+        return total
+    }
+
+    private fun columns(): Array<GridColumn<Quote>> {
+        val theme = source
+        return [
+            gridColumn<Quote, String>(
+                GridColumnId("ticker"),
+                "Ticker",
+                { f"${it.ticker} ${it.name}" },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fixed(310.0)),
+                cell =
+                    Some {
+                        quote -> demoRow {
+                            spacing = 10.0;
+                            alignment = CrossAlignment.Center
+                            avatar(
+                                when (quote.instrument) {
+                                    case "Bond" -> "B";
+                                    case "ETF" -> "E";
+                                    case "Crypto" -> "C";
+                                    else -> "S"
+                                }
+                            ) { size = AvatarSize.Default }
+                            item(twoLines(quote.ticker, quote.name, theme)) {
+                                grow = 1.0;
+                                basis = FlexBasis.Fixed(0.0)
+                            }
+                        }
+                    }
+            ),
+            gridColumn<Quote, Long>(
+                GridColumnId("price"),
+                "Last Price",
+                { it.price },
+                moneyValues(),
+                TableColumnSize(GridTrack.Fixed(134.0))
+            ),
+            gridColumn<Quote, Long>(
+                GridColumnId("change"),
+                "Change",
+                { it.change },
+                formattedLong({ changeText(it) }, moneyValues()),
+                TableColumnSize(GridTrack.Fixed(120.0)),
+                cell =
+                    Some {
+                        quote -> demoText(
+                            f"${
+                                if (quote.change >= 0L)
+                                    "▲"
+                                else
+                                    "▼"
+                            } ${changeText(quote.change)}",
+                            theme,
+                            13.0,
+                            500,
+                            ink = Some(movementColor(theme, quote.change >= 0L))
+                        )
+                    }
+            ),
+            gridColumn<Quote, String>(
+                GridColumnId("instrument"),
+                "Instrument",
+                { it.instrument },
+                gridTextValues(),
+                TableColumnSize(GridTrack.Fixed(120.0)),
+                groupable = true
+            ),
+            gridColumn<Quote, Long>(
+                GridColumnId("profit"),
+                "P&L",
+                { it.profit },
+                moneyValues(),
+                TableColumnSize(GridTrack.Fixed(145.0)),
+                cell =
+                    Some {
+                        quote -> demoText(
+                            moneyText(quote.profit),
+                            theme,
+                            ink = Some(movementColor(theme, quote.profit >= 0L))
+                        )
+                    },
+                aggregations = [moneySum()]
+            ),
+            gridColumn<Quote, Long>(
+                GridColumnId("value"),
+                "Total Value",
+                { it.value },
+                moneyValues(),
+                TableColumnSize(GridTrack.Fixed(160.0)),
+                aggregations = [moneySum()]
+            ),
+            gridColumn<Quote, Long>(
+                GridColumnId("quantity"),
+                "Quantity",
+                { it.quantity },
+                formattedLong({ integerText(it) }),
+                TableColumnSize(GridTrack.Fixed(110.0))
+            ),
+            gridColumn<Quote, Long>(
+                GridColumnId("purchase"),
+                "Purchase Price",
+                { it.purchase },
+                moneyValues(),
+                TableColumnSize(GridTrack.Fixed(148.0))
+            )
+        ]
+    }
+
+    fun view(): View {
+        val demo = this
+        val profit = totalProfit()
+        return demoColumn {
+            spacing = 16.0;
+            alignment = CrossAlignment.Stretch
+            add(
+                pageHeading(
+                    "Finance",
+                    "A portfolio of stocks, bonds, ETFs and crypto. Local sample quotes in USD.",
+                    demo.source
+                )
+            )
+            row {
+                spacing = 14.0;
+                alignment = CrossAlignment.Center
+                add(twoLines(moneyText(demo.totalValue()), "Portfolio value", demo.source))
+                add(
+                    tag(
+                        f"P&L  ${moneyText(profit)}",
+                        demo.source,
+                        Some(movementColor(demo.source, profit >= 0L))
+                    )
+                )
+                item(empty()) { grow = 1.0 }
+                button(
+                    if (demo.grid.query.grouping.size == 0L)
+                        "Group instruments"
+                    else
+                        "Ungroup",
+                    { demo.group() }
+                ) { variant = ButtonVariant.Outline }
+                button("Refresh quotes", { demo.refresh() })
+            }
+            add(gridControls(demo.grid, demo.handle, demo.tools, "Search instruments..."))
+            add(
+                gridWorkspace(
+                    demo.grid,
+                    demo.handle,
+                    demo.tools,
+                    dataGrid(demo.grid) {
+                        handle = Some(demo.handle);
+                        scroll = Some(demo.scroll)
+                        height = 510.0;
+                        rowHeight = 56.0;
+                        headerHeight = 40.0
+                        labels = demoGridLabels("Finance grid")
+                    }
+                )
+            )
+            add(
+                gridSummary(
+                    demo.grid,
+                    demo.source,
+                    f"Snapshot ${demo.snapshot.value} · Manual refresh"
+                )
+            )
+        }
+    }
+}

@@ -1,0 +1,87 @@
+package scoop.grid.examples.demo
+
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as demoColumn
+import scoop.ui.style.*
+
+internal class AlbumDetail(private val album: Album, private val source: ThemeSource) {
+    private val grid =
+        DataGridState(
+            TableRows(
+                Array<TableRecord<Edition>>(album.editions.size) {
+                    TableRecord(ViewKey.Number(it), album.editions[it])
+                }
+            ),
+            [
+                gridColumn<Edition, String>(
+                    GridColumnId("format"),
+                    "Format",
+                    { it.format },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(240.0))
+                ),
+                gridColumn<Edition, Long>(
+                    GridColumnId("available"),
+                    "Available",
+                    { it.available },
+                    gridLongValues(),
+                    TableColumnSize(GridTrack.Fixed(105.0))
+                ),
+                gridColumn<Edition, String>(
+                    GridColumnId("label"),
+                    "Label",
+                    { it.label },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(145.0))
+                ),
+                gridColumn<Edition, String>(
+                    GridColumnId("country"),
+                    "Country",
+                    { it.country },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(120.0))
+                ),
+                gridColumn<Edition, String>(
+                    GridColumnId("cat"),
+                    "Cat#",
+                    { it.catalogue },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(180.0))
+                ),
+                gridColumn<Edition, Long>(
+                    GridColumnId("year"),
+                    "Year",
+                    { it.year },
+                    gridLongValues(),
+                    TableColumnSize(GridTrack.Fixed(86.0))
+                )
+            ]
+        )
+    fun view(): View {
+        val detail = this
+        return demoColumn {
+            spacing = 10.0;
+            padding = Insets.all(16.0);
+            alignment = CrossAlignment.Stretch
+            add(
+                demoText(
+                    f"${detail.album.title} · ${detail.album.editions.size} editions",
+                    detail.source,
+                    14.0,
+                    600
+                )
+            )
+            add(
+                dataGrid(detail.grid) {
+                    height = 138.0;
+                    rowHeight = 38.0;
+                    headerHeight = 34.0
+                    selectionCheckboxes = false
+                    labels = demoGridLabels(f"${detail.album.title} editions")
+                }
+            )
+        }
+    }
+}

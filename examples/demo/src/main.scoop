@@ -1,0 +1,39 @@
+package scoop.grid.examples.demo
+
+import scoop.graphics.text.FontCollection
+import scoop.ui.*
+import scoop.window.*
+
+fun main() {
+    DemoImages(demoAssetRoot()).use {
+        images ->
+        val model = GalleryModel(images)
+        FontCollection().use {
+            fonts -> context(model.source) {
+                UiHost(onRootError = { _, error -> throw error }) {
+                    host,
+                    active,
+                    event -> when (event) {
+                        case Resumed -> {
+                            val window =
+                                active.createWindow(
+                                    windowAttributes {
+                                        title = "Scoop Grid Demos"
+                                        size = LogicalSize(1440.0, 920.0)
+                                    }
+                                )
+                            host.attach(
+                                window,
+                                { scope -> Gallery(model, scope) },
+                                fonts = Some(fonts)
+                            )
+                            window.requestFocus()
+                        }
+                        case Window(_, WindowEvent.CloseRequested) -> active.requestExit()
+                        else -> {}
+                    }
+                }.use { host -> Application().run(host) }
+            }
+        }
+    }
+}

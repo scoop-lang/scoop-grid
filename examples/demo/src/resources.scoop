@@ -1,0 +1,37 @@
+package scoop.grid.examples.demo
+
+import scoop.collections.HashMap
+import scoop.graphics.Image
+import scoop.platform.env.*
+import scoop.platform.fs.Path
+import scoop.platform.fs.readAllBytes
+
+/** Assets belong to the application and outlive every mounted page. */
+internal class DemoImages(private val root: Path): Closeable {
+    private val loaded = HashMap<String, Image>()
+    fun get(name: String): Image {
+        when (val cached = loaded[name]) {
+            case Some(val image) -> return image
+            case None -> {}
+        }
+        val image = Image.decode(root.resolve(Path.fromString(name)).readAllBytes())
+        loaded.put(name, image)
+        return image
+    }
+    public override fun close() {
+        for ((_, image) in loaded)
+            image.close()
+        loaded.clear()
+    }
+}
+
+internal fun demoAssetRoot(): Path {
+    val args = arguments()
+    if (args.size == 3L && args[1L].decodeUtf8() == "--assets")
+        return Path.fromOsString(args[2L])
+    if (args.size != 1L)
+        throw IllegalArgumentException(Some("Usage: grid-demos [--assets /path/to/assets]"))
+    val binaryDirectory =
+        executablePath().parent ?: throw IllegalStateException(Some("Missing executable directory"))
+    return binaryDirectory.resolve(Path.fromString("../Resources/assets")).normalizeLexically()
+}
