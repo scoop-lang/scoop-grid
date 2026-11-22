@@ -248,6 +248,6 @@ scoop test --release tests-cones/performance
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 
-本地开发使用 `../scoop-work/grid/toolchain/bin/scoop`，配合 `--cache-dir ../scoop-work/grid/cache`；该副本已同步上游精确条目焦点、布局输入和共享祖先视口扩展。窗口回归与纯模型测试分别记录，完整阶段状态见进度文档。
+本地开发使用 `../scoop-work/grid/toolchain/bin/scoop`，配合 `--cache-dir ../scoop-work/grid/cache`；该副本已同步上游帧内输入收尾、布局输入依赖复用和无障碍发布合并，macOS 示例可用 `SCOOP_SURFACE_FPS=1` 输出实际呈现帧率。窗口回归与纯模型测试分别记录，完整阶段状态见进度文档，测量口径与前后对照见 [性能记录](docs/PERFORMANCE.md)。
 
 明确排除高频增量更新，多区域选择、填充柄、整行／批量编辑、跨单元格撤销，行拖动、跨行合并，Sparkline、选区生成图表，Excel／PDF 导出、打印，以及公式和用户自定义计算列。

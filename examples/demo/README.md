@@ -31,6 +31,8 @@ scoop bundle examples/demo --format app --output-dir "$PWD/dist"
 
 macOS 入口在附着窗口前调用 Surface 的 FPS 诊断配置。以 `SCOOP_SURFACE_FPS=1 scoop run examples/demo --release -- --assets "$PWD/examples/demo/assets"` 启动时，stderr 输出 Metal 实际呈现帧率。默认关闭；静止窗口没有周期输出，样本的 `start`／`end` 可用于排除跨过静止期的区间。
 
+2026-11-23 使用同一 Performance 页面完成滚动优化后的旧新版交替测量：60 Hz 本机常速约 44 → 60 FPS，十万行高速约 19 → 44.5–47.7 FPS。环境、滚动速度、分配量与剩余开销见 [性能记录](../../docs/PERFORMANCE.md)。
+
 `Cone.toml` 引用同目录 `Bundle.toml`。Bundle 配置包含应用标识、名称、图标、封面、头像及资源说明。也可以对已经构建的可执行文件运行 `scoop bundle --executable … --config examples/demo/Bundle.toml --format app --output-dir …`。
 
 打包完成后打开命令输出的 `Scoop Grid Demos.app`。Apple Silicon 上的项目构建默认位于 `dist/aarch64-apple-darwin/release/dev.scoop.grid.demos/app/Scoop Grid Demos.app`；使用 `--executable` 打包时，路径中的 profile 为 `prebuilt`。整个 app 可以移动到其他目录运行。
