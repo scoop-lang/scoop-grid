@@ -25,7 +25,7 @@ internal class GridRows<Row>(
     val busy: Boolean = false,
     val details: GridDetails<Row>? = None,
     val hasStructuralRows: Boolean = false
-): ItemSource {
+) : ItemSource {
     public override val count: Long get() = source.count
     public override fun keyAt(index: Long): ViewKey = source.keyAt(index)
     public override fun indexOfKey(key: ViewKey): Long? = source.indexOfKey(key)
@@ -34,51 +34,51 @@ internal class GridRows<Row>(
         val key = source.rowKeyAt(index)
         when (row) {
             case Detail(val value, val info) -> {
-                val definition =
-                    details ?: throw IllegalStateException(Some("detail row requires content"))
+                val definition = details ?:
+                    throw IllegalStateException(Some("detail row requires content"))
                 return element(
                     GridDetailProps(info, index, session, columns.appearance, enabled),
                     { props, scope -> GridDetailView(props, scope) },
                     [definition.content(value)]
                 )
             }
+
             case Unloaded(val load) -> return gridLoadView(this, load, index)
             else -> {}
         }
         val spans = spansFor(row)
-        val cells =
-            GridRowCells(
-                row,
-                key,
-                index,
-                columns,
-                session,
-                policy,
-                enabled,
-                spans,
-                selection,
-                range,
-                labels,
-                source.hierarchyAt(index),
-                details
-            )
+        val cells = GridRowCells(
+            row,
+            key,
+            index,
+            columns,
+            session,
+            policy,
+            enabled,
+            spans,
+            selection,
+            range,
+            labels,
+            source.hierarchyAt(index),
+            details
+        )
         return lazyElement(
             cells,
             GridRowProps(row, index, key, columns, session, policy, spans, selection),
             { props, scope -> GridRowView(props, scope) }
         )
     }
-    fun spansFor(row: GridRow<Row>): GridRowSpans =
-        when (row) {
-            case Data(val value, _) -> when (columnSpans) {
+    fun spansFor(row: GridRow<Row>): GridRowSpans = when (row) {
+        case Data(val value, _) ->
+            when (columnSpans) {
                 case Some(val resolve) -> columns.spans.resolve(resolve(value))
                 case None -> GridRowSpans(columns.columns.size)
             }
-            case Group(_) -> GridRowSpans(columns.columns.size)
-            case Total(_) -> GridRowSpans(columns.columns.size)
-            case Detail(_, _) -> GridRowSpans(0L)
-            case Unloaded(_) -> GridRowSpans(0L)
-        }
+        case Group(_) -> GridRowSpans(columns.columns.size)
+        case Total(_) -> GridRowSpans(columns.columns.size)
+        case Detail(_, _) -> GridRowSpans(0L)
+        case Unloaded(_) -> GridRowSpans(0L)
+    }
     fun indexOfKey(key: GridRowKey): Long? = source.indexOfKey(key)
     private fun labelColumn(row: GridRow<Row>): GridColumnId? = row.labelColumn(columns.columns)
     private fun expanded(info: GridRowInfo, hierarchy: GridRowHierarchy?): Boolean? {
@@ -94,18 +94,16 @@ internal class GridRows<Row>(
     }
     private fun expand(key: ViewKey, value: Boolean): SemanticActionResult {
         val model = session.currentModel ?: return SemanticActionResult.Unavailable
-        if (model.result.rows !== source)
-            return SemanticActionResult.Unavailable
+        if (model.result.rows !== source) return SemanticActionResult.Unavailable
         val index = source.indexOfKey(key) ?: return SemanticActionResult.Unavailable
         val row = source.rowKeyAt(index)
-        val result =
-            if (model.canExpand(row))
-                session.setExpanded(row, value)
-            else
-                when (row.dataKey) {
-                    case Some(val parent) -> session.setDetailExpanded(parent, value)
-                    case None -> return SemanticActionResult.Unavailable
-                }
+        val result = if (model.canExpand(row))
+            session.setExpanded(row, value)
+        else
+            when (row.dataKey) {
+                case Some(val parent) -> session.setDetailExpanded(parent, value)
+                case None -> return SemanticActionResult.Unavailable
+            }
         return when (result) {
             case Applied -> SemanticActionResult.Completed
             case Rejected(_) -> SemanticActionResult.Rejected
@@ -113,8 +111,7 @@ internal class GridRows<Row>(
     }
     private fun cellProperties(key: SemanticItemKey, column: Long): SemanticItemProperties? {
         val at = source.indexOfKey(gridRowKey(key)) ?: return None
-        if (!source.rowKeyAt(at).hasCells)
-            return None
+        if (!source.rowKeyAt(at).hasCells) return None
         val row = source.rowAt(at)
         val span = spansFor(row).span(column)
         return Some(
@@ -129,159 +126,150 @@ internal class GridRows<Row>(
     fun semantics(): ItemSemantics {
         val selected = ArrayList<SemanticItemKey>()
         when (selection) {
-            case Some(val value) -> for (key in value.selected.keys)
-                when (val at = source.indexOfKey(GridRowKey.Data(key))) {
-                    case Some(val index) -> if (!(source.hierarchyAt(index)?.contextOnly ?: false))
-                        selected.add(gridSelectionItemKey(GridRowKey.Data(key).viewKey))
-                    case None -> {}
-                }
+            case Some(val value) ->
+                for (key in value.selected.keys)
+                    when (val at = source.indexOfKey(GridRowKey.Data(key))) {
+                        case Some(val index) ->
+                            if (!(source.hierarchyAt(index)?.contextOnly ?: false))
+                                selected.add(gridSelectionItemKey(GridRowKey.Data(key).viewKey))
+                        case None -> {}
+                    }
             case None -> {}
         }
         return ItemSemantics(
             this,
-            {
-                index ->
+            { index ->
                 val info = source.infoAt(index)
                 val hierarchy = source.hierarchyAt(index)
                 Some(
                     SemanticItemProperties(
-                        name =
-                            if (hierarchy?.contextOnly ?: false)
-                                Some(labels.contextRow)
-                            else
-                                info.label,
+                        name = if (hierarchy?.contextOnly ?: false)
+                            Some(labels.contextRow)
+                        else
+                            info.label,
                         enabled = enabled,
                         focusable = true,
-                        hierarchyLevel =
-                            when (hierarchy) {
-                                case Some(val value) -> Some(value.level)
-                                case None -> when (details) {
-                                    case Some(_) -> if (info.dataKey != None)
-                                        Some(0L)
-                                    else
-                                        None
+                        hierarchyLevel = when (hierarchy) {
+                            case Some(val value) -> Some(value.level)
+                            case None ->
+                                when (details) {
+                                    case Some(_) -> if (info.dataKey != None) Some(0L) else None
                                     case None -> None
                                 }
-                            },
+                        },
                         expanded = expanded(info, hierarchy),
                         selectable = info.dataKey != None && !(hierarchy?.contextOnly ?: false),
-                        selected =
-                            when (info.dataKey) {
-                                case Some(val key) -> if (hierarchy?.contextOnly ?: false)
+                        selected = when (info.dataKey) {
+                            case Some(val key) ->
+                                if (hierarchy?.contextOnly ?: false)
                                     None
                                 else
                                     selection?.selected?.contains(key)
-                                case None -> None
-                            }
+                            case None -> None
+                        }
                     )
                 )
             },
-            selection =
-                when (selection) {
-                    case Some(val value) -> Some(
+            selection = when (selection) {
+                case Some(val value) ->
+                    Some(
                         SemanticCollectionSelection(
                             selected.toArray(),
                             multiple = value.model.rowSelection == GridRowSelectionMode.Multiple
                         )
                     )
-                    case None -> None
-                },
-            setSelected =
-                when (selection) {
-                    case Some(val value) -> Some {
-                        key,
-                        selected -> value.semanticSelect(key, selected)
-                    }
-                    case None -> None
-                },
+                case None -> None
+            },
+            setSelected = when (selection) {
+                case Some(val value) ->
+                    Some { key, selected -> value.semanticSelect(key, selected) }
+                case None -> None
+            },
             setExpanded = Some { key, next -> expand(key, next) },
-            grid =
-                Some(
-                    SemanticGrid(
-                        Array<SemanticGridColumn>(columns.columns.size) {
-                            index ->
-                            val column = columns.columns[index]
-                            SemanticGridColumn(
-                                SemanticItemKey.Text(column.id.encoded),
-                                Some(column.title)
-                            )
-                        },
-                        { key, column -> cellProperties(key, column) },
-                        span =
-                            when (columnSpans) {
-                                case Some(_) -> Some {
-                                    key, column ->
-                                    val index = source.indexOfKey(gridRowKey(key))
-                                    when (index) {
-                                        case Some(val at) -> {
-                                            if (source.rowKeyAt(at).hasCells) {
-                                                val range = spansFor(source.rowAt(at)).span(column)
-                                                SemanticGridSpan(range.column, range.count)
-                                            } else
-                                                SemanticGridSpan(column)
-                                        }
-                                        case None -> SemanticGridSpan(column)
+            grid = Some(
+                SemanticGrid(
+                    Array<SemanticGridColumn>(columns.columns.size) { index ->
+                        val column = columns.columns[index]
+                        SemanticGridColumn(
+                            SemanticItemKey.Text(column.id.encoded),
+                            Some(column.title)
+                        )
+                    },
+                    { key, column -> cellProperties(key, column) },
+                    span = when (columnSpans) {
+                        case Some(_) ->
+                            Some { key, column ->
+                                val index = source.indexOfKey(gridRowKey(key))
+                                when (index) {
+                                    case Some(val at) -> {
+                                        if (source.rowKeyAt(at).hasCells) {
+                                            val range = spansFor(source.rowAt(at)).span(column)
+                                            SemanticGridSpan(range.column, range.count)
+                                        } else
+                                            SemanticGridSpan(column)
                                     }
+
+                                    case None -> SemanticGridSpan(column)
                                 }
-                                case None -> None
-                            },
-                        hasCells =
-                            if (hasStructuralRows)
-                                Some {
-                                    key -> when (val index = source.indexOfKey(gridRowKey(key))) {
-                                        case Some(val at) -> source.rowKeyAt(at).hasCells
-                                        case None -> false
-                                    }
-                                }
-                            else
-                                None
-                    )
+                            }
+                        case None -> None
+                    },
+                    hasCells = if (hasStructuralRows)
+                        Some { key ->
+                            when (val index = source.indexOfKey(gridRowKey(key))) {
+                                case Some(val at) -> source.rowKeyAt(at).hasCells
+                                case None -> false
+                            }
+                        }
+                    else
+                        None
                 )
+            )
         )
     }
 }
 
-private fun gridRowKey(key: SemanticItemKey): ViewKey =
-    when (key) {
-        case Number(val value) -> ViewKey.Number(value)
-        case Text(val value) -> ViewKey.Text(value)
-    }
+private fun gridRowKey(key: SemanticItemKey): ViewKey = when (key) {
+    case Number(val value) -> ViewKey.Number(value)
+    case Text(val value) -> ViewKey.Text(value)
+}
 
 internal class GridBodyProps<Row>(val rows: GridRows<Row>, val session: GridSession<Row>)
 
 internal class GridBody<Row>(
     private val props: Props<GridBodyProps<Row>>,
     scope: ComponentScope
-): LazyElement<Rect>(scope) {
+) : LazyElement<Rect>(scope) {
     private val semantics = scope.semantics(SemanticRole.Table)
     public override fun onMount() {
         props.value.session.tableSemantics = Some(semantics)
-        props.value.session.bodyFocus =
-            Some(
-                scope.lazyFocus(
+        props.value.session.bodyFocus = Some(
+            scope
+                .lazyFocus(
                     props.value.session.viewport!!,
                     LazyFocusOptions(ItemNavigation.Roving())
                 )
-            )
+        )
         scope.routeSemanticsChildren(Some(semantics))
     }
     public override fun update(): UiInvalidation {
         val rows = props.value.rows
-        semantics.update(
-            SemanticProperties(
-                name = Some(rows.labels.name),
-                description =
-                    when (rows.session.currentModel?.result?.external ?: None) {
-                        case Some(val availability) -> Some(
-                            rows.labels.externalStatus(availability)
-                        )
+        semantics
+            .update(
+                SemanticProperties(
+                    name = Some(rows.labels.name),
+                    description = when (rows.session.currentModel?.result?.external ?: None) {
+                        case Some(val availability) ->
+                            Some(
+                                rows.labels.externalStatus(availability)
+                            )
                         case None -> None
                     },
-                busy = rows.busy,
-                enabled = rows.enabled,
-                table = Some(SemanticTableSize(rows.count, rows.columns.columns.size))
+                    busy = rows.busy,
+                    enabled = rows.enabled,
+                    table = Some(SemanticTableSize(rows.count, rows.columns.columns.size))
+                )
             )
-        )
         semantics.updateCollection(rows, Some(rows.semantics()), props.value.session.viewport)
         return UiInvalidation.Layout
     }
@@ -291,13 +279,14 @@ internal class GridBody<Row>(
     ): LayoutResult<Rect> {
         val plan = context.input<GridMeasurePlan>()
         when (plan.probe) {
-            case Some(val probe) -> return gridMeasureContentRows(
-                context,
-                constraints,
-                plan,
-                probe,
-                props.value.rows.source
-            )
+            case Some(val probe) ->
+                return gridMeasureContentRows(
+                    context,
+                    constraints,
+                    plan,
+                    probe,
+                    props.value.rows.source
+                )
             case None -> {}
         }
         val offset = plan.scroll.presentationOffset
@@ -308,22 +297,24 @@ internal class GridBody<Row>(
         for (index in context.pinnedItems)
             selected.add(index)
         when (props.value.session.requested) {
-            case Some(val target) -> when (props.value.rows.indexOfKey(target.row)) {
-                case Some(val index) -> selected.add(index)
-                case None -> {}
-            }
+            case Some(val target) ->
+                when (props.value.rows.indexOfKey(target.row)) {
+                    case Some(val index) -> selected.add(index)
+                    case None -> {}
+                }
             case None -> {}
         }
         when (props.value.session.editing.current) {
-            case Some(val edit) -> when (props.value.rows.indexOfKey(edit.address.row)) {
-                case Some(val index) -> selected.add(index)
-                case None -> {}
-            }
+            case Some(val edit) ->
+                when (props.value.rows.indexOfKey(edit.address.row)) {
+                    case Some(val index) -> selected.add(index)
+                    case None -> {}
+                }
             case None -> {}
         }
         for (index in selected) {
-            val metrics =
-                context.measureItem(
+            val metrics = context
+                .measureItem(
                     index,
                     if (extents.variable)
                         Constraints(
@@ -370,23 +361,23 @@ internal class GridRowProps<Row>(
 internal class GridRowView<Row>(
     private val props: Props<GridRowProps<Row>>,
     scope: ComponentScope
-): LazyElement<Unit>(scope) {
+) : LazyElement<Unit>(scope) {
     private val semantics = scope.semantics(SemanticRole.Row)
     public override fun onMount() {
         scope.bindGridColumns(props.value.session.tableSemantics!!, props.value.key.viewKey)
     }
     public override fun update(): UiInvalidation {
         scope.routeSemanticsChildren(Some(semantics))
-        semantics.update(
-            SemanticProperties(
-                name = props.value.row.info.label,
-                selected =
-                    when (props.value.key.dataKey) {
+        semantics
+            .update(
+                SemanticProperties(
+                    name = props.value.row.info.label,
+                    selected = when (props.value.key.dataKey) {
                         case Some(val key) -> props.value.selection?.selected?.contains(key)
                         case None -> None
                     }
+                )
             )
-        )
         return UiInvalidation.Layout
     }
     public override fun measure(
@@ -408,6 +399,7 @@ internal class GridRowView<Row>(
                     Some(spans.anchorItem(probe.column))
                 )
             }
+
             case None -> {}
         }
         val selected = HashSet<Long>()
@@ -421,44 +413,47 @@ internal class GridRowView<Row>(
         for (index in context.pinnedItems)
             selected.add(index)
         when (props.value.session.requested) {
-            case Some(val address) -> if (address.row == props.value.key) {
-                when (props.value.columns.indexOf(address.column)) {
-                    case Some(val index) -> selected.add(spans.anchorItem(index));
-                    case None -> {}
+            case Some(val address) ->
+                if (address.row == props.value.key) {
+                    when (props.value.columns.indexOf(address.column)) {
+                        case Some(val index) -> selected.add(spans.anchorItem(index));
+                        case None -> {}
+                    }
                 }
-            }
             case None -> {}
         }
         when (props.value.session.editing.current) {
-            case Some(val edit) -> if (edit.address.row == props.value.key) {
-                when (props.value.columns.indexOf(edit.address.column)) {
-                    case Some(val index) -> selected.add(spans.anchorItem(index))
-                    case None -> {}
+            case Some(val edit) ->
+                if (edit.address.row == props.value.key) {
+                    when (props.value.columns.indexOf(edit.address.column)) {
+                        case Some(val index) -> selected.add(spans.anchorItem(index))
+                        case None -> {}
+                    }
                 }
-            }
             case None -> {}
         }
-        var height =
-            when (props.value.row) {
-                case Data(val row, _) -> props.value.policy.height(row, plan.rows.estimate)
-                case Group(_) -> plan.rows.estimate
-                case Total(_) -> plan.rows.estimate
-                case Detail(_, _) -> throw IllegalStateException(
+        var height = when (props.value.row) {
+            case Data(val row, _) -> props.value.policy.height(row, plan.rows.estimate)
+            case Group(_) -> plan.rows.estimate
+            case Total(_) -> plan.rows.estimate
+            case Detail(_, _) ->
+                throw IllegalStateException(
                     Some("detail content uses its own row measure")
                 )
-                case Unloaded(_) -> throw IllegalStateException(
+            case Unloaded(_) ->
+                throw IllegalStateException(
                     Some("loading content uses its own row measure")
                 )
-            }
+        }
         for (index in contributors) {
             val column = spans.columnIndex(index)
             val range = spans.span(column)
-            val box =
-                plan.columns.box(column, plan.scroll.presentationOffset.x, height, range.count)
-            if (box.width <= 0.0)
-                continue
-            val metrics =
-                context.measureItem(
+            val box = plan
+                .columns
+                .box(column, plan.scroll.presentationOffset.x, height, range.count)
+            if (box.width <= 0.0) continue
+            val metrics = context
+                .measureItem(
                     index,
                     Constraints(minWidth = box.width, maxWidth = Some(box.width)),
                     LayoutInput(
@@ -473,33 +468,38 @@ internal class GridRowView<Row>(
                 )
             height = max(height, metrics.size.height)
         }
+        val row = plan.bands.box(props.value.index, plan.scroll.presentationOffset.y, height)
+        val offset = plan.scroll.snapshot.offset.x
         for (index in selected) {
             val column = spans.columnIndex(index)
             val range = spans.span(column)
-            val box =
-                plan.columns.box(column, plan.scroll.presentationOffset.x, height, range.count)
-            val row = plan.bands.box(props.value.index, plan.scroll.presentationOffset.y, height)
-            context.measureItem(
-                index,
-                Constraints.tight(Size(box.width, height)),
-                LayoutInput(
-                    GridCellClip(
-                        Rect(box.clip.x, row.clipTop, box.clip.width, row.clipHeight),
-                        plan.columns.region(
-                            column,
-                            plan.headerHeight + row.regionTop,
-                            row.regionHeight
-                        ),
-                        if (plan.columns.frozen(column))
-                            ScrollAxes.Vertical
-                        else
-                            ScrollAxes.Both,
-                        plan.viewport,
-                        fixedRow = row.fixed
+            val box = plan
+                .columns
+                .box(column, plan.scroll.presentationOffset.x, height, range.count)
+            context
+                .measureItem(
+                    index,
+                    Constraints.tight(Size(box.width, height)),
+                    LayoutInput(
+                        GridCellClip(
+                            Rect(box.clip.x, row.clipTop, box.clip.width, row.clipHeight),
+                            plan
+                                .columns
+                                .region(
+                                    column,
+                                    plan.headerHeight + row.regionTop,
+                                    row.regionHeight
+                                ),
+                            if (plan.columns.frozen(column))
+                                ScrollAxes.Vertical
+                            else
+                                ScrollAxes.Both,
+                            plan.viewport,
+                            fixedRow = row.fixed
+                        )
                     )
                 )
-            )
-            context.placeItem(index, Point(box.x - plan.scroll.snapshot.offset.x, 0.0))
+            context.placeItem(index, Point(box.x - offset, 0.0))
         }
         return LayoutResult(
             LayoutMetrics(constraints.constrain(Size(plan.columns.total, height))),
@@ -512,20 +512,21 @@ internal class GridRowView<Row>(
     }
 }
 
-internal class GridHeader(scope: ComponentScope): LazyElement<Unit>(scope) {
+internal class GridHeader(scope: ComponentScope) : LazyElement<Unit>(scope) {
     public override fun measure(
         context: LazyMeasureContext,
         constraints: Constraints
     ): LayoutResult<Unit> {
         val plan = context.input<GridMeasurePlan>()
         when (plan.probe) {
-            case Some(val probe) -> return gridMeasureContentCell(
-                context,
-                constraints,
-                plan,
-                probe,
-                true
-            )
+            case Some(val probe) ->
+                return gridMeasureContentCell(
+                    context,
+                    constraints,
+                    plan,
+                    probe,
+                    true
+                )
             case None -> {}
         }
         val selected = HashSet<Long>()
@@ -542,42 +543,41 @@ internal class GridHeader(scope: ComponentScope): LazyElement<Unit>(scope) {
         val ordered = ArrayList<Long>()
         for (index in selected)
             ordered.add(index)
-        ordered.sortWith(
-            comparatorOf<Long> {
-                left, right ->
-                val depth = plan.headers.items[left].level - plan.headers.items[right].level
-                if (depth == 0L)
-                    left - right
-                else
-                    depth
-            }
-        )
+        ordered
+            .sortWith(
+                comparatorOf<Long> { left, right ->
+                    val depth = plan.headers.items[left].level - plan.headers.items[right].level
+                    if (depth == 0L) left - right else depth
+                }
+            )
         for (index in ordered) {
             val item = plan.headers.items[index]
-            val box =
-                plan.headers.box(
+            val box = plan
+                .headers
+                .box(
                     index,
                     plan.columns,
                     plan.scroll.presentationOffset.x,
                     plan.headerRowHeight,
                     plan.headerHeight
                 )
-            context.measureItem(
-                index,
-                Constraints.tight(Size(box.width, box.height)),
-                LayoutInput(
-                    GridCellClip(
-                        box.clip,
-                        box.region,
-                        if (plan.columns.frozen(item.first))
-                            ScrollAxes.Vertical
-                        else
-                            ScrollAxes.Horizontal,
-                        plan.viewport,
-                        fixedRow = true
+            context
+                .measureItem(
+                    index,
+                    Constraints.tight(Size(box.width, box.height)),
+                    LayoutInput(
+                        GridCellClip(
+                            box.clip,
+                            box.region,
+                            if (plan.columns.frozen(item.first))
+                                ScrollAxes.Vertical
+                            else
+                                ScrollAxes.Horizontal,
+                            plan.viewport,
+                            fixedRow = true
+                        )
                     )
                 )
-            )
             context.placeItem(index, Point(box.x - plan.scroll.snapshot.offset.x, box.y))
         }
         return LayoutResult(

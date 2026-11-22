@@ -1,0 +1,204 @@
+package scoop.grid.examples.demo
+
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.column as demoColumn
+import scoop.ui.style.*
+
+internal class InventoryDemo(internal val source: ThemeSource, internal val images: DemoImages) {
+    internal var rows = inventoryRows()
+    val revision = state(0L)
+    val message =
+        state("Double-click Incoming or Price to edit; expand an album to see its editions")
+    val handle = DataGridHandle()
+    val scroll = ScrollState()
+    val tools = GridTools()
+    private val details = Array<AlbumDetail>(rows.count) { AlbumDetail(rows.rowAt(it), source) }
+    val grid =
+        DataGridState(
+            rows,
+            inventoryColumns(this),
+            GridQuery(pagination = GridPagination.Page(0L, 10L)),
+            rowSelection = GridRowSelectionMode.Multiple,
+            details =
+                Some(
+                    GridDetails<Album>(
+                        { row -> details[row.id].view() },
+                        Some(GridColumnId("album")),
+                        "album editions"
+                    )
+                )
+        )
+
+    init {
+        grid.setColumnState(GridColumnState(GridColumnId("album"), pin = GridPin.Start))
+        grid.setColumnState(GridColumnState(GridColumnId("actions"), pin = GridPin.End))
+    }
+
+    fun chooseStatus(status: String) {
+        if (readyToLeave(handle))
+            grid.setQuery(grid.query.withFilter(inventoryStatusFilter(status)))
+    }
+    fun toggleHold(id: Long) {
+        if (!readyToLeave(handle))
+            return
+        val index = rows.indexOfKey(ViewKey.Number(id)) ?: return
+        val album = rows.rowAt(index)
+        if (album.available == 0L)
+            return
+        val next = album.withHeld(!album.held)
+        publish(replacing(next))
+        message.value = f"${album.title}: ${next.status}"
+    }
+    fun remove(id: Long) {
+        if (!readyToLeave(handle))
+            return
+        val index = rows.indexOfKey(ViewKey.Number(id)) ?: return
+        val title = rows.rowAt(index).title
+        val records = ArrayList<TableRecord<Album>>()
+        for (at in 0L ..< rows.count)
+            if (at != index)
+                records.add(TableRecord(rows.keyAt(at), rows.rowAt(at)))
+        publish(TableRows(records.toArray()))
+        message.value = f"Removed ${title}. Reset sample restores the catalogue."
+    }
+    fun reset() {
+        if (!readyToLeave(handle))
+            return
+        grid.setExpandedDetails([])
+        grid.setSelectedRows([])
+        grid.setQuery(GridQuery(pagination = GridPagination.Page(0L, 10L)))
+        publish(inventoryRows())
+        message.value = "Sample catalogue restored"
+    }
+    private fun publish(next: TableRows<Album>) {
+        grid.replaceData(next)
+        rows = next
+        revision.value += 1L
+    }
+    private fun replacing(album: Album): TableRows<Album> =
+        TableRows(
+            Array<TableRecord<Album>>(rows.count) {
+                index ->
+                val old = rows.rowAt(index)
+                TableRecord(
+                    rows.keyAt(index),
+                    if (old.id == album.id)
+                        album
+                    else
+                        old
+                )
+            }
+        )
+    internal fun save(album: Album, completion: GridCommit<Album>) {
+        val next = replacing(album)
+        if (completion.accept(next)) {
+            rows = next
+            revision.value += 1L
+            message.value = f"Saved ${album.title}"
+        }
+    }
+    fun count(status: String): Long {
+        val version = revision.value
+        var count = 0L
+        for (index in 0L ..< rows.count)
+            if (status == "All" || rows.rowAt(index).status == status)
+                count += 1L
+        return count
+    }
+
+    fun view(): View {
+        val demo = this
+        return demoColumn {
+            spacing = 16.0;
+            alignment = CrossAlignment.Stretch
+            add(
+                pageHeading(
+                    "Inventory",
+                    "A record-store catalogue with stock controls and album editions.",
+                    demo.source
+                )
+            )
+            row {
+                spacing = 8.0;
+                alignment = CrossAlignment.Center
+                for (status in ["All", "Active", "On Hold", "Out of Stock"])
+                    button(f"${status}  ${demo.count(status)}", { demo.chooseStatus(status) }) {
+                        variant =
+                            if (demo.grid.query.filter == inventoryStatusFilter(status))
+                                ButtonVariant.Default
+                            else
+                                ButtonVariant.Outline
+                    }
+                item(empty()) { grow = 1.0 }
+                button("Reset sample", { demo.reset() }) { variant = ButtonVariant.Outline }
+            }
+            add(
+                gridControls(
+                    demo.grid,
+                    demo.handle,
+                    demo.tools,
+                    "Search albums, artists or genres..."
+                )
+            )
+            add(
+                gridWorkspace(
+                    demo.grid,
+                    demo.handle,
+                    demo.tools,
+                    dataGrid(demo.grid) {
+                        handle = Some(demo.handle);
+                        scroll = Some(demo.scroll)
+                        height = 460.0;
+                        rowHeight = 80.0;
+                        headerHeight = 40.0
+                        labels = demoGridLabels("Inventory grid")
+                        empty =
+                            Some(demoText("No albums match this filter", demo.source, muted = true))
+                    }
+                )
+            )
+            add(
+                gridPager(demo.grid) {
+                    handle = Some(demo.handle);
+                    pageSizes = [5L, 10L, 20L]
+                    labels =
+                        GridPagerLabels(
+                            all = "All rows",
+                            size = { f"${it} / page" },
+                            sizeName = "Page size",
+                            rows = { f"${it} albums" },
+                            status =
+                                {
+                                    count,
+                                    page,
+                                    pages -> f"${count} albums · Page ${page} of ${pages}"
+                                },
+                            previous = "Previous",
+                            next = "Next",
+                            page = { f"Page ${it}" },
+                            name = "Inventory pages"
+                        )
+                }
+            )
+            add(
+                demoText(
+                    demo.handle.editError ?: demo.message.value,
+                    demo.source,
+                    12.0,
+                    muted = true
+                )
+            )
+        }
+    }
+}
+
+internal fun inventoryStatusFilter(status: String): GridFilter =
+    if (status == "All")
+        GridFilter.All
+    else
+        GridFilter.Column(
+            GridColumnId("status"),
+            GridCondition.Compare(GridComparison.Equal, GridLiteral.Text(status))
+        )

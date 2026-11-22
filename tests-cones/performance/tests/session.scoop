@@ -19,18 +19,16 @@ private class GridPerformanceTest {
         val probe = PerfProbe()
         try {
             context(ThemeSource(shadcnTheme())) {
-                UiHost(onRootError = { _, error -> throw error }) {
-                    host,
-                    active,
-                    event -> probe.event(host, active, event)
-                }.use { host -> Application().run(host) }
+                UiHost(onRootError = { _, error -> throw error }) { host, active, event ->
+                    probe.event(host, active, event)
+                }
+                    .use { host -> Application().run(host) }
             }
             assertTrue(probe.finished)
             measureQueries()
         } catch (error: Throwable) {
             println(f"PERF_FAILED case=${probe.index} phase=${probe.phase} step=${probe.iteration}")
-            if (error is Exception)
-                error.printStackTrace()
+            if (error is Exception) error.printStackTrace()
             throw error
         } finally {
             probe.close()
@@ -38,15 +36,14 @@ private class GridPerformanceTest {
     }
 }
 
-internal class PerfProbe: Closeable {
-    private val configurations =
-        [
-            PerfConfig("management", 10000L, 20L, controls = true, preallocated = true),
-            PerfConfig("wide-fixed", 100000L, 300L),
-            PerfConfig("wide-frozen", 100000L, 300L, frozen = true),
-            PerfConfig("wide-content", 100000L, 300L, frozen = true, contentHeight = true),
-            PerfConfig("million-lazy", 1000000L, 300L, frozen = true)
-        ]
+internal class PerfProbe : Closeable {
+    private val configurations = [
+        PerfConfig("management", 10000L, 20L, controls = true, preallocated = true),
+        PerfConfig("wide-fixed", 100000L, 300L),
+        PerfConfig("wide-frozen", 100000L, 300L, frozen = true),
+        PerfConfig("wide-content", 100000L, 300L, frozen = true, contentHeight = true),
+        PerfConfig("million-lazy", 1000000L, 300L, frozen = true)
+    ]
     private val timeout = MonotonicTimeSource.now() + Duration.seconds(45L)
     private var host: UiHost? = None
     private var active: ActiveApplication? = None
@@ -59,6 +56,9 @@ internal class PerfProbe: Closeable {
     private var attached = MonotonicTimeSource.now()
     private var waiting = false
     private var idleFrames = 0L
+    private var reuseStep = 0
+    private var reuseMeasures = 0L
+    private var reuseFactories = 0L
     var frame: ComponentScope? = None
     var index = 0L
     var phase = 0
@@ -71,8 +71,8 @@ internal class PerfProbe: Closeable {
                 this.host = Some(host)
                 active = Some(application)
                 application.setControlFlow(ControlFlow.WaitUntil(timeout))
-                val native =
-                    application.createWindow(
+                val native = application
+                    .createWindow(
                         windowAttributes {
                             title = "Scoop Grid measured production viewport"
                             size = LogicalSize(1200.0, 600.0)
@@ -84,10 +84,12 @@ internal class PerfProbe: Closeable {
                 begin()
                 native.requestFocus()
             }
+
             case NewEvents(StartCause.Deadline) -> {
                 if (MonotonicTimeSource.now() >= timeout)
                     fail(Some(f"performance timeout: ${index}/${phase}/${iteration}"))
             }
+
             else -> {}
         }
     }
@@ -103,8 +105,7 @@ internal class PerfProbe: Closeable {
     }
     fun accepted(sample: PerfSample, epoch: Long, uiNs: Long) {
         val activeSample = current ?: return
-        if (finished || waiting || activeSample !== sample)
-            return
+        if (finished || waiting || activeSample !== sample) return
         sample.capture(epoch)
         when (phase) {
             case 0 -> {
@@ -112,13 +113,16 @@ internal class PerfProbe: Closeable {
                 assertTrue(sample.cells.live.size > 0L)
                 post {
                     assertTrue(
-                        sample.handle.focusCell(
-                            GridCellAddress(ViewKey.Number(0L), GridColumnId("c0"))
-                        )
+                        sample
+                            .handle
+                            .focusCell(
+                                GridCellAddress(ViewKey.Number(0L), GridColumnId("c0"))
+                            )
                     )
                     phase = 1
                 }
             }
+
             case 1 -> {
                 if (sample.handle.isPending) {
                     frame!!.requestFrame()
@@ -128,9 +132,16 @@ internal class PerfProbe: Closeable {
                     Some(GridCellAddress(ViewKey.Number(0L), GridColumnId("c0"))),
                     sample.handle.focusedCell
                 )
-                phase = 2
-                scroll()
+                if (index == 0L) {
+                    phase = 5
+                    reuseStep = -2
+                    post { sample.scroll.scrollTo(Point(0.0, 1234.0)) }
+                } else {
+                    phase = 2
+                    scroll()
+                }
             }
+
             case 2 -> {
                 if (iteration >= 0) {
                     sample.uiTimes.add(uiNs)
@@ -144,6 +155,30 @@ internal class PerfProbe: Closeable {
                     idleDeadline!!.schedule(MonotonicTimeSource.now() + Duration.milliseconds(250L))
                 }
             }
+
+            case 5 -> {
+                if (reuseStep == 0) {
+                    reuseMeasures = sample.cells.measures
+                    reuseFactories = sample.cells.factories
+                } else if (reuseStep > 0) {
+                    assertEquals(
+                        reuseFactories, sample.cells.factories,
+                        Some("small scroll rebuilt unchanged cells")
+                    )
+                    assertEquals(
+                        reuseMeasures, sample.cells.measures,
+                        Some("small scroll remeasured unchanged cell content")
+                    )
+                }
+                reuseStep += 1
+                if (reuseStep < 8)
+                    post { sample.scroll.scrollTo(Point(0.0, 1234.0 + (reuseStep % 2).toDouble())) }
+                else {
+                    phase = 2
+                    scroll()
+                }
+            }
+
             else -> {}
         }
     }
@@ -151,32 +186,32 @@ internal class PerfProbe: Closeable {
         waiting = true
         val scope = frame!!
         assertTrue(
-            active!!.proxy().post {
-                _ -> assertTrue(
-                    scope.dispatch {
-                        action()
-                        waiting = false
-                        scope.requestFrame()
-                    }
-                )
-            }
+            active!!
+                .proxy()
+                .post { _ ->
+                    assertTrue(
+                        scope
+                            .dispatch {
+                                action()
+                                waiting = false
+                                scope.requestFrame()
+                            }
+                    )
+                }
         )
     }
     private fun scroll() {
         val sample = current!!
         val step = iteration
         post {
-            val x =
-                if (step < 32)
-                    ((step + 6) % 20).toDouble() * 120.0
-                else
-                    (((step - 32) * 37 + 30).toLong() % sample.configuration.columns).toDouble() *
-                        120.0
-            val y =
-                if (step < 32)
-                    (step + 7).toDouble() * 84.0
-                else
-                    (sample.configuration.rows * (step - 31).toLong() / 9L).toDouble() * 28.0
+            val x = if (step < 32)
+                ((step + 6) % 20).toDouble() * 120.0
+            else
+                (((step - 32) * 37 + 30).toLong() % sample.configuration.columns).toDouble() * 120.0
+            val y = if (step < 32)
+                (step + 7).toDouble() * 84.0
+            else
+                (sample.configuration.rows * (step - 31).toLong() / 9L).toDouble() * 28.0
             requested = MonotonicTimeSource.now()
             sample.scroll.scrollTo(Point(x, y))
         }

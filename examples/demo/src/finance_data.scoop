@@ -1,0 +1,81 @@
+package scoop.grid.examples.demo
+
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+internal struct Quote(
+    val ticker: String,
+    val name: String,
+    val instrument: String,
+    val quantity: Long,
+    val purchase: Long,
+    val price: Long,
+    val previous: Long
+) {
+    val value: Long get() = quantity * price
+    val profit: Long get() = quantity * (price - purchase)
+    val change: Long get() = (price - previous) * 10000L / previous
+    fun refreshed(sequence: Long, index: Long): Quote {
+        val direction = (sequence * 7L + index * 11L) % 13L - 6L
+        val delta = price * direction / 1000L
+        return Quote(
+            ticker,
+            name,
+            instrument,
+            quantity,
+            purchase,
+            price +
+                if (delta == 0L)
+                    1L
+                else
+                    delta,
+            price
+        )
+    }
+}
+
+internal fun financeRows(): TableRows<Quote> {
+    val quotes =
+        [
+            Quote("US10Y", "U.S. Treasury 10-Year Bond", "Bond", 1000L, 10000L, 10250L, 10212L),
+            Quote("CAD30Y", "Canada 30-Year Government Bond", "Bond", 550L, 9600L, 9700L, 9765L),
+            Quote("MUB", "iShares National Muni Bond ETF", "ETF", 75L, 11500L, 11600L, 11521L),
+            Quote("BTC-USD", "Bitcoin", "Crypto", 2L, 6800000L, 7142510L, 7200575L),
+            Quote("T", "AT&T Inc.", "Stock", 100L, 2000L, 2367L, 2318L),
+            Quote("FRN2027", "Floating Rate Note 2027", "Bond", 250L, 10000L, 10125L, 10103L),
+            Quote("ADI", "Analog Devices, Inc.", "Stock", 65L, 18500L, 21245L, 21120L),
+            Quote("AIG", "American International Group", "Stock", 120L, 6200L, 7431L, 7526L),
+            Quote("DAL", "Delta Air Lines", "Stock", 200L, 4250L, 4798L, 4712L),
+            Quote("BP", "BP p.l.c.", "Stock", 180L, 3720L, 3530L, 3578L),
+            Quote("MA", "Mastercard Incorporated", "Stock", 40L, 42000L, 48310L, 48502L),
+            Quote("VGT", "Vanguard Information Technology ETF", "ETF", 30L, 51000L, 56125L, 55721L),
+            Quote("PBR", "Petrobras", "Stock", 450L, 1510L, 1436L, 1408L),
+            Quote("EUBOND", "European Investment Bank Bond", "Bond", 500L, 10000L, 10185L, 10180L),
+            Quote(
+                "CORPBOND",
+                "Corporate Investment Grade Bond",
+                "Bond",
+                350L,
+                9900L,
+                10025L,
+                10074L
+            ),
+            Quote("JNJ", "Johnson & Johnson", "Stock", 70L, 16400L, 15845L, 15921L),
+            Quote("AAPL", "Apple Inc.", "Stock", 150L, 18200L, 22535L, 22418L),
+            Quote("MSFT", "Microsoft Corporation", "Stock", 80L, 38000L, 42680L, 42231L),
+            Quote("NVDA", "NVIDIA Corporation", "Stock", 240L, 10500L, 13975L, 14123L),
+            Quote("ETH-USD", "Ethereum", "Crypto", 8L, 280000L, 324576L, 320431L),
+            Quote("GLD", "SPDR Gold Shares", "ETF", 90L, 20100L, 22457L, 22405L),
+            Quote("SPY", "SPDR S&P 500 ETF Trust", "ETF", 60L, 48500L, 54879L, 54632L),
+            Quote("USB30Y", "U.S. Treasury 30-Year Bond", "Bond", 400L, 9800L, 9925L, 9981L),
+            Quote("SOL-USD", "Solana", "Crypto", 35L, 13500L, 16432L, 16108L)
+        ]
+    return quoteRows(quotes)
+}
+
+internal fun quoteRows(quotes: Array<Quote>): TableRows<Quote> =
+    TableRows(
+        Array<TableRecord<Quote>>(quotes.size) {
+            TableRecord(ViewKey.Text(quotes[it].ticker), quotes[it])
+        }
+    )

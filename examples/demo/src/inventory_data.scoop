@@ -1,0 +1,139 @@
+package scoop.grid.examples.demo
+
+import scoop.ui.ViewKey
+import scoop.ui.component.*
+
+internal struct Edition(
+    val format: String,
+    val label: String,
+    val country: String,
+    val catalogue: String,
+    val year: Long,
+    val available: Long
+)
+
+internal struct Album(
+    val id: Long,
+    val title: String,
+    val artist: String,
+    val genre: String,
+    val year: Long,
+    val held: Boolean,
+    val incoming: Long,
+    val price: Long,
+    val sold: Long,
+    val increase: Long,
+    val editions: Array<Edition>
+) {
+    val available: Long get() {
+        var total = 0L
+        for (edition in editions)
+            total += edition.available
+        return total
+    }
+    val status: String get() =
+        if (available == 0L)
+            "Out of Stock"
+        else
+            if (held)
+                "On Hold"
+            else
+                "Active"
+    val profit: Long get() = price * sold / 10L
+    fun withPrice(value: Long): Album =
+        Album(id, title, artist, genre, year, held, incoming, value, sold, increase, editions)
+    fun withIncoming(value: Long): Album =
+        Album(id, title, artist, genre, year, held, value, price, sold, increase, editions)
+    fun withHeld(value: Boolean): Album =
+        Album(id, title, artist, genre, year, value, incoming, price, sold, increase, editions)
+}
+
+internal fun inventoryRows(): TableRows<Album> {
+    val titles =
+        [
+            "Dreams of You",
+            "Blue Skies",
+            "Heaven",
+            "Life Matters",
+            "Lonely Hearts",
+            "Imaginary Groove",
+            "Desert Bloom",
+            "Golden Daze",
+            "Fragments",
+            "Solstice City"
+        ]
+    val artists =
+        [
+            "David Nearing",
+            "Maya Allen",
+            "Velvet Wave",
+            "Danielle James",
+            "Emma Stone",
+            "Leo Collins",
+            "Indigo Ray",
+            "The Marlowe Sound",
+            "Nova Elle",
+            "Aurora Lines"
+        ]
+    val genres =
+        [
+            "Soft Rock",
+            "Pop",
+            "Synth-pop",
+            "Rhythm & Blues",
+            "Alt-pop",
+            "Jazz",
+            "Electronic",
+            "Rock",
+            "Trance",
+            "Ambient"
+        ]
+    val years = [1978L, 2022L, 1985L, 2019L, 2023L, 2021L, 2020L, 1975L, 2024L, 2023L]
+    val stock = [8L, 0L, 22L, 15L, 9L, 18L, 6L, 12L, 24L, 0L]
+    val prices = [3200L, 2500L, 2000L, 2800L, 3400L, 3000L, 2700L, 3100L, 2900L, 2600L]
+    val increases = [5L, 10L, 10L, 5L, 12L, 8L, 6L, 7L, 4L, 0L]
+    return TableRows(
+        Array<TableRecord<Album>>(titles.size) {
+            index ->
+            val vinyl = (stock[index] + 1L) / 2L
+            val editions =
+                [
+                    Edition(
+                        "LP, Album, Reissue",
+                        "Scoop Records",
+                        "Worldwide",
+                        f"SG-${years[index]}-${index + 1L}-LP",
+                        2024L,
+                        vinyl
+                    ),
+                    Edition(
+                        "CD, Album, Remastered",
+                        "Scoop Records",
+                        "Europe",
+                        f"SG-${years[index]}-${index + 1L}-CD",
+                        2024L,
+                        stock[index] - vinyl
+                    )
+                ]
+            TableRecord(
+                ViewKey.Number(index),
+                Album(
+                    index,
+                    titles[index],
+                    artists[index],
+                    genres[index],
+                    years[index],
+                    index == 3L || index == 6L,
+                    if (index % 3L == 0L)
+                        20L
+                    else
+                        0L,
+                    prices[index],
+                    18L + index * 7L,
+                    increases[index],
+                    editions
+                )
+            )
+        }
+    )
+}

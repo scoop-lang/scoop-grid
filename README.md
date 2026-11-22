@@ -4,6 +4,8 @@
 
 本库尚未发布版本。依赖 Scoop 现有的类型化数据、声明式 UI、原生输入、主题和无障碍能力，不兼容 AG Grid 的 JavaScript API。本机规模、耗时与资源结果见 [性能记录](docs/PERFORMANCE.md)，其中明确区分惰性视口与完整本地查询。
 
+[Demo Gallery](examples/demo/README.md) 将 AG Grid 官网的 Performance、Finance、HR 和 Inventory 四个场景组合成一个原生应用，采用 UI Component gallery 的左侧列表与右侧演示窗格。示例提供本地图片和应用图标，并附有 macOS `Bundle.toml`，可通过 `scoop bundle examples/demo --format app` 打包。
+
 已提供类型化本地模型、条件筛选面板、快速筛选和分页控件、双轴虚拟化 DataGrid、固定表头、逻辑 Start／End 冻结、按行列 key 定位、原生离屏单元格动作、二维键盘导航、自定义控件内部交互、类型化单格编辑／校验／异步提交、业务行选择、单矩形与系统复制、查找、CSV／TSV、视图恢复、菜单、本地化、View 插槽，以及筛选结果的类型化聚合、行分组、树数据、透视、按层级展开、小计与总计，以及普通或嵌套主从详情、外部分页／区间加载和未知总数。公开合同见 [SPEC.md](docs/SPEC.md)。模型用法例如：
 
 ```scoop
@@ -246,6 +248,6 @@ scoop test --release tests-cones/performance
 
 开发目录与 Scoop 源码并列：`scoop/`、`scoop-grid/`，已下载的原生依赖使用 `scoop-dep/`。本机验证使用 release 配置，先格式化、检查，再运行受影响的测试。构建产物与缓存不提交；原始验证日志放在相邻的 `scoop-work/`。
 
-本地开发使用 `../scoop-work/grid/toolchain/bin/scoop`，配合 `--cache-dir ../scoop-work/grid/cache`；该副本已同步上游精确条目焦点、布局输入和共享祖先视口扩展。窗口回归与纯模型测试分别记录，完整阶段状态见进度文档。
+本地开发使用 `../scoop-work/grid/toolchain/bin/scoop`，配合 `--cache-dir ../scoop-work/grid/cache`；该副本已同步上游帧内输入收尾、布局输入依赖复用和无障碍发布合并，macOS 示例可用 `SCOOP_SURFACE_FPS=1` 输出实际呈现帧率。窗口回归与纯模型测试分别记录，完整阶段状态见进度文档，测量口径与前后对照见 [性能记录](docs/PERFORMANCE.md)。
 
 明确排除高频增量更新，多区域选择、填充柄、整行／批量编辑、跨单元格撤销，行拖动、跨行合并，Sparkline、选区生成图表，Excel／PDF 导出、打印，以及公式和用户自定义计算列。

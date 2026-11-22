@@ -1,0 +1,165 @@
+package scoop.grid.examples.demo
+
+import scoop.grid.*
+import scoop.math.BigDecimal
+import scoop.platform.fs.Path
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.style.ThemeSource
+import scoop.ui.style.shadcn.shadcnTheme
+
+@Test
+private class DemoModelsTest {
+    @Test
+    fun `large participant source preserves random access identity`() {
+        val rows = ParticipantRows(100000L)
+        assertEquals(100000L, rows.count)
+        assertEquals(Some(99999L), rows.indexOfKey(rows.keyAt(99999L)))
+        assertEquals(None, rows.indexOfKey(ViewKey.Number(100000L)))
+        val row = rows.rowAt(99999L)
+        var total = 0L
+        for (month in 0L ..< 12L)
+            total += row.month(month)
+        assertEquals(total, row.winnings)
+        assertEquals(row.name, rows.rowAt(99999L).name)
+    }
+
+    @Test
+    fun `performance grouping composes with search after changing size`() {
+        val demo = PerformanceDemo(ThemeSource(shadcnTheme()))
+        demo.resize(10000L)
+        demo.groupBy("country")
+        demo.grid.setQuery(demo.grid.query.withQuickFilter("France"))
+        assertEquals(21L, demo.grid.columnState.size)
+        assertEquals(1250L, demo.grid.result.totalRows)
+        assertEquals(1L, demo.grid.result.rootCount)
+        demo.groupBy("none")
+        assertEquals(1250L, demo.grid.result.totalRows)
+        assertEquals("France", demo.grid.query.quickFilter)
+    }
+
+    @Test
+    fun `currency editing and filtering share currency units while storing cents`() {
+        val values = moneyValues("£")
+        assertEquals(3250L, values.literal(GridLiteral.Number(32.50)))
+        assertEquals(3200L, values.literal(GridLiteral.Integer(32L)))
+        assertEquals("£1,234.50", values.format(123450L))
+        assertEquals(Some(32.5), values.number(3250L))
+        val editor = moneyEditor(3200L)
+        editor.importText("32.50")
+        when (editor.candidate()) {
+            case Value(val value) -> assertEquals(3250L, value)
+            case Rejected(_) -> fail(Some("valid decimal amount rejected"))
+        }
+        editor.importText("32.501")
+        when (editor.candidate()) {
+            case Value(_) -> fail(Some("fractional cents must not silently round"))
+            case Rejected(_) -> {}
+        }
+        assertEquals(None, moneyCents(1000000001.0))
+    }
+
+    @Test
+    fun `finance refresh keeps selection sorting and instrument identities`() {
+        val demo = FinanceDemo(ThemeSource(shadcnTheme()))
+        demo.grid.setQuery(
+            demo.grid.query.withSorting(
+                [GridSort(GridColumnId("price"), GridSortDirection.Descending)]
+            )
+        )
+        demo.grid.setSelectedRows([ViewKey.Text("AAPL")])
+        val query = demo.grid.query
+        val before = demo.grid.result.ordered
+        val beforePrice = before.rowAt(before.indexOfKey(ViewKey.Text("AAPL"))!!).price
+        demo.refresh()
+        val after = demo.grid.result.ordered
+        assertEquals(1L, demo.snapshot.value)
+        assertEquals(query, demo.grid.query)
+        assertEquals(24L, after.count)
+        assertEquals(ViewKey.Text("AAPL"), demo.grid.selectedRowKeys[0L])
+        assertEquals(
+            Some(GridAggregateDisplay.Value(moneyText(demo.totalValue()))),
+            demo.grid.result.aggregates.total(GridColumnId("value"))
+        )
+        assertEquals(
+            Some(BigDecimal(demo.totalValue(), 2L)),
+            demo.grid.result.aggregates.numericTotal(GridColumnId("value"))
+        )
+        assertTrue(beforePrice != after.rowAt(after.indexOfKey(ViewKey.Text("AAPL"))!!).price)
+        val quote = after.rowAt(0L)
+        assertEquals(quote.quantity * (quote.price - quote.purchase), quote.profit)
+        val changeColumn = demo.grid.sourceColumn(GridColumnId("change"))
+        val exactChange =
+            GridCondition.Compare(
+                GridComparison.Equal,
+                GridLiteral.Number(quote.change.toDouble() / 100.0)
+            )
+        assertTrue(changeColumn.predicate(exactChange)(quote))
+    }
+
+    @Test
+    fun `hr search retains the employee ancestry and collapse uses real tree state`() {
+        val images = DemoImages(Path.fromString("unused-in-model-tests"))
+        val demo = HrDemo(ThemeSource(shadcnTheme()), images)
+        assertEquals(29L, demo.grid.result.rows.count)
+        demo.expand(false)
+        assertEquals(1L, demo.grid.result.rows.count)
+        demo.expand(true)
+        demo.grid.setQuery(demo.grid.query.withQuickFilter("Emma Chen"))
+        assertEquals(1L, demo.grid.result.totalRows)
+        assertEquals(4L, demo.grid.result.rows.count)
+        assertEquals(1L, demo.grid.result.rootCount)
+        demo.grid.setQuery(demo.grid.query.withQuickFilter("Pending"))
+        assertEquals(6L, demo.grid.result.totalRows)
+        images.close()
+    }
+
+    @Test
+    fun `inventory actions update filters and reset restores the sample`() {
+        val images = DemoImages(Path.fromString("unused-in-model-tests"))
+        val demo = InventoryDemo(ThemeSource(shadcnTheme()), images)
+        assertEquals(6L, demo.count("Active"))
+        assertEquals(2L, demo.count("On Hold"))
+        assertEquals(2L, demo.count("Out of Stock"))
+        demo.chooseStatus("On Hold")
+        demo.toggleHold(0L)
+        assertEquals(3L, demo.grid.result.totalRows)
+        demo.remove(3L)
+        assertEquals(2L, demo.grid.result.totalRows)
+        assertEquals(9L, demo.count("All"))
+        demo.reset()
+        assertEquals(10L, demo.grid.result.totalRows)
+        assertEquals(6L, demo.count("Active"))
+        assertEquals(GridFilter.All, demo.grid.query.filter)
+        images.close()
+    }
+
+    @Test
+    fun `deleting an expanded selected album removes its related state`() {
+        val images = DemoImages(Path.fromString("unused-in-model-tests"))
+        val demo = InventoryDemo(ThemeSource(shadcnTheme()), images)
+        demo.grid.setSelectedRows([ViewKey.Number(0L)])
+        demo.grid.setDetailExpanded(ViewKey.Number(0L), true)
+        demo.remove(0L)
+        assertEquals(0L, demo.grid.selectedRowKeys.size)
+        assertEquals(0L, demo.grid.expandedDetails.size)
+        assertEquals(None, demo.rows.indexOfKey(ViewKey.Number(0L)))
+        images.close()
+    }
+
+    @Test
+    fun `changing gallery pages preserves independent query and data state`() {
+        val images = DemoImages(Path.fromString("unused-in-model-tests"))
+        val gallery = GalleryModel(images)
+        gallery.performance.grid.setQuery(gallery.performance.grid.query.withQuickFilter("Chess"))
+        gallery.select(DemoPage.Inventory)
+        gallery.inventory.remove(0L)
+        gallery.select(DemoPage.Finance)
+        gallery.finance.refresh()
+        gallery.select(DemoPage.Performance)
+        assertEquals("Chess", gallery.performance.grid.query.quickFilter)
+        assertEquals(9L, gallery.inventory.count("All"))
+        assertEquals(1L, gallery.finance.snapshot.value)
+        images.close()
+    }
+}

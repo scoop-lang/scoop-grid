@@ -1,0 +1,192 @@
+package scoop.grid.examples.demo
+
+import scoop.graphics.*
+import scoop.grid.*
+import scoop.ui.*
+import scoop.ui.component.*
+import scoop.ui.component.row as demoRow
+import scoop.ui.component.frame as demoFrame
+import scoop.ui.component.imageView as demoImage
+
+internal fun inventoryColumns(demo: InventoryDemo): Array<GridColumn<Album>> {
+    val theme = demo.source
+    return [
+        gridColumn<Album, String>(
+            GridColumnId("album"),
+            "Album Name",
+            { f"${it.title} ${it.genre}" },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(290.0)),
+            cell =
+                Some {
+                    album -> demoRow {
+                        spacing = 12.0;
+                        alignment = CrossAlignment.Center
+                        item(
+                            demoFrame(
+                                demoImage(
+                                    demo.images.get(f"covers/${album.id}.png"),
+                                    Size(52.0, 52.0)
+                                )
+                            ) {
+                                width = Some(52.0);
+                                height = Some(52.0)
+                            }
+                        ) { shrink = 0.0 }
+                        item(twoLines(album.title, album.genre, theme)) {
+                            grow = 1.0;
+                            basis = FlexBasis.Fixed(0.0)
+                        }
+                    }
+                }
+        ),
+        gridColumn<Album, String>(
+            GridColumnId("artist"),
+            "Artist",
+            { it.artist },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(176.0))
+        ),
+        gridColumn<Album, String>(
+            GridColumnId("status"),
+            "Status",
+            { it.status },
+            gridTextValues(),
+            TableColumnSize(GridTrack.Fixed(154.0)),
+            cell =
+                Some {
+                    album -> tag(
+                        f"●  ${album.status}",
+                        theme,
+                        if (album.status == "Active")
+                            Some(movementColor(theme, true))
+                        else
+                            if (album.status == "Out of Stock")
+                                Some(movementColor(theme, false))
+                            else
+                                None
+                    )
+                }
+        ),
+        gridColumn<Album, Long>(
+            GridColumnId("price"),
+            "Price",
+            { it.price },
+            moneyValues("£"),
+            TableColumnSize(GridTrack.Fixed(138.0)),
+            cell =
+                Some {
+                    album -> twoLines(
+                        moneyText(album.price, "£"),
+                        f"+${album.increase}% list price",
+                        theme
+                    )
+                },
+            edit =
+                Some(
+                    gridEdit<Album, Long>(
+                        { moneyEditor(it) },
+                        {
+                            edit,
+                            completion -> demo.save(edit.row.withPrice(edit.value), completion)
+                        },
+                        validate =
+                            {
+                                _,
+                                value -> if (value > 0L && value <= 10000000L)
+                                    None
+                                else
+                                    Some("Price must be between £0.01 and £100,000")
+                            }
+                    )
+                )
+        ),
+        gridColumn<Album, Long>(
+            GridColumnId("available"),
+            "Inventory",
+            { it.available },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(120.0)),
+            cell =
+                Some {
+                    album -> twoLines(
+                        f"${album.available} in stock",
+                        f"${album.editions.size} editions",
+                        theme
+                    )
+                }
+        ),
+        gridColumn<Album, Long>(
+            GridColumnId("incoming"),
+            "Incoming",
+            { it.incoming },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(115.0)),
+            edit =
+                Some(
+                    gridEdit<Album, Long>(
+                        { gridLongEditor(it) },
+                        {
+                            edit,
+                            completion -> demo.save(edit.row.withIncoming(edit.value), completion)
+                        },
+                        validate =
+                            {
+                                _,
+                                value -> if (value >= 0L && value <= 100000L)
+                                    None
+                                else
+                                    Some("Incoming stock must be between 0 and 100,000")
+                            }
+                    )
+                )
+        ),
+        gridColumn<Album, Long>(
+            GridColumnId("year"),
+            "Year",
+            { it.year },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(94.0))
+        ),
+        gridColumn<Album, Long>(
+            GridColumnId("sold"),
+            "Sold",
+            { it.sold },
+            gridLongValues(),
+            TableColumnSize(GridTrack.Fixed(94.0))
+        ),
+        gridColumn<Album, Long>(
+            GridColumnId("profit"),
+            "Est. Profit",
+            { it.profit },
+            moneyValues("£"),
+            TableColumnSize(GridTrack.Fixed(138.0))
+        ),
+        gridActionColumn<Album>(
+            GridColumnId("actions"),
+            "Actions",
+            {
+                album -> demoRow {
+                    spacing = 6.0;
+                    alignment = CrossAlignment.Center
+                    button(
+                        if (album.held)
+                            "Resume"
+                        else
+                            "Hold",
+                        { demo.toggleHold(album.id) }
+                    ) {
+                        variant = ButtonVariant.Outline;
+                        size = ButtonSize.Sm;
+                        enabled = album.available > 0L
+                    }
+                    button("Delete", { demo.remove(album.id) }) {
+                        variant = ButtonVariant.Ghost;
+                        size = ButtonSize.Sm
+                    }
+                }
+            },
+            TableColumnSize(GridTrack.Fixed(158.0))
+        )
+    ]
+}
