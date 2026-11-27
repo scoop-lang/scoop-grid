@@ -1,6 +1,7 @@
 package scoop.grid.examples.demo
 
 import scoop.graphics.Color
+import scoop.graphics.text.TextAlignment
 import scoop.grid.*
 import scoop.ui.*
 import scoop.ui.component.*
@@ -13,180 +14,195 @@ internal class PerformanceDemo(private val source: ThemeSource) {
     val handle = DataGridHandle()
     val scroll = ScrollState()
     val tools = GridTools()
-    val grid =
-        DataGridState(
-            ParticipantRows(1000L),
-            columns(),
-            headers = Some(headers()),
-            rowSelection = GridRowSelectionMode.Multiple,
-            expandedRows = GridExpandedRows(true)
-        )
+    val grid = DataGridState(
+        ParticipantRows(1000L),
+        columns(),
+        headers = Some(headers()),
+        rowSelection = GridRowSelectionMode.Multiple,
+        expandedRows = GridExpandedRows(true)
+    )
 
     init {
         grid.setColumnState(GridColumnState(GridColumnId("number"), pin = GridPin.Start))
     }
 
     fun resize(next: Long) {
-        if (count.value == next || !readyToLeave(handle))
-            return
+        if (count.value == next || !readyToLeave(handle)) return
         grid.replaceData(ParticipantRows(next))
         count.value = next
     }
     fun groupBy(id: String) {
-        if (!readyToLeave(handle))
-            return
-        grid.setQuery(
-            grid.query.withGrouping(
-                if (id == "none")
-                    []
-                else
-                    [GridColumnId(id)]
+        if (!readyToLeave(handle)) return
+        grid
+            .setQuery(
+                grid
+                    .query
+                    .withGrouping(
+                        if (id == "none") [] else [GridColumnId(id)]
+                    )
+                    .withAggregations(
+                        [GridAggregationSelection(GridColumnId("winnings"), GridAggregateId("sum"))]
+                    )
             )
-            .withAggregations(
-                [GridAggregationSelection(GridColumnId("winnings"), GridAggregateId("sum"))]
-            )
-        )
     }
 
     private fun columns(): Array<GridColumn<Participant>> {
         val theme = source
         val columns = ArrayList<GridColumn<Participant>>()
-        columns.add(
-            gridColumn<Participant, Long>(
-                GridColumnId("number"),
-                "#",
-                { it.index + 1L },
-                gridLongValues(),
-                TableColumnSize(GridTrack.Fixed(76.0))
+        columns
+            .add(
+                gridColumn<Participant, Long>(
+                    GridColumnId("number"),
+                    "#",
+                    { it.index + 1L },
+                    gridLongValues(),
+                    TableColumnSize(GridTrack.Fixed(132.0))
+                )
             )
-        )
-        columns.add(
-            gridColumn<Participant, String>(
-                GridColumnId("name"),
-                "Name",
-                { it.name },
-                gridTextValues(),
-                TableColumnSize(GridTrack.Fixed(180.0))
+        columns
+            .add(
+                gridColumn<Participant, String>(
+                    GridColumnId("name"),
+                    "Name",
+                    { it.name },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(180.0))
+                )
             )
-        )
-        columns.add(
-            gridColumn<Participant, String>(
-                GridColumnId("language"),
-                "Language",
-                { it.language },
-                gridTextValues(),
-                TableColumnSize(GridTrack.Fixed(130.0)),
-                groupable = true
+        columns
+            .add(
+                gridColumn<Participant, String>(
+                    GridColumnId("language"),
+                    "Language",
+                    { it.language },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(130.0)),
+                    groupable = true
+                )
             )
-        )
-        columns.add(
-            gridColumn<Participant, String>(
-                GridColumnId("country"),
-                "Country",
-                { it.country },
-                gridTextValues(),
-                TableColumnSize(GridTrack.Fixed(190.0)),
-                cell = Some { row -> demoText(f"${row.flag}  ${row.country}", theme) },
-                groupable = true
+        columns
+            .add(
+                gridColumn<Participant, String>(
+                    GridColumnId("country"),
+                    "Country",
+                    { it.country },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(190.0)),
+                    cell = Some { row -> demoText(f"${row.flag}  ${row.country}", theme) },
+                    groupable = true
+                )
             )
-        )
-        columns.add(
-            gridColumn<Participant, String>(
-                GridColumnId("game"),
-                "Game Name",
-                { it.game },
-                gridTextValues(),
-                TableColumnSize(GridTrack.Fixed(166.0)),
-                groupable = true
+        columns
+            .add(
+                gridColumn<Participant, String>(
+                    GridColumnId("game"),
+                    "Game Name",
+                    { it.game },
+                    gridTextValues(),
+                    TableColumnSize(GridTrack.Fixed(166.0)),
+                    groupable = true
+                )
             )
-        )
-        columns.add(
-            gridColumn<Participant, Boolean>(
-                GridColumnId("bought"),
-                "Bought",
-                { it.bought },
-                gridBooleanValues(),
-                TableColumnSize(GridTrack.Fixed(95.0)),
-                cell =
-                    Some {
-                        row -> demoText(
-                            if (row.bought)
-                                "✓"
-                            else
-                                "—",
+        columns
+            .add(
+                gridColumn<Participant, Boolean>(
+                    GridColumnId("bought"),
+                    "Bought",
+                    { it.bought },
+                    gridBooleanValues(),
+                    TableColumnSize(GridTrack.Fixed(95.0)),
+                    cell = Some { row ->
+                        demoText(
+                            if (row.bought) "✓" else "—",
                             theme,
                             17.0,
                             500,
                             muted = !row.bought
                         )
                     }
-            )
-        )
-        columns.add(
-            gridColumn<Participant, Long>(
-                GridColumnId("balance"),
-                "Bank Balance",
-                { it.balance },
-                moneyValues(),
-                TableColumnSize(GridTrack.Fixed(160.0)),
-                cell =
-                    Some {
-                        row -> demoText(
-                            moneyText(row.balance),
-                            theme,
-                            ink = Some(movementColor(theme, row.balance >= 0L))
-                        )
-                    }
-            )
-        )
-        columns.add(
-            gridColumn<Participant, Long>(
-                GridColumnId("rating"),
-                "Rating",
-                { it.rating },
-                gridLongValues(),
-                TableColumnSize(GridTrack.Fixed(115.0)),
-                cell =
-                    Some {
-                        row -> demoText(
-                            ["★", "★★", "★★★", "★★★★", "★★★★★"][row.rating - 1L],
-                            theme,
-                            ink = Some(Color(0.78, 0.52, 0.10))
-                        )
-                    }
-            )
-        )
-        columns.add(
-            gridColumn<Participant, Long>(
-                GridColumnId("winnings"),
-                "Total Winnings",
-                { it.winnings },
-                moneyValues(),
-                TableColumnSize(GridTrack.Fixed(170.0)),
-                aggregations = [moneySum()]
-            )
-        )
-        val months =
-            ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        for (at in 0L ..< months.size) {
-            val month = at
-            columns.add(
-                gridColumn<Participant, Long>(
-                    GridColumnId(f"month-${month}"),
-                    months[month],
-                    { it.month(month) },
-                    moneyValues(),
-                    TableColumnSize(GridTrack.Fixed(126.0))
                 )
             )
+        columns
+            .add(
+                gridColumn<Participant, Long>(
+                    GridColumnId("balance"),
+                    "Bank Balance",
+                    { it.balance },
+                    moneyValues(),
+                    TableColumnSize(GridTrack.Fixed(160.0)),
+                    cell = Some { row ->
+                        demoText(
+                            moneyText(row.balance),
+                            theme,
+                            ink = Some(movementColor(theme, row.balance >= 0L)),
+                            alignment = TextAlignment.End
+                        )
+                    }
+                )
+            )
+        columns
+            .add(
+                gridColumn<Participant, Long>(
+                    GridColumnId("rating"),
+                    "Rating",
+                    { it.rating },
+                    gridLongValues(),
+                    TableColumnSize(GridTrack.Fixed(115.0)),
+                    cell = Some { row ->
+                        demoText(
+                            ["★", "★★", "★★★", "★★★★", "★★★★★"][row.rating - 1L],
+                            theme,
+                            ink = Some(Color(0.78, 0.52, 0.10)),
+                            alignment = TextAlignment.End
+                        )
+                    }
+                )
+            )
+        columns
+            .add(
+                gridColumn<Participant, Long>(
+                    GridColumnId("winnings"),
+                    "Total Winnings",
+                    { it.winnings },
+                    moneyValues(),
+                    TableColumnSize(GridTrack.Fixed(170.0)),
+                    aggregations = [moneySum()]
+                )
+            )
+        val months = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec"
+        ]
+        for (at in 0L..<months.size) {
+            val month = at
+            columns
+                .add(
+                    gridColumn<Participant, Long>(
+                        GridColumnId(f"month-${month}"),
+                        months[month],
+                        { it.month(month) },
+                        moneyValues(),
+                        TableColumnSize(GridTrack.Fixed(126.0))
+                    )
+                )
         }
         return columns.toArray()
     }
 
-    private fun headers(): Array<GridHeaderNode> =
-        [
-            GridHeaderNode.Column(GridColumnId("number")),
-            GridHeaderNode.Group(
+    private fun headers(): Array<GridHeaderNode> = [
+        GridHeaderNode.Column(GridColumnId("number")),
+        GridHeaderNode
+            .Group(
                 GridColumnGroupId("participant"),
                 "Participant",
                 [
@@ -195,7 +211,8 @@ internal class PerformanceDemo(private val source: ThemeSource) {
                     GridHeaderNode.Column(GridColumnId("country"))
                 ]
             ),
-            GridHeaderNode.Group(
+        GridHeaderNode
+            .Group(
                 GridColumnGroupId("game"),
                 "Game of Choice",
                 [
@@ -203,7 +220,8 @@ internal class PerformanceDemo(private val source: ThemeSource) {
                     GridHeaderNode.Column(GridColumnId("bought"))
                 ]
             ),
-            GridHeaderNode.Group(
+        GridHeaderNode
+            .Group(
                 GridColumnGroupId("performance"),
                 "Performance",
                 [
@@ -212,42 +230,41 @@ internal class PerformanceDemo(private val source: ThemeSource) {
                     GridHeaderNode.Column(GridColumnId("winnings"))
                 ]
             ),
-            GridHeaderNode.Group(
+        GridHeaderNode
+            .Group(
                 GridColumnGroupId("months"),
                 "Monthly Breakdown",
                 Array<GridHeaderNode>(12L) { GridHeaderNode.Column(GridColumnId(f"month-${it}")) }
             )
-        ]
+    ]
 
     fun view(): View {
         val demo = this
-        val rows =
-            binding<Long?>(
-                { Some(demo.count.value) },
-                {
-                    next -> when (next) {
-                        case Some(val value) -> demo.resize(value);
-                        case None -> {}
-                    }
+        val rows = binding<Long?>(
+            { Some(demo.count.value) },
+            { next ->
+                when (next) {
+                    case Some(val value) -> demo.resize(value);
+                    case None -> {}
                 }
-            )
-        val grouping =
-            binding<String?>(
-                {
-                    Some(
-                        if (demo.grid.query.grouping.size == 0L)
-                            "none"
-                        else
-                            demo.grid.query.grouping[0L].value
-                    )
-                },
-                {
-                    next -> when (next) {
-                        case Some(val value) -> demo.groupBy(value);
-                        case None -> {}
-                    }
+            }
+        )
+        val grouping = binding<String?>(
+            {
+                Some(
+                    if (demo.grid.query.grouping.size == 0L)
+                        "none"
+                    else
+                        demo.grid.query.grouping[0L].value
+                )
+            },
+            { next ->
+                when (next) {
+                    case Some(val value) -> demo.groupBy(value);
+                    case None -> {}
                 }
-            )
+            }
+        )
         return demoColumn {
             spacing = 16.0
             alignment = CrossAlignment.Stretch
@@ -296,8 +313,9 @@ internal class PerformanceDemo(private val source: ThemeSource) {
                         handle = Some(demo.handle);
                         scroll = Some(demo.scroll)
                         height = 510.0;
-                        rowHeight = 38.0;
-                        headerHeight = 34.0
+                        rowHeight = 42.0;
+                        headerHeight = 48.0
+                        style = demoGridStyle(demo.source)
                         labels = demoGridLabels("Performance grid")
                     }
                 )

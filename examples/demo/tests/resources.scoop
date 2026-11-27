@@ -1,0 +1,55 @@
+package scoop.grid.examples.demo
+
+import scoop.compiler.includeBytes
+import scoop.graphics.Image
+import scoop.test.*
+
+@Test
+private class DemoResourcesTest {
+    @Test
+    fun `all bundled avatars decode with the installed graphics library`() {
+        val images = [
+            includeBytes("../assets/avatars/0.png"),
+            includeBytes("../assets/avatars/1.png"),
+            includeBytes("../assets/avatars/2.png"),
+            includeBytes("../assets/avatars/3.png"),
+            includeBytes("../assets/avatars/4.png"),
+            includeBytes("../assets/avatars/5.png"),
+            includeBytes("../assets/avatars/6.png"),
+            includeBytes("../assets/avatars/7.png"),
+            includeBytes("../assets/avatars/8.png"),
+            includeBytes("../assets/avatars/9.png"),
+            includeBytes("../assets/avatars/10.png"),
+            includeBytes("../assets/avatars/11.png")
+        ]
+        for (bytes in images)
+            Image
+                .decode(bytes)
+                .use { image ->
+                    assertEquals(192, image.width)
+                    assertEquals(192, image.height)
+                }
+    }
+    @Test
+    fun `all bundled covers decode with the installed graphics library`() {
+        val images = [
+            includeBytes("../assets/covers/0.png"),
+            includeBytes("../assets/covers/1.png"),
+            includeBytes("../assets/covers/2.png"),
+            includeBytes("../assets/covers/3.png"),
+            includeBytes("../assets/covers/4.png"),
+            includeBytes("../assets/covers/5.png"),
+            includeBytes("../assets/covers/6.png"),
+            includeBytes("../assets/covers/7.png"),
+            includeBytes("../assets/covers/8.png"),
+            includeBytes("../assets/covers/9.png")
+        ]
+        for (bytes in images)
+            Image
+                .decode(bytes)
+                .use { image ->
+                    assertEquals(320, image.width)
+                    assertEquals(320, image.height)
+                }
+    }
+}

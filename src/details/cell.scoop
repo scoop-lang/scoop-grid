@@ -5,21 +5,20 @@ import scoop.ui.component.*
 import scoop.ui.component.button as detailButton
 import scoop.window.*
 
-internal fun gridDetailShortcut(key: KeyEvent): Boolean =
-    key.state ==
-        ElementState.Pressed &&
-        !key.synthetic &&
-        key.modifiers.alt &&
-        !key.modifiers.control &&
-        !key.modifiers.superKey &&
-        !key.modifiers.shift &&
-        !key.modifiers.function &&
-        (
+internal fun gridDetailShortcut(key: KeyEvent): Boolean = key.state ==
+    ElementState.Pressed &&
+    !key.synthetic &&
+    key.modifiers.alt &&
+    !key.modifiers.control &&
+    !key.modifiers.superKey &&
+    !key.modifiers.shift &&
+    !key.modifiers.function &&
+    (
+        key.logicalKey ==
+            LogicalKey.Named(NamedKey.Enter) ||
             key.logicalKey ==
-                LogicalKey.Named(NamedKey.Enter) ||
-                key.logicalKey ==
-                LogicalKey.Named(NamedKey.ArrowDown)
-        )
+            LogicalKey.Named(NamedKey.ArrowDown)
+    )
 
 internal fun <Row> gridDetailCell(input: GridDataCellProps<Row>, content: View): View {
     val details = input.details ?: return content
@@ -27,21 +26,17 @@ internal fun <Row> gridDetailCell(input: GridDataCellProps<Row>, content: View):
     val session = input.session
     val model = session.currentModel ?: return content
     val expanded = model.isDetailExpanded(parent)
-    val identity =
-        when (input.key.viewKey) {
-            case Number(val id) -> f"n${id}"
-            case Text(val id) -> f"s${id}"
-            case Position -> throw IllegalArgumentException(Some("details require an explicit key"))
-        }
+    val identity = when (input.key.viewKey) {
+        case Number(val id) -> f"n${id}"
+        case Text(val id) -> f"s${id}"
+        case Position -> throw IllegalArgumentException(Some("details require an explicit key"))
+    }
     return row {
         spacing = 4.0 * input.appearance.density
         alignment = CrossAlignment.Center
         item(
             detailButton(
-                if (expanded)
-                    "−"
-                else
-                    "+",
+                gridDisclosureIcon(expanded, input.appearance),
                 {
                     if (session.usesModel(model))
                         session.setDetailExpanded(parent, !model.isDetailExpanded(parent))
@@ -51,20 +46,17 @@ internal fun <Row> gridDetailCell(input: GridDataCellProps<Row>, content: View):
                 key = ViewKey.Text("grid-detail-toggle")
                 enabled = input.enabled && !session.submitting
                 theme = session.theme
-                fonts = Some(input.appearance.fonts)
                 size = ButtonSize.IconXs
                 variant = ButtonVariant.Ghost
-                semantics =
-                    ComponentSemantics(
-                        name =
-                            Some(
-                                if (expanded)
-                                    input.labels.collapseDetail(details.label)
-                                else
-                                    input.labels.expandDetail(details.label)
-                            ),
-                        automationId = Some(f"grid-detail-expand-${identity}")
-                    )
+                semantics = ComponentSemantics(
+                    name = Some(
+                        if (expanded)
+                            input.labels.collapseDetail(details.label)
+                        else
+                            input.labels.expandDetail(details.label)
+                    ),
+                    automationId = Some(f"grid-detail-expand-${identity}")
+                )
             }
         ) { shrink = 0.0 }
         item(content) { grow = 1.0 }

@@ -8,6 +8,7 @@ import scoop.ui.style.*
 import scoop.ui.component.pagination as queryPagination
 import scoop.ui.component.select as querySelect
 import scoop.ui.component.row as queryRow
+import scoop.ui.component.label as queryLabel
 
 public class GridPagerProps<Row> public constructor(
     public val state: DataGridState<Row>,
@@ -28,7 +29,7 @@ public class GridPagerProps<Row> public constructor(
 public class GridPager<Row> public constructor(
     private val props: Props<GridPagerProps<Row>>,
     scope: ComponentScope
-): Component(scope) {
+) : Component(scope) {
     private var ambient: ThemeSource? = None
     public override fun onMount() {
         when (props.value.theme) {
@@ -36,24 +37,21 @@ public class GridPager<Row> public constructor(
             case Some(_) -> {}
         }
     }
-    private fun ready(input: GridPagerProps<Row>): Boolean =
+    private fun ready(input: GridPagerProps<Row>): Boolean = scope.isMounted &&
+        input.enabled &&
+        gridQueryReady(input.handle) &&
         scope.isMounted &&
-            input.enabled &&
-            gridQueryReady(input.handle) &&
-            scope.isMounted &&
-            props.value.state ===
-            input.state
+        props.value.state ===
+        input.state
 
-    private fun page(): Long =
-        when (props.value.state.query.pagination) {
-            case Page(val index, _) -> index + 1L
-            case Disabled -> 1L
-        }
+    private fun page(): Long = when (props.value.state.query.pagination) {
+        case Page(val index, _) -> index + 1L
+        case Disabled -> 1L
+    }
 
     private fun selectPage(value: Long) {
         val input = props.value
-        if (!ready(input))
-            return
+        if (!ready(input)) return
         when (input.state.query.pagination) {
             case Page(_, _) -> input.state.setPage(value - 1L)
             case Disabled -> {}
@@ -63,129 +61,110 @@ public class GridPager<Row> public constructor(
     private fun selectSize(value: GridPagination?) {
         val next = value ?: return
         val input = props.value
-        if (ready(input))
-            input.state.setPagination(next)
+        if (ready(input)) input.state.setPagination(next)
     }
 
     public override fun render(): View {
         val input = props.value
         val labels = input.labels
         val source = input.theme ?: (ambient ?: currentThemeSource())
-        val appearance =
-            GridAppearance(
-                source.read(scope),
-                input.fonts ?: scope.defaultFonts,
-                scope.layoutDirection
-            )
+        val appearance = GridAppearance(
+            source.read(scope),
+            input.fonts ?: scope.defaultFonts,
+            scope.layoutDirection
+        )
         val model = input.state
         val query = model.query
         val result = model.result
         val available = input.enabled && !(input.handle?.isSubmitting ?: false)
         val rootPages = result.pageUnit == GridPageUnit.Roots
         val treePages = result.pageUnit == GridPageUnit.TreeRoots
-        val sizeLabel =
-            if (treePages)
-                labels.treeRootSize
-            else
-                if (rootPages)
-                    labels.rootSize
-                else
-                    labels.size
+        val sizeLabel = if (treePages)
+            labels.treeRootSize
+        else if (rootPages) labels.rootSize else labels.size
         val choices = ArrayList<Choice<GridPagination>>()
-        choices.add(
-            Choice(
-                ViewKey.Text("all"),
-                GridPagination.Disabled,
-                if (model.isExternal)
-                    labels.ranges
-                else
-                    labels.all
+        choices
+            .add(
+                Choice(
+                    ViewKey.Text("all"),
+                    GridPagination.Disabled,
+                    if (model.isExternal) labels.ranges else labels.all
+                )
             )
-        )
         var listed = false
         for (size in input.pageSizes) {
             val choice = GridPagination.Page(0L, size)
             choices.add(Choice(ViewKey.Number(size), choice, sizeLabel(size)))
-            if (gridFirstPage(query.pagination) == choice)
-                listed = true
+            if (gridFirstPage(query.pagination) == choice) listed = true
         }
         if (!listed)
             when (query.pagination) {
-                case Page(_, val size) -> choices.add(
-                    Choice(ViewKey.Number(size), GridPagination.Page(0L, size), sizeLabel(size))
-                )
+                case Page(_, val size) ->
+                    choices
+                        .add(
+                            Choice(
+                                ViewKey.Number(size),
+                                GridPagination.Page(0L, size),
+                                sizeLabel(size)
+                            )
+                        )
                 case Disabled -> {}
             }
-        val status =
-            if (model.isExternal)
-                labels.loaded(result.external!!, page())
+        val status = if (model.isExternal)
+            labels.loaded(result.external!!, page())
+        else if (query.pagination == GridPagination.Disabled || result.pageCount == 0L)
+            if (treePages)
+                labels.treeRoots(result.rootCount, result.totalRows)
+            else if (rootPages)
+                labels.roots(result.rootCount, result.totalRows)
             else
-                if (query.pagination == GridPagination.Disabled || result.pageCount == 0L)
-                    if (treePages)
-                        labels.treeRoots(result.rootCount, result.totalRows)
-                    else
-                        if (rootPages)
-                            labels.roots(result.rootCount, result.totalRows)
-                        else
-                            labels.rows(result.totalRows)
-                else
-                    if (treePages)
-                        labels.treeRootStatus(
-                            result.rootCount,
-                            result.totalRows,
-                            page(),
-                            result.pageCount
-                        )
-                    else
-                        if (rootPages)
-                            labels.rootStatus(
-                                result.rootCount,
-                                result.totalRows,
-                                page(),
-                                result.pageCount
-                            )
-                        else
-                            labels.status(result.totalRows, page(), result.pageCount)
-        return column {
+                labels.rows(result.totalRows)
+        else if (treePages)
+            labels
+                .treeRootStatus(
+                    result.rootCount,
+                    result.totalRows,
+                    page(),
+                    result.pageCount
+                )
+        else if (rootPages)
+            labels
+                .rootStatus(
+                    result.rootCount,
+                    result.totalRows,
+                    page(),
+                    result.pageCount
+                )
+        else
+            labels.status(result.totalRows, page(), result.pageCount)
+        return queryRow {
+            item(appearance.label(status)) { grow = 1.0 }
             add(
-                queryRow {
-                    item(appearance.label(status)) { grow = 1.0 }
-                    add(
-                        querySelect(
-                            binding<GridPagination?>(
-                                {
-                                    Some(
-                                        gridFirstPage(
-                                            this @GridPager.props.value.state.query.pagination
-                                        )
-                                    )
-                                },
-                                { value -> this @GridPager.selectSize(value) }
-                            ),
-                            choices.toArray()
-                        ) {
-                            enabled = available
-                            fonts = input.fonts
-                            theme = input.theme
-                            width = Some(128.0 * appearance.density)
-                            semantics =
-                                ComponentSemantics(
-                                    name =
-                                        Some(
-                                            if (treePages)
-                                                labels.treeRootSizeName
-                                            else
-                                                if (rootPages)
-                                                    labels.rootSizeName
-                                                else
-                                                    labels.sizeName
-                                        ),
-                                    automationId = Some("grid-page-size")
+                querySelect(
+                    binding<GridPagination?>(
+                        {
+                            Some(
+                                gridFirstPage(
+                                    this @GridPager.props.value.state.query.pagination
                                 )
-                        }
+                            )
+                        },
+                        { value -> this @GridPager.selectSize(value) }
+                    ),
+                    choices.toArray()
+                ) {
+                    enabled = available
+                    fonts = input.fonts
+                    theme = input.theme
+                    width = Some(128.0 * appearance.density)
+                    semantics = ComponentSemantics(
+                        name = Some(
+                            if (treePages)
+                                labels.treeRootSizeName
+                            else if (rootPages) labels.rootSizeName else labels.sizeName
+                        ),
+                        automationId = Some("grid-page-size")
                     )
-                    spacing = 8.0 * appearance.density
-                    alignment = CrossAlignment.Center
                 }
             )
             if (query.pagination != GridPagination.Disabled)
@@ -199,27 +178,35 @@ public class GridPager<Row> public constructor(
                     ) {
                         enabled = available
                         compact = true
-                        items =
-                            Some(
-                                if (result.pageCount == 0L)
-                                    []
-                                else
-                                    [PaginationItem.Page(this @GridPager.page())]
-                            )
+                        items = Some(
+                            if (result.pageCount == 0L)
+                                []
+                            else
+                                [PaginationItem.Page(this @GridPager.page())]
+                        )
                         previousText = labels.previous
                         nextText = labels.next
                         pageLabel = labels.page
+                        pageContent = Some { number, appearance ->
+                            queryLabel(f"${number}") {
+                                fonts = input.fonts
+                                style {
+                                    color = Some(appearance.text.color)
+                                    fontSize = Some(appearance.text.fontSize)
+                                    weight = Some(appearance.text.weight)
+                                }
+                            }
+                        }
                         fonts = input.fonts
                         theme = input.theme
-                        semantics =
-                            ComponentSemantics(
-                                name = Some(labels.name),
-                                automationId = Some("grid-pagination")
-                            )
+                        semantics = ComponentSemantics(
+                            name = Some(labels.name),
+                            automationId = Some("grid-pagination")
+                        )
                     }
                 )
-            spacing = 4.0 * appearance.density
-            alignment = CrossAlignment.Stretch
+            spacing = 12.0 * appearance.density
+            alignment = CrossAlignment.Center
         }
     }
 }
@@ -232,8 +219,15 @@ public class GridPagerBuilder internal constructor() {
     public var theme: ThemeSource? = None
     public var labels: GridPagerLabels = GridPagerLabels()
     public var key: ViewKey = ViewKey.Position
-    internal fun <Row> snapshot(state: DataGridState<Row>): GridPagerProps<Row> =
-        GridPagerProps(state, pageSizes, handle, enabled, fonts, theme, labels)
+    internal fun <Row> snapshot(state: DataGridState<Row>): GridPagerProps<Row> = GridPagerProps(
+        state,
+        pageSizes,
+        handle,
+        enabled,
+        fonts,
+        theme,
+        labels
+    )
 }
 
 public fun <Row> gridPager(

@@ -15,10 +15,7 @@ internal fun <Row> gridGroupCell(
     return gridHierarchyCell(
         input,
         group.path.parts.size - 1L,
-        if (input.session.currentModel?.canExpand(input.key) ?: false)
-            Some(expanded)
-        else
-            None,
+        if (input.session.currentModel?.canExpand(input.key) ?: false) Some(expanded) else None,
         if (expanded)
             input.labels.collapseGroup(group.label)
         else
@@ -42,34 +39,23 @@ internal fun <Row> gridHierarchyCell(
     val model = session.currentModel
     val appearance = input.appearance
     return row {
-        logicalPadding =
-            Some(
-                LogicalInsets(
-                    start =
-                        (
-                            level.toDouble() *
-                                14.0 +
-                                if (expanded == None)
-                                    28.0
-                                else
-                                    0.0
-                        ) *
-                            appearance.density
-                )
+        logicalPadding = Some(
+            LogicalInsets(
+                start = (level.toDouble() * 14.0 + if (expanded == None) 28.0 else 0.0) *
+                    appearance.density
             )
+        )
         spacing = 4.0 * appearance.density
         alignment = CrossAlignment.Center
         if (expanded != None)
             add(
                 groupButton(
-                    if (expanded == Some(true))
-                        "▾"
-                    else
-                        "▸",
+                    gridDisclosureIcon(expanded == Some(true), appearance),
                     {
                         when (model) {
-                            case Some(val current) -> if (session.usesModel(current))
-                                session.setExpanded(input.key, !current.isExpanded(input.key))
+                            case Some(val current) ->
+                                if (session.usesModel(current))
+                                    session.setExpanded(input.key, !current.isExpanded(input.key))
                             case None -> {}
                         }
                         Unit
@@ -78,15 +64,15 @@ internal fun <Row> gridHierarchyCell(
                     key = ViewKey.Text("grid-group-expansion")
                     enabled = input.enabled && !session.submitting
                     theme = session.theme
-                    fonts = Some(appearance.fonts)
                     size = ButtonSize.IconXs
                     variant = ButtonVariant.Ghost
-                    semantics =
-                        ComponentSemantics(name = Some(name), automationId = Some(automationId))
+                    semantics = ComponentSemantics(
+                        name = Some(name),
+                        automationId = Some(automationId)
+                    )
                 }
             )
         item(content) { grow = 1.0 }
-        if (contextOnly)
-            add(appearance.label(input.labels.contextRow))
+        if (contextOnly) add(appearance.label(input.labels.contextRow))
     }
 }

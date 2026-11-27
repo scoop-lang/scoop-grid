@@ -17,16 +17,19 @@
 
 业务数据仅用于演示，修改保存在当前进程内。封面、头像和应用图标使用本仓库生成的原创图形；启动时从 app 的 `Contents/Resources/assets` 读取，开发运行可显式指定 `--assets`。不依赖工作目录、开发机绝对路径或网络。
 
+表格使用短表头分隔线、横向行边线、数字列对齐和跟随系统偏好的滚动条。Performance 与 Finance 使用 42 高的正文行，HR 使用 65 高的头像行、较小的大写表头与淡色隔行底纹，Inventory 使用 80 高的封面行、状态胶囊、图标操作与单行分页栏。颜色同时适配浅色和深色主题。共用表现由 `GridStyle` 配置；详情行始终占满网格视口，外层冻结列边界在详情区域内断开。
+
 ## 开发与打包
 
-以下命令在仓库根目录运行，使用已安装的 Scoop 开发工具链及系统库：
+以下命令在仓库根目录运行，使用 `~/.scoop` 中已安装的 Scoop 开发工具链及系统库。更新工具链后需要重新构建并打包；既有 `.app` 中的可执行文件和资源不会自动更新。
 
 ```sh
-scoop fmt examples/demo
-scoop check examples/demo --tests --release
-scoop test examples/demo --release
-scoop run examples/demo --release -- --assets "$PWD/examples/demo/assets"
-scoop bundle examples/demo --format app --output-dir "$PWD/dist"
+~/.scoop/bin/scoop --version
+~/.scoop/bin/scoop fmt examples/demo
+~/.scoop/bin/scoop check examples/demo --tests --release
+~/.scoop/bin/scoop test examples/demo --release
+~/.scoop/bin/scoop run examples/demo --release -- --assets "$PWD/examples/demo/assets"
+~/.scoop/bin/scoop bundle examples/demo --format app --output-dir "$PWD/dist"
 ```
 
 macOS 入口在附着窗口前调用 Surface 的 FPS 诊断配置。以 `SCOOP_SURFACE_FPS=1 scoop run examples/demo --release -- --assets "$PWD/examples/demo/assets"` 启动时，stderr 输出 Metal 实际呈现帧率。默认关闭；静止窗口没有周期输出，样本的 `start`／`end` 可用于排除跨过静止期的区间。
@@ -39,8 +42,10 @@ macOS 入口在附着窗口前调用 Surface 的 FPS 诊断配置。以 `SCOOP_S
 
 ## 本机验证
 
-2026-11-22，在 macOS Apple Silicon 上使用 release 构建验证：
+2026-11-27，在 macOS Apple Silicon 上使用 `~/.scoop` 工具链 `0.0.0-dev.local.20261126202747424829`（Scoop `af7b7dc5c`）及其预编译系统库完成 release 验证：
 
-- `scoop fmt`、`scoop check --tests --release` 和 8 项模型测试通过，覆盖大数据源随机访问、分组与搜索组合、金额编辑与筛选单位、行情刷新后的查询／选择、组织树祖先路径、支付状态搜索、库存删除／重置，以及切页后的独立状态。
-- 原生窗口已检查十万行切换和滚动、手动行情刷新、组织树展开与搜索、雇佣类型编辑、库存价格编辑与校验、明细表、暂停／删除／重置、深色主题，以及列／筛选工具面板。无效编辑会阻止切页，按 Esc 取消后会清除单元格和应用底部的错误提示。
-- 已通过项目入口和预构建可执行文件两种方式打包 `.app`，移动 app 后头像与封面仍能正常加载；最终 app 通过 `codesign --verify --deep --strict`。
+- 变更文件格式检查、Grid 与 Demo 的 `scoop check --tests --release` 通过。Grid 的 191 项测试及 Demo 的 10 项测试全部通过；Demo 包括 8 项模型测试和全部 12 张头像、10 张封面的实际图片解码测试。
+- 分隔线回归覆盖多个详情、部分滚出、收起恢复、上下固定区和 RTL；一亿行稀疏数据源验证只访问可见行元数据，不读取业务记录。
+- 原生窗口已检查十万行双向滚动、手动行情刷新、HR 搜索保留祖先路径、组织树展开／收起和雇佣类型编辑；Inventory 的价格校验／保存、状态筛选、分页、多个详情展开／滚动／收起，以及浅色／深色外观均正常。无效价格会阻止切页，修正保存后错误提示清除。
+- 使用当前工具链重建并打包后，HR 和 Inventory 的页面加载、图片及上述交互没有再出现异常退出。未取得旧包的异常栈，因此没有将旧故障归因于某个未经验证的运行时或资源问题。
+- `.app` 搬离打包目录并从仓库外启动，头像和封面仍正常加载；最终包通过 `codesign --verify --deep --strict`。包内含应用图标、图片、资源说明和许可证。

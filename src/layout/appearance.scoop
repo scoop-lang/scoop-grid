@@ -10,48 +10,61 @@ import scoop.ui.style.*
 internal class GridAppearance(
     val theme: Theme,
     val fonts: FontCollection,
-    val direction: LayoutDirection
+    val direction: LayoutDirection,
+    val style: GridStyle = GridStyle()
 ) {
     val density = theme.tokens.typography.body.fontSize / 14.0
-    val padding = 8.0 * density
-    val body =
-        theme.tokens.typography.body.copy {
+    val padding = style.cellPadding * density
+    val verticalPadding = 6.0 * density
+    val body = theme
+        .tokens
+        .typography
+        .body
+        .copy {
             weight = 400
             color = theme.tokens.palette.background.foreground
         }
-    val head =
-        theme.tokens.typography.body.copy {
+    val head = theme
+        .tokens
+        .typography
+        .body
+        .copy {
             weight = 500
-            color = theme.tokens.palette.background.foreground
+            fontSize = this @GridAppearance
+                .style
+                .headerFontSize
+                ?.times(this @GridAppearance.density) ?:
+                fontSize
+            color = style.headerForeground ?: theme.tokens.palette.background.foreground
         }
-    val paragraph =
-        paragraphStyle {
-            maxLines = Some(1L)
-            ellipsis = "…"
-            this.direction =
-                if (this @GridAppearance.direction == LayoutDirection.Rtl)
-                    TextDirection.Rtl
-                else
-                    TextDirection.Ltr
-        }
-    val wrapping =
-        paragraphStyle {
-            this.direction =
-                if (this @GridAppearance.direction == LayoutDirection.Rtl)
-                    TextDirection.Rtl
-                else
-                    TextDirection.Ltr
-        }
-    fun label(text: String): View =
-        component(
-            LabelProps(
-                LabelText.Plain(text, None),
-                Some(fonts),
-                Some(paragraph),
-                baseStyle = Some(head)
-            ),
-            { props, scope -> Label(props, scope) }
-        )
+    val paragraph = paragraphStyle {
+        maxLines = Some(1L)
+        ellipsis = "…"
+        this.direction = if (this @GridAppearance.direction == LayoutDirection.Rtl)
+            TextDirection.Rtl
+        else
+            TextDirection.Ltr
+    }
+    val wrapping = paragraphStyle {
+        this.direction = if (this @GridAppearance.direction == LayoutDirection.Rtl)
+            TextDirection.Rtl
+        else
+            TextDirection.Ltr
+    }
+    private val endParagraph = paragraph.copy { alignment = TextAlignment.End }
+    private val endWrapping = wrapping.copy { alignment = TextAlignment.End }
+    fun cellParagraph(wraps: Boolean, endAligned: Boolean): ParagraphStyle = if (wraps)
+        if (endAligned) endWrapping else wrapping
+    else if (endAligned) endParagraph else paragraph
+    fun label(text: String, endAligned: Boolean = false): View = component(
+        LabelProps(
+            LabelText.Plain(text, None),
+            Some(fonts),
+            Some(cellParagraph(false, endAligned)),
+            baseStyle = Some(head)
+        ),
+        { props, scope -> Label(props, scope) }
+    )
     fun natural(column: TableColumnSize, title: String): Double {
         when (column.track) {
             case Auto -> {
@@ -60,6 +73,7 @@ internal class GridAppearance(
                     width = max(width, measure(sample))
                 return max(column.minimum, width + padding * 2.0 / density)
             }
+
             else -> return column.minimum
         }
     }
@@ -69,8 +83,6 @@ internal class GridAppearance(
             width = max(width, measure(sample))
         return width + padding * 2.0 / density
     }
-    private fun measure(text: String): Double =
-        Paragraph(fonts, text, head, paragraph).use {
-            value -> value.layoutUnwrapped().use { layout -> layout.size.width / density }
-        }
+    private fun measure(text: String): Double = Paragraph(fonts, text, head, paragraph)
+        .use { value -> value.layoutUnwrapped().use { layout -> layout.size.width / density } }
 }

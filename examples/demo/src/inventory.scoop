@@ -9,27 +9,26 @@ import scoop.ui.style.*
 internal class InventoryDemo(internal val source: ThemeSource, internal val images: DemoImages) {
     internal var rows = inventoryRows()
     val revision = state(0L)
-    val message =
-        state("Double-click Incoming or Price to edit; expand an album to see its editions")
+    val message = state(
+        "Double-click Incoming or Price to edit; expand an album to see its editions"
+    )
     val handle = DataGridHandle()
     val scroll = ScrollState()
     val tools = GridTools()
     private val details = Array<AlbumDetail>(rows.count) { AlbumDetail(rows.rowAt(it), source) }
-    val grid =
-        DataGridState(
-            rows,
-            inventoryColumns(this),
-            GridQuery(pagination = GridPagination.Page(0L, 10L)),
-            rowSelection = GridRowSelectionMode.Multiple,
-            details =
-                Some(
-                    GridDetails<Album>(
-                        { row -> details[row.id].view() },
-                        Some(GridColumnId("album")),
-                        "album editions"
-                    )
-                )
+    val grid = DataGridState(
+        rows,
+        inventoryColumns(this),
+        GridQuery(pagination = GridPagination.Page(0L, 10L)),
+        rowSelection = GridRowSelectionMode.Multiple,
+        details = Some(
+            GridDetails<Album>(
+                { row -> details[row.id].view() },
+                Some(GridColumnId("album")),
+                "album editions"
+            )
         )
+    )
 
     init {
         grid.setColumnState(GridColumnState(GridColumnId("album"), pin = GridPin.Start))
@@ -41,31 +40,26 @@ internal class InventoryDemo(internal val source: ThemeSource, internal val imag
             grid.setQuery(grid.query.withFilter(inventoryStatusFilter(status)))
     }
     fun toggleHold(id: Long) {
-        if (!readyToLeave(handle))
-            return
+        if (!readyToLeave(handle)) return
         val index = rows.indexOfKey(ViewKey.Number(id)) ?: return
         val album = rows.rowAt(index)
-        if (album.available == 0L)
-            return
+        if (album.available == 0L) return
         val next = album.withHeld(!album.held)
         publish(replacing(next))
         message.value = f"${album.title}: ${next.status}"
     }
     fun remove(id: Long) {
-        if (!readyToLeave(handle))
-            return
+        if (!readyToLeave(handle)) return
         val index = rows.indexOfKey(ViewKey.Number(id)) ?: return
         val title = rows.rowAt(index).title
         val records = ArrayList<TableRecord<Album>>()
-        for (at in 0L ..< rows.count)
-            if (at != index)
-                records.add(TableRecord(rows.keyAt(at), rows.rowAt(at)))
+        for (at in 0L..<rows.count)
+            if (at != index) records.add(TableRecord(rows.keyAt(at), rows.rowAt(at)))
         publish(TableRows(records.toArray()))
         message.value = f"Removed ${title}. Reset sample restores the catalogue."
     }
     fun reset() {
-        if (!readyToLeave(handle))
-            return
+        if (!readyToLeave(handle)) return
         grid.setExpandedDetails([])
         grid.setSelectedRows([])
         grid.setQuery(GridQuery(pagination = GridPagination.Page(0L, 10L)))
@@ -77,20 +71,15 @@ internal class InventoryDemo(internal val source: ThemeSource, internal val imag
         rows = next
         revision.value += 1L
     }
-    private fun replacing(album: Album): TableRows<Album> =
-        TableRows(
-            Array<TableRecord<Album>>(rows.count) {
-                index ->
-                val old = rows.rowAt(index)
-                TableRecord(
-                    rows.keyAt(index),
-                    if (old.id == album.id)
-                        album
-                    else
-                        old
-                )
-            }
-        )
+    private fun replacing(album: Album): TableRows<Album> = TableRows(
+        Array<TableRecord<Album>>(rows.count) { index ->
+            val old = rows.rowAt(index)
+            TableRecord(
+                rows.keyAt(index),
+                if (old.id == album.id) album else old
+            )
+        }
+    )
     internal fun save(album: Album, completion: GridCommit<Album>) {
         val next = replacing(album)
         if (completion.accept(next)) {
@@ -102,9 +91,8 @@ internal class InventoryDemo(internal val source: ThemeSource, internal val imag
     fun count(status: String): Long {
         val version = revision.value
         var count = 0L
-        for (index in 0L ..< rows.count)
-            if (status == "All" || rows.rowAt(index).status == status)
-                count += 1L
+        for (index in 0L..<rows.count)
+            if (status == "All" || rows.rowAt(index).status == status) count += 1L
         return count
     }
 
@@ -125,11 +113,10 @@ internal class InventoryDemo(internal val source: ThemeSource, internal val imag
                 alignment = CrossAlignment.Center
                 for (status in ["All", "Active", "On Hold", "Out of Stock"])
                     button(f"${status}  ${demo.count(status)}", { demo.chooseStatus(status) }) {
-                        variant =
-                            if (demo.grid.query.filter == inventoryStatusFilter(status))
-                                ButtonVariant.Default
-                            else
-                                ButtonVariant.Outline
+                        variant = if (demo.grid.query.filter == inventoryStatusFilter(status))
+                            ButtonVariant.Default
+                        else
+                            ButtonVariant.Outline
                     }
                 item(empty()) { grow = 1.0 }
                 button("Reset sample", { demo.reset() }) { variant = ButtonVariant.Outline }
@@ -150,12 +137,14 @@ internal class InventoryDemo(internal val source: ThemeSource, internal val imag
                     dataGrid(demo.grid) {
                         handle = Some(demo.handle);
                         scroll = Some(demo.scroll)
-                        height = 460.0;
+                        height = 500.0;
                         rowHeight = 80.0;
-                        headerHeight = 40.0
+                        headerHeight = 48.0
+                        style = demoGridStyle(demo.source)
                         labels = demoGridLabels("Inventory grid")
-                        empty =
-                            Some(demoText("No albums match this filter", demo.source, muted = true))
+                        empty = Some(
+                            demoText("No albums match this filter", demo.source, muted = true)
+                        )
                     }
                 )
             )
@@ -163,23 +152,19 @@ internal class InventoryDemo(internal val source: ThemeSource, internal val imag
                 gridPager(demo.grid) {
                     handle = Some(demo.handle);
                     pageSizes = [5L, 10L, 20L]
-                    labels =
-                        GridPagerLabels(
-                            all = "All rows",
-                            size = { f"${it} / page" },
-                            sizeName = "Page size",
-                            rows = { f"${it} albums" },
-                            status =
-                                {
-                                    count,
-                                    page,
-                                    pages -> f"${count} albums · Page ${page} of ${pages}"
-                                },
-                            previous = "Previous",
-                            next = "Next",
-                            page = { f"Page ${it}" },
-                            name = "Inventory pages"
-                        )
+                    labels = GridPagerLabels(
+                        all = "All rows",
+                        size = { f"${it} / page" },
+                        sizeName = "Page size",
+                        rows = { f"${it} albums" },
+                        status = { count, page, pages ->
+                            f"${count} albums · Page ${page} of ${pages}"
+                        },
+                        previous = "Previous",
+                        next = "Next",
+                        page = { f"Page ${it}" },
+                        name = "Inventory pages"
+                    )
                 }
             )
             add(
@@ -194,11 +179,11 @@ internal class InventoryDemo(internal val source: ThemeSource, internal val imag
     }
 }
 
-internal fun inventoryStatusFilter(status: String): GridFilter =
-    if (status == "All")
-        GridFilter.All
-    else
-        GridFilter.Column(
+internal fun inventoryStatusFilter(status: String): GridFilter = if (status == "All")
+    GridFilter.All
+else
+    GridFilter
+        .Column(
             GridColumnId("status"),
             GridCondition.Compare(GridComparison.Equal, GridLiteral.Text(status))
         )

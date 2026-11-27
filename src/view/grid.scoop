@@ -6,7 +6,7 @@ import scoop.ui.style.*
 public class DataGrid<Row> public constructor(
     private val props: Props<DataGridProps<Row>>,
     scope: ComponentScope
-): Component(scope) {
+) : Component(scope) {
     private val ownScroll = ScrollState()
     private val session = GridSession<Row>()
     private var ambient: ThemeSource? = None
@@ -28,9 +28,9 @@ public class DataGrid<Row> public constructor(
         val states = input.state.columnState
         val headers = input.state.headerTree
         val direction = scope.layoutDirection
-        val reuse =
-            when (plan) {
-                case Some(val old) -> old.definitions ===
+        val reuse = when (plan) {
+            case Some(val old) ->
+                old.definitions ===
                     columns &&
                     old.states ===
                     states &&
@@ -42,111 +42,106 @@ public class DataGrid<Row> public constructor(
                     fonts &&
                     old.appearance.direction ==
                     direction &&
+                    old.appearance.style ==
+                    input.style &&
                     fontRevision ==
                     fonts.revision
-                case None -> false
-            }
+            case None -> false
+        }
         if (!reuse) {
-            plan =
-                Some(
-                    GridColumnsPlan(
-                        columns,
-                        states,
-                        GridAppearance(theme, fonts, direction),
-                        Some(headers)
-                    )
+            plan = Some(
+                GridColumnsPlan(
+                    columns,
+                    states,
+                    GridAppearance(theme, fonts, direction, input.style),
+                    Some(headers)
                 )
+            )
             fontRevision = fonts.revision
         }
         val layout = plan!!
         val sizing = gridResultRowSizing(input.state, input.rowSizing)
-        val policy =
-            when (val previous = rowPolicy) {
-                case Some(val old) -> if (
-                    old.columns === layout && gridSameRowSizing(old.mode, sizing)
-                )
+        val policy = when (val previous = rowPolicy) {
+            case Some(val old) ->
+                if (old.columns === layout && gridSameRowSizing(old.mode, sizing))
                     old
                 else
                     GridRowPolicy(sizing, layout)
-                case None -> GridRowPolicy(sizing, layout)
-            }
+            case None -> GridRowPolicy(sizing, layout)
+        }
         rowPolicy = Some(policy)
         val result = input.state.result
-        val selection =
-            if (input.state.rowSelection == GridRowSelectionMode.Disabled)
-                None
-            else
-                Some(
-                    GridSelectionView(
-                        input.state,
-                        session,
-                        input.enabled,
-                        input.selectionCheckboxes,
-                        source,
-                        layout.appearance,
-                        input.labels
-                    )
+        val selection = if (input.state.rowSelection == GridRowSelectionMode.Disabled)
+            None
+        else
+            Some(
+                GridSelectionView(
+                    input.state,
+                    session,
+                    input.enabled,
+                    input.selectionCheckboxes,
+                    source,
+                    layout.appearance,
+                    input.labels
                 )
-        val rows =
-            GridRows(
-                result.rows,
-                layout,
-                session,
-                policy,
-                input.enabled,
-                result.topCount,
-                result.bottomCount,
-                input.columnSpans,
-                selection,
-                input.state.cellRangeBounds,
-                input.labels,
-                when (input.error) {
-                    case Some(_) -> false
-                    case None -> when (input.loading) {
+            )
+        val rows = GridRows(
+            result.rows,
+            layout,
+            session,
+            policy,
+            input.enabled,
+            result.topCount,
+            result.bottomCount,
+            input.columnSpans,
+            selection,
+            input.state.cellRangeBounds,
+            input.labels,
+            when (input.error) {
+                case Some(_) -> false
+                case None ->
+                    when (input.loading) {
                         case Some(_) -> true
                         case None -> false
                     }
-                },
-                input.state.details,
-                result.detailCount > 0L || input.state.isExternal
-            )
-        val header =
-            GridHeaderCells(
+            },
+            input.state.details,
+            result.detailCount > 0L || input.state.isExternal
+        )
+        val header = GridHeaderCells(
+            layout,
+            input.state,
+            session,
+            input.multiSortModifier,
+            input.enabled,
+            source,
+            selection,
+            input.labels
+        )
+        val previousCell: GridCellAddress? = when (session.requested) {
+            case Some(val address) -> Some(address)
+            case None -> session.focused
+        }
+        val viewport = element(
+            GridRootProps(
+                input,
                 layout,
-                input.state,
+                rows,
+                input.scroll ?: ownScroll,
                 session,
-                input.multiSortModifier,
-                input.enabled,
                 source,
-                selection,
-                input.labels
-            )
-        val previousCell: GridCellAddress? =
-            when (session.requested) {
-                case Some(val address) -> Some(address)
-                case None -> session.focused
-            }
-        val viewport =
-            element(
-                GridRootProps(
-                    input,
-                    layout,
+                previousCell
+            ),
+            { props, scope -> GridRoot(props, scope) },
+            [
+                lazyElement(header, { scope -> GridHeader(scope) }),
+                lazyElement(
                     rows,
-                    input.scroll ?: ownScroll,
-                    session,
-                    source,
-                    previousCell
-                ),
-                { props, scope -> GridRoot(props, scope) },
-                [
-                    lazyElement(header, { scope -> GridHeader(scope) }),
-                    lazyElement(
-                        rows,
-                        GridBodyProps(rows, session),
-                        { props, scope -> GridBody(props, scope) }
-                    )
-                ]
-            )
+                    GridBodyProps(rows, session),
+                    { props, scope -> GridBody(props, scope) }
+                )
+            ]
+        )
         return gridFrame(
             input,
             viewport,

@@ -1,6 +1,7 @@
 package scoop.grid.examples.demo
 
 import scoop.grid.*
+import scoop.graphics.text.TextAlignment
 import scoop.ui.*
 import scoop.ui.component.*
 import scoop.ui.component.column as demoColumn
@@ -13,56 +14,49 @@ internal class FinanceDemo(private val source: ThemeSource) {
     val handle = DataGridHandle()
     val scroll = ScrollState()
     val tools = GridTools()
-    val grid =
-        DataGridState(
-            rows,
-            columns(),
-            query =
-                GridQuery(
-                    aggregations =
-                        [
-                            GridAggregationSelection(GridColumnId("value"), GridAggregateId("sum")),
-                            GridAggregationSelection(GridColumnId("profit"), GridAggregateId("sum"))
-                        ],
-                    totals = GridTotals(GridTotalPlacement.After, "Portfolio total")
-                ),
-            rowSelection = GridRowSelectionMode.Multiple,
-            expandedRows = GridExpandedRows(true)
-        )
+    val grid = DataGridState(
+        rows,
+        columns(),
+        query = GridQuery(
+            aggregations = [
+                GridAggregationSelection(GridColumnId("value"), GridAggregateId("sum")),
+                GridAggregationSelection(GridColumnId("profit"), GridAggregateId("sum"))
+            ],
+            totals = GridTotals(GridTotalPlacement.After, "Portfolio total")
+        ),
+        rowSelection = GridRowSelectionMode.Multiple,
+        expandedRows = GridExpandedRows(true)
+    )
 
     init {
         grid.setColumnState(GridColumnState(GridColumnId("ticker"), pin = GridPin.Start))
     }
 
     fun refresh() {
-        if (!readyToLeave(handle))
-            return
+        if (!readyToLeave(handle)) return
         val next = snapshot.value + 1L
         rows = quoteRows(Array<Quote>(rows.count) { rows.rowAt(it).refreshed(next, it) })
         grid.replaceData(rows)
         snapshot.value = next
     }
     fun group() {
-        if (!readyToLeave(handle))
-            return
-        grid.setGrouping(
-            if (grid.query.grouping.size == 0L)
-                [GridColumnId("instrument")]
-            else
-                []
-        )
+        if (!readyToLeave(handle)) return
+        grid
+            .setGrouping(
+                if (grid.query.grouping.size == 0L) [GridColumnId("instrument")] else []
+            )
     }
     fun totalValue(): Long {
         val version = snapshot.value
         var total = 0L
-        for (i in 0L ..< rows.count)
+        for (i in 0L..<rows.count)
             total += rows.rowAt(i).value
         return total
     }
     fun totalProfit(): Long {
         val version = snapshot.value
         var total = 0L
-        for (i in 0L ..< rows.count)
+        for (i in 0L..<rows.count)
             total += rows.rowAt(i).profit
         return total
     }
@@ -75,26 +69,26 @@ internal class FinanceDemo(private val source: ThemeSource) {
                 "Ticker",
                 { f"${it.ticker} ${it.name}" },
                 gridTextValues(),
-                TableColumnSize(GridTrack.Fixed(310.0)),
-                cell =
-                    Some {
-                        quote -> demoRow {
-                            spacing = 10.0;
-                            alignment = CrossAlignment.Center
-                            avatar(
-                                when (quote.instrument) {
-                                    case "Bond" -> "B";
-                                    case "ETF" -> "E";
-                                    case "Crypto" -> "C";
-                                    else -> "S"
-                                }
-                            ) { size = AvatarSize.Default }
-                            item(twoLines(quote.ticker, quote.name, theme)) {
-                                grow = 1.0;
-                                basis = FlexBasis.Fixed(0.0)
+                TableColumnSize(GridTrack.Fixed(340.0)),
+                cell = Some { quote ->
+                    demoRow {
+                        spacing = 10.0;
+                        alignment = CrossAlignment.Center
+                        avatar(
+                            when (quote.instrument) {
+                                case "Bond" -> "B";
+                                case "ETF" -> "E";
+                                case "Crypto" -> "C";
+                                else -> "S"
                             }
+                        ) { size = AvatarSize.Sm }
+                        item(demoText(quote.ticker, theme, 14.0, 600)) { shrink = 0.0 }
+                        item(demoText(quote.name, theme, 13.0, muted = true)) {
+                            grow = 1.0;
+                            basis = FlexBasis.Fixed(0.0)
                         }
                     }
+                }
             ),
             gridColumn<Quote, Long>(
                 GridColumnId("price"),
@@ -109,21 +103,16 @@ internal class FinanceDemo(private val source: ThemeSource) {
                 { it.change },
                 formattedLong({ changeText(it) }, moneyValues()),
                 TableColumnSize(GridTrack.Fixed(120.0)),
-                cell =
-                    Some {
-                        quote -> demoText(
-                            f"${
-                                if (quote.change >= 0L)
-                                    "▲"
-                                else
-                                    "▼"
-                            } ${changeText(quote.change)}",
-                            theme,
-                            13.0,
-                            500,
-                            ink = Some(movementColor(theme, quote.change >= 0L))
-                        )
-                    }
+                cell = Some { quote ->
+                    demoText(
+                        f"${if (quote.change >= 0L) "▲" else "▼"} ${changeText(quote.change)}",
+                        theme,
+                        13.0,
+                        500,
+                        ink = Some(movementColor(theme, quote.change >= 0L)),
+                        alignment = TextAlignment.End
+                    )
+                }
             ),
             gridColumn<Quote, String>(
                 GridColumnId("instrument"),
@@ -139,14 +128,14 @@ internal class FinanceDemo(private val source: ThemeSource) {
                 { it.profit },
                 moneyValues(),
                 TableColumnSize(GridTrack.Fixed(145.0)),
-                cell =
-                    Some {
-                        quote -> demoText(
-                            moneyText(quote.profit),
-                            theme,
-                            ink = Some(movementColor(theme, quote.profit >= 0L))
-                        )
-                    },
+                cell = Some { quote ->
+                    demoText(
+                        moneyText(quote.profit),
+                        theme,
+                        ink = Some(movementColor(theme, quote.profit >= 0L)),
+                        alignment = TextAlignment.End
+                    )
+                },
                 aggregations = [moneySum()]
             ),
             gridColumn<Quote, Long>(
@@ -200,10 +189,7 @@ internal class FinanceDemo(private val source: ThemeSource) {
                 )
                 item(empty()) { grow = 1.0 }
                 button(
-                    if (demo.grid.query.grouping.size == 0L)
-                        "Group instruments"
-                    else
-                        "Ungroup",
+                    if (demo.grid.query.grouping.size == 0L) "Group instruments" else "Ungroup",
                     { demo.group() }
                 ) { variant = ButtonVariant.Outline }
                 button("Refresh quotes", { demo.refresh() })
@@ -218,8 +204,9 @@ internal class FinanceDemo(private val source: ThemeSource) {
                         handle = Some(demo.handle);
                         scroll = Some(demo.scroll)
                         height = 510.0;
-                        rowHeight = 56.0;
-                        headerHeight = 40.0
+                        rowHeight = 42.0;
+                        headerHeight = 48.0
+                        style = demoGridStyle(demo.source)
                         labels = demoGridLabels("Finance grid")
                     }
                 )

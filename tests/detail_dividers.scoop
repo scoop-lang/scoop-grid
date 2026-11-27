@@ -1,0 +1,122 @@
+package scoop.grid
+
+import scoop.graphics.Rect
+import scoop.test.*
+import scoop.ui.*
+import scoop.ui.component.*
+
+@Test
+private class GridDetailDividersTest {
+    @Test
+    fun `frozen boundaries skip clipped details and restore after collapse without reading rows`() {
+        val source = DetailSource(100000000L)
+        val model = DataGridState(
+            source,
+            detailColumns(),
+            details = Some(detailDefinition<Long>()),
+            expandedDetails = [ViewKey.Number(1L), ViewKey.Number(4L)]
+        )
+        val index = ItemExtentIndex(model.result.rows.count, ItemExtent.Variable(32.0))
+        index.record(2L, 96.0)
+        index.record(6L, 64.0)
+        val rows = GridRowLayout(index, 0L, 0L, 256.0)
+        for (direction in [LayoutDirection.Ltr, LayoutDirection.Rtl]) {
+            val columns = GridColumnLayout([80.0, 400.0, 60.0], 1L, 2L, 400.0, direction)
+            val left = if (direction == LayoutDirection.Ltr) 79.0 else 320.0
+            val right = if (direction == LayoutDirection.Ltr) 340.0 else 59.0
+            val initial = gridFrozenDividers(
+                columns,
+                rows,
+                50.0,
+                40.0,
+                1.0,
+                model.result.rows,
+                true
+            )
+            assertDividers(
+                [
+                    Rect(left, 0.0, 1.0, 54.0),
+                    Rect(right, 0.0, 1.0, 54.0),
+                    Rect(left, 150.0, 1.0, 96.0),
+                    Rect(right, 150.0, 1.0, 96.0)
+                ],
+                initial
+            )
+            val partial = gridFrozenDividers(
+                columns,
+                rows,
+                80.0,
+                40.0,
+                1.0,
+                model.result.rows,
+                true
+            )
+            assertDividers(
+                [
+                    Rect(left, 0.0, 1.0, 40.0),
+                    Rect(right, 0.0, 1.0, 40.0),
+                    Rect(left, 120.0, 1.0, 96.0),
+                    Rect(right, 120.0, 1.0, 96.0),
+                    Rect(left, 280.0, 1.0, 16.0),
+                    Rect(right, 280.0, 1.0, 16.0)
+                ],
+                partial
+            )
+        }
+        model.setExpandedDetails([])
+        val columns = GridColumnLayout([80.0, 400.0, 60.0], 1L, 2L, 400.0, LayoutDirection.Ltr)
+        val collapsed = GridRowLayout(
+            ItemExtentIndex(source.count, ItemExtent.Fixed(32.0)),
+            0L,
+            0L,
+            256.0
+        )
+        assertDividers(
+            [Rect(79.0, 0.0, 1.0, 296.0), Rect(340.0, 0.0, 1.0, 296.0)],
+            gridFrozenDividers(columns, collapsed, 80.0, 40.0, 1.0, model.result.rows, false)
+        )
+        assertEquals(0L, source.reads)
+    }
+
+    @Test
+    fun `top and bottom details cut only their visible fixed regions`() {
+        val source = DetailSource(20L)
+        val model = DataGridState(
+            source,
+            detailColumns(),
+            details = Some(detailDefinition<Long>()),
+            expandedDetails = [ViewKey.Number(1L), ViewKey.Number(4L)],
+            pinnedRows = GridPinnedRows(top = [ViewKey.Number(1L)], bottom = [ViewKey.Number(4L)])
+        )
+        val index = ItemExtentIndex(model.result.rows.count, ItemExtent.Variable(32.0))
+        index.record(1L, 96.0)
+        index.record(index.count - 1L, 64.0)
+        val rows = GridRowLayout(index, model.result.topCount, model.result.bottomCount, 256.0)
+        val columns = GridColumnLayout([80.0, 400.0, 60.0], 1L, 2L, 400.0, LayoutDirection.Ltr)
+        assertDividers(
+            [
+                Rect(79.0, 0.0, 1.0, 72.0),
+                Rect(340.0, 0.0, 1.0, 72.0),
+                Rect(79.0, 168.0, 1.0, 64.0),
+                Rect(340.0, 168.0, 1.0, 64.0)
+            ],
+            gridFrozenDividers(columns, rows, 45.0, 40.0, 1.0, model.result.rows, true)
+        )
+        val small = GridRowLayout(index, model.result.topCount, model.result.bottomCount, 80.0)
+        assertDividers(
+            [Rect(79.0, 0.0, 1.0, 72.0), Rect(340.0, 0.0, 1.0, 72.0)],
+            gridFrozenDividers(columns, small, 45.0, 40.0, 1.0, model.result.rows, true)
+        )
+        assertEquals(0L, source.reads)
+    }
+}
+
+private fun assertDividers(expected: Array<Rect>, actual: Array<Rect>) {
+    assertEquals(expected.size, actual.size)
+    for (index in 0L..<expected.size) {
+        assertEquals(expected[index].x, actual[index].x)
+        assertEquals(expected[index].y, actual[index].y)
+        assertEquals(expected[index].width, actual[index].width)
+        assertEquals(expected[index].height, actual[index].height)
+    }
+}

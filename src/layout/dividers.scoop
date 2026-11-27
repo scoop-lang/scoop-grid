@@ -1,0 +1,49 @@
+package scoop.grid
+
+import scoop.graphics.Rect
+import scoop.math.max
+import scoop.math.min
+import scoop.ui.LayoutDirection
+
+/** Resolve the overlay once from measured row geometry, without reading business payloads. */
+internal fun <Row> gridFrozenDividers(
+    columns: GridColumnLayout,
+    rows: GridRowLayout,
+    offset: Double,
+    headerHeight: Double,
+    line: Double,
+    source: GridRowSource<Row>,
+    hasDetails: Boolean
+): Array<Rect> {
+    val edges = ArrayList<Double>()
+    val rtl = columns.direction == LayoutDirection.Rtl
+    if (columns.startVisible > 0.0)
+        edges.add(if (rtl) columns.viewport - columns.startVisible else columns.startVisible - line)
+    if (columns.endVisible > 0.0)
+        edges.add(if (rtl) columns.endVisible - line else columns.viewport - columns.endVisible)
+    if (edges.size == 0L || columns.viewport <= 0.0) return []
+    val result = ArrayList<Rect>()
+    fun append(top: Double, bottom: Double) {
+        if (bottom <= top) return
+        for (x in edges)
+            result.add(Rect(max(0.0, x), top, min(line, columns.viewport), bottom - top))
+    }
+    var top = 0.0
+    if (hasDetails) {
+        for (index in rows.visible(offset, 0.0, columns.viewport)) {
+            when (source.infoAt(index)) {
+                case Detail(_) -> {
+                    val box = rows.box(index, offset, rows.index.extent(index))
+                    if (box.clipHeight <= 0.0) continue
+                    val start = headerHeight + box.y + box.clipTop
+                    append(top, start)
+                    top = max(top, start + box.clipHeight)
+                }
+
+                else -> {}
+            }
+        }
+    }
+    append(top, headerHeight + rows.available)
+    return result.toArray()
+}

@@ -4,12 +4,14 @@ import scoop.graphics.*
 import scoop.math.max
 import scoop.math.min
 import scoop.ui.*
+import scoop.ui.component.ViewportScrollbars
 
 /** Finish size discovery before placing the header and publishing one scroll layout. */
 internal fun <Row> gridMeasureRows(
     context: MeasureContext,
     input: GridRootProps<Row>,
     viewport: ScrollViewport,
+    scrollbars: ViewportScrollbars,
     size: Size,
     columns: GridColumnLayout,
     headerRowHeight: Double,
@@ -33,7 +35,7 @@ internal fun <Row> gridMeasureRows(
             columns.total,
             bands.bodyExtent + headerHeight + bands.topVisible + bands.bottomVisible
         )
-        var scroll = viewport.layout(size, content)
+        var scroll = scrollbars.layout(size, content)
         val old = scroll.snapshot.offset
         var adjusted: Point? = None
         when (input.session.bodyFocus?.pendingItem ?: None) {
@@ -94,7 +96,7 @@ internal fun <Row> gridMeasureRows(
         }
         when (adjusted) {
             case Some(val offset) ->
-                scroll = viewport.layout(size, content, Some(ScrollAdjustment(revision, offset)))
+                scroll = scrollbars.layout(size, content, Some(ScrollAdjustment(revision, offset)))
             case None -> {}
         }
         return GridMeasurePlan(
@@ -162,5 +164,18 @@ internal fun <Row> gridMeasureRows(
         case None -> {}
     }
     context.placeChild(1L, Point(0.0, headerHeight))
-    return GridRootLayout(plan, measured, input.session.rowHeights.capture(input, plan))
+    return GridRootLayout(
+        plan,
+        measured,
+        input.session.rowHeights.capture(input, plan),
+        gridFrozenDividers(
+            plan.columns,
+            plan.bands,
+            plan.scroll.presentationOffset.y,
+            plan.headerHeight,
+            density,
+            input.rows.source,
+            input.rows.hasStructuralRows
+        )
+    )
 }

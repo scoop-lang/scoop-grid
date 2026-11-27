@@ -1,0 +1,15 @@
+package scoop.grid
+
+import scoop.icons.lucide.*
+import scoop.ui.*
+import scoop.ui.component.icon
+
+internal fun gridDisclosureIcon(expanded: Boolean, appearance: GridAppearance): View = icon(
+    if (expanded)
+        chevronDown
+    else if (appearance.direction == LayoutDirection.Rtl) chevronLeft else chevronRight
+) {
+    size = 14.0 * appearance.density
+    color = Some(appearance.theme.tokens.palette.muted.foreground)
+    strokeWidth = 1.8
+}

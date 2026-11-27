@@ -1,0 +1,13 @@
+package scoop.grid
+
+import scoop.graphics.Color
+
+/** Small presentation overrides; unset colors and typography follow the current theme. */
+public struct GridStyle(
+    val cellPadding: Double = 12.0,
+    val columnBorders: Boolean = false,
+    val headerBackground: Color? = None,
+    val headerForeground: Color? = None,
+    val headerFontSize: Double? = None,
+    val alternateRowBackground: Color? = None
+) {}

@@ -31,15 +31,26 @@ public class DataGridProps<Row> public constructor(
     public val footer: View? = None,
     public val empty: View? = None,
     public val loading: View? = None,
-    public val error: View? = None
+    public val error: View? = None,
+    public val style: GridStyle = GridStyle()
 ) {
     init {
+        gridRequire(
+            style.cellPadding.isFinite() && style.cellPadding >= 0.0,
+            "invalid grid cell padding"
+        )
+        when (style.headerFontSize) {
+            case Some(val size) ->
+                gridRequire(size.isFinite() && size > 0.0, "invalid grid header font size")
+            case None -> {}
+        }
         gridRequire(height.isFinite() && height >= 0.0, "invalid grid height")
         when (width) {
-            case Some(val value) -> gridRequire(
-                value.isFinite() && value >= 0.0,
-                "invalid grid width"
-            )
+            case Some(val value) ->
+                gridRequire(
+                    value.isFinite() && value >= 0.0,
+                    "invalid grid width"
+                )
             case None -> {}
         }
         gridRequire(rowHeight.isFinite() && rowHeight > 0.0, "invalid grid row height")
@@ -79,37 +90,38 @@ public class DataGridBuilder<Row> internal constructor() {
     public var empty: View? = None
     public var loading: View? = None
     public var error: View? = None
+    public var style: GridStyle = GridStyle()
     public var key: ViewKey = ViewKey.Position
-    internal fun snapshot(state: DataGridState<Row>): DataGridProps<Row> =
-        DataGridProps(
-            state,
-            height,
-            width,
-            rowHeight,
-            headerHeight,
-            overscan,
-            scroll,
-            handle,
-            enabled,
-            fonts,
-            theme,
-            onEditEnd,
-            onPasteResult,
-            multiSortModifier,
-            minimumCenterWidth,
-            rowSizing,
-            columnSpans,
-            selectionCheckboxes,
-            onCopyResult,
-            touchCellSelection,
-            contextMenus,
-            labels,
-            toolbar,
-            footer,
-            empty,
-            loading,
-            error
-        )
+    internal fun snapshot(state: DataGridState<Row>): DataGridProps<Row> = DataGridProps(
+        state,
+        height,
+        width,
+        rowHeight,
+        headerHeight,
+        overscan,
+        scroll,
+        handle,
+        enabled,
+        fonts,
+        theme,
+        onEditEnd,
+        onPasteResult,
+        multiSortModifier,
+        minimumCenterWidth,
+        rowSizing,
+        columnSpans,
+        selectionCheckboxes,
+        onCopyResult,
+        touchCellSelection,
+        contextMenus,
+        labels,
+        toolbar,
+        footer,
+        empty,
+        loading,
+        error,
+        style
+    )
 }
 
 public fun <Row> dataGrid(
